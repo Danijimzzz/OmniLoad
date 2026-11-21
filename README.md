@@ -13,26 +13,35 @@ cargo run --release -p omni-gui            # abre la ventana
 cargo run --release -p omni-gui -- <url>   # y analiza ese enlace
 ```
 
-El ejecutable queda en `target/release/omniload(.exe)`. Funciona como el
-capturador de enlaces de JDownloader:
+El ejecutable queda en `target/release/omniload(.exe)`. La ventana se parece a
+JDownloader:
 
-1. Pega uno o varios enlaces (sueltos o dentro de un texto) y pulsa
-   **Analizar enlaces**.
-2. La pestaña **Capturador de enlaces** enseña los archivos encontrados, con
-   nombre, tamaño y si están disponibles, antes de descargar nada. Si el enlace
-   es una página web, aparecen los archivos enlazados desde ella (un nivel, sin
-   seguir otras páginas).
-3. Marca los que quieras, elige carpeta y conexiones y pulsa **Descargar
-   seleccionados**.
+1. Pulsa **Añadir enlaces** y pega uno o varios enlaces (sueltos o dentro de un
+   texto). Si tienes activado **Vigilar portapapeles**, basta con copiarlos.
+2. La pestaña **Capturador de enlaces** enseña los archivos encontrados,
+   agrupados en paquetes (por el título de la página o por el nombre del
+   archivo, así `peli.part1.rar` y `peli.part2.rar` van juntos), con tamaño y
+   disponibilidad, antes de descargar nada. Si el enlace es una página web,
+   aparecen los archivos enlazados desde ella (un nivel). En el panel del
+   paquete se cambia el nombre, la carpeta y la prioridad.
+3. **Añadir a descargas** los deja en la cola parados; **Iniciar descargas**
+   los pone a bajar.
 
-La pestaña **Descargas** muestra progreso, velocidad, tiempo restante,
-conexiones activas (y el límite si el servidor rechaza conexiones de más) y
-los botones de pausar y reanudar.
+La pestaña **Descargas** muestra el árbol de paquetes con progreso, velocidad,
+tiempo restante, prioridad y estado; abajo, el panel del paquete o archivo
+elegido y un resumen con los totales. La barra inferior tiene iniciar, pausar
+y detener todo, las descargas simultáneas y las conexiones por archivo.
+
+En **Ajustes** están la carpeta de descargas, la vigilancia del portapapeles y
+la apariencia: cinco temas (Cristal claro, Cristal oscuro, Claro, Grafito y
+Alto contraste), seguir al sistema, posición del panel de propiedades,
+densidad, color de acento y reducir transparencia. Se guardan en
+`ajustes.json` dentro de la carpeta de configuración del sistema.
 
 Pausar guarda el progreso; reanudar sigue donde se quedó. Al cerrar la ventana
 se pausa todo. La lista aún no se guarda entre sesiones (llegará con
-`omni-store` en la fase 2), pero volver a añadir el mismo enlace en la misma
-carpeta reanuda desde el `.part`.
+`omni-store`), pero volver a añadir el mismo enlace en la misma carpeta
+reanuda desde el `.part`.
 
 En Linux hacen falta `libfontconfig` y `libxkbcommon-x11` (vienen en cualquier
 escritorio). Para compilar: `sudo apt install libfontconfig-dev libxkbcommon-dev`
