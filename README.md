@@ -45,7 +45,8 @@ se quedó, también tras un cierre forzado o un corte de luz.
    exponencial (1, 2, 4… hasta 60 s, respetando `Retry-After`). 403, 404 y 410
    marcan el enlace como caducado.
    Si el servidor rechaza conexiones por exceso (429 o 503 con varias
-   abiertas), se baja al número que acepta y cada 60 s se prueba con una más.
+   abiertas), se baja al número que acepta, se recuerda ese máximo y se
+   trabaja con él sin volver a probar por encima.
    Siempre HTTP/1.1: cada conexión es una conexión TCP propia.
 8. **Cierre**: se comprueba el tamaño (y el SHA-256 si se pidió) y se renombra
    `.part` al nombre final.
