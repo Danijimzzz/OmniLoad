@@ -18,7 +18,7 @@ impl fmt::Display for NetworkId {
 /// Una salida a internet por la que se abren conexiones.
 ///
 /// En la fase 1 solo existe [`Network::system_default`], que deja al sistema
-/// operativo elegir la ruta. En la fase 2b habrá redes atadas a una interfaz
+/// operativo elegir la ruta. En la última fase del plan habrá redes atadas a una interfaz
 /// concreta (wifi, cable, móvil por USB). Lo propio de cada sistema operativo
 /// para atar sockets (`SO_BINDTODEVICE` en Linux, `IP_BOUND_IF` en macOS,
 /// `IP_UNICAST_IF` en Windows) irá en [`crate::platform`] y se usará al

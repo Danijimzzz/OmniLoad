@@ -55,10 +55,19 @@ Si el servidor no acepta rangos, se descarga en un solo flujo sin reanudación.
 
 ### Preparado para varias redes
 
-Cada conexión pertenece a una `Network`. Hoy solo existe la red por defecto del
-sistema, pero la cola de bloques ya sabe qué red descarga cada bloque y, al
-competir por el último trozo, prefiere ayudar a otra red. La descarga
-multi-red (fase 2b) solo tendrá que añadir redes atadas a una interfaz.
+La descarga multi-red irá al final del plan, pero el motor ya trabaja con
+varias redes:
+
+- `DownloadOptions::networks` acepta una lista de `Network`, cada una con su
+  propio cliente HTTP, y el motor abre sus conexiones en cada una.
+- La cola de bloques sabe qué red descarga cada bloque y, al competir por el
+  último trozo, prefiere ayudar a otra red.
+- El límite de conexiones y el progreso van por red.
+- La prueba `splits_blocks_between_networks` descarga con dos redes a la vez.
+
+Lo que faltará entonces es descubrir las interfaces del equipo y construir el
+cliente HTTP de cada una atado a su interfaz (en `platform/`), sin tocar la
+cola ni el motor.
 
 ## Estructura
 

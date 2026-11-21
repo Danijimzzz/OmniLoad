@@ -3,7 +3,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use omni_core::{Destination, Download, DownloadOptions, Error, state_path_for};
+use omni_core::{
+    Destination, Download, DownloadOptions, Error, Network, NetworkId, state_path_for,
+};
 use omni_testserver::{ServerConfig, TestServer, pseudo_random_bytes};
 use tokio_util::sync::CancellationToken;
 
@@ -62,6 +64,47 @@ async fn multipart_download_matches() {
     );
     assert!(!state_path_for(&out.path).exists());
     assert!(!dir.path().join("archivo.bin.part").exists());
+}
+
+/// La descarga multi-red irá al final del plan, pero el motor ya reparte los
+/// bloques entre varias redes. Esta prueba lo mantiene así: con dos "redes"
+/// (dos clientes HTTP distintos) las dos descargan y el archivo sale entero.
+#[tokio::test]
+async fn splits_blocks_between_networks() {
+    let data = pseudo_random_bytes((4 * MIB) as usize, 21);
+    let cfg = ServerConfig {
+        chunk_delay: Some(Duration::from_millis(1)),
+        ..ServerConfig::default()
+    };
+    let server = TestServer::start(data.clone(), cfg).await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = || reqwest::Client::builder().http1_only().build().unwrap();
+    let opts = DownloadOptions {
+        connections_per_network: 2,
+        networks: vec![
+            Network::with_client(NetworkId(0), "red A", client()),
+            Network::with_client(NetworkId(1), "red B", client()),
+        ],
+        ..fast_opts()
+    };
+    let dl = Download::new(
+        &server.url("multired.bin"),
+        Destination::Dir(dir.path().into()),
+        opts,
+    )
+    .unwrap();
+    let progress = dl.progress();
+    let out = dl.run(CancellationToken::new()).await.unwrap();
+
+    assert_eq!(read(&out.path), data);
+    let per = progress.per_network();
+    assert_eq!(per.len(), 2);
+    for id in [NetworkId(0), NetworkId(1)] {
+        let bytes = per[&id].bytes;
+        assert!(bytes > 0, "{id} no descargó nada");
+    }
+    let total: u64 = per.values().map(|s| s.bytes).sum();
+    assert_eq!(total, data.len() as u64);
 }
 
 #[tokio::test]
