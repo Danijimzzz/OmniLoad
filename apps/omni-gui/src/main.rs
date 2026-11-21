@@ -65,8 +65,14 @@ impl App {
         self.ui.upgrade()
     }
 
-    fn base_dir(&self) -> PathBuf {
-        self.settings.borrow().download_dir.clone()
+    /// Dónde va cada paquete, según los ajustes.
+    fn dest(&self) -> grabber::Dest {
+        let s = self.settings.borrow();
+        grabber::Dest {
+            base: s.download_dir.clone(),
+            per_package: s.package_folders,
+            single_file_too: s.single_file_folders,
+        }
     }
 
     fn show(&self, msg: &str, error: bool) {
@@ -80,7 +86,7 @@ impl App {
     fn refresh(&self) {
         let Some(ui) = self.ui() else { return };
         let rows = self.manager.snapshot();
-        let grabbed = self.grabber.snapshot(&self.base_dir());
+        let grabbed = self.grabber.snapshot(&self.dest());
         let mut st = self.state.borrow_mut();
         views::fill_downloads(&ui, &self.dl_rows, &rows, &mut st);
         views::fill_grabber(&ui, &self.grab_rows, &grabbed, &mut st);
@@ -255,7 +261,7 @@ impl App {
     /// Pasa a la cola lo disponible y marcado de la tanda del aviso.
     fn popup_download(&self, start: bool) {
         let batch = self.pop.borrow().batch;
-        let picked = self.grabber.take_batch(batch, &self.base_dir());
+        let picked = self.grabber.take_batch(batch, &self.dest());
         self.close_popup();
         if !picked.is_empty() {
             self.queue(picked, start);
@@ -264,7 +270,7 @@ impl App {
 
     /// Pasa lo marcado del capturador a la cola.
     fn grab_to_queue(&self, start: bool) {
-        let picked = self.grabber.take_selected(&self.base_dir());
+        let picked = self.grabber.take_selected(&self.dest());
         if picked.is_empty() {
             self.show("No hay archivos marcados.", true);
             return;
@@ -328,6 +334,8 @@ impl App {
         s.clip_popup_autoclose = ui.get_clip_autoclose();
         s.clip_popup_autostart = self.popup.get_autostart();
         s.download_dir = PathBuf::from(ui.get_download_dir().as_str());
+        s.package_folders = ui.get_package_folders();
+        s.single_file_folders = ui.get_single_file_folders();
         s.save();
         self.manager.set_max_active(s.max_active as usize);
         self.manager.set_connections(s.connections as usize);
@@ -527,6 +535,8 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_clip_popup(s.clip_popup);
     ui.set_clip_autoclose(s.clip_popup_autoclose);
     ui.set_download_dir(s.download_dir.display().to_string().into());
+    ui.set_package_folders(s.package_folders);
+    ui.set_single_file_folders(s.single_file_folders);
 }
 
 /// Elige carpeta con el diálogo nativo del sistema.

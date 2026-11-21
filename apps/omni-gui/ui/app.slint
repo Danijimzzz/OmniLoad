@@ -722,6 +722,8 @@ export component AppWindow inherits Window {
     in-out property <int> connections: 8;
     in-out property <bool> watch-clipboard: true;
     in-out property <int> clip-popup: 1;
+    in-out property <bool> package-folders: true;
+    in-out property <bool> single-file-folders: true;
     in-out property <bool> clip-autoclose: true;
     in-out property <string> download-dir;
 
@@ -906,6 +908,61 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             spacing: 10px;
 
+            // Barra de controles, encima de la lista.
+            Panel {
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    Btn {
+                        text: "Añadir enlaces";
+                        icon: "M12 5v14M5 12h14";
+                        primary: true;
+                        clicked => { root.add-dialog-open = true; }
+                    }
+                    Sep { y: (parent.height - self.height) / 2; }
+                    Btn {
+                        label: "Iniciar descargas";
+                        icon: "M7 4l13 8-13 8z";
+                        icon-filled: true;
+                        icon-color: Theme.ok;
+                        clicked => { root.start-all(); }
+                    }
+                    Btn {
+                        label: "Pausar descargas";
+                        icon: "M9 5v14M15 5v14";
+                        clicked => { root.pause-all(); }
+                    }
+                    Btn {
+                        label: "Detener descargas";
+                        icon: "M5 5h14v14H5z";
+                        icon-filled: true;
+                        icon-color: Theme.err;
+                        clicked => { root.stop-all(); }
+                    }
+                    Sep { y: (parent.height - self.height) / 2; }
+                    Text { text: "Simultáneas"; color: Theme.text; vertical-alignment: center; }
+                    SpinBox {
+                        width: 90px;
+                        minimum: 1;
+                        maximum: 20;
+                        value <=> root.max-active;
+                    }
+                    Text { text: "Conexiones por archivo"; color: Theme.text; vertical-alignment: center; }
+                    SpinBox {
+                        width: 90px;
+                        minimum: 1;
+                        maximum: 32;
+                        value <=> root.connections;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    LineEdit {
+                        width: 240px;
+                        placeholder-text: "Buscar paquetes o archivos";
+                        edited(t) => { root.dl-search(t); }
+                    }
+                }
+            }
+
             HorizontalLayout {
                 vertical-stretch: 1;
                 spacing: 10px;
@@ -1063,61 +1120,6 @@ export component AppWindow inherits Window {
                             }
                         }
                         Text { text: root.net-text; font-size: 12.5px; color: Theme.text; }
-                    }
-                }
-            }
-
-            // Barra inferior.
-            Panel {
-                HorizontalLayout {
-                    padding: 8px;
-                    spacing: 6px;
-                    Btn {
-                        text: "Añadir enlaces";
-                        icon: "M12 5v14M5 12h14";
-                        primary: true;
-                        clicked => { root.add-dialog-open = true; }
-                    }
-                    Sep { y: (parent.height - self.height) / 2; }
-                    Btn {
-                        label: "Iniciar descargas";
-                        icon: "M7 4l13 8-13 8z";
-                        icon-filled: true;
-                        icon-color: Theme.ok;
-                        clicked => { root.start-all(); }
-                    }
-                    Btn {
-                        label: "Pausar descargas";
-                        icon: "M9 5v14M15 5v14";
-                        clicked => { root.pause-all(); }
-                    }
-                    Btn {
-                        label: "Detener descargas";
-                        icon: "M5 5h14v14H5z";
-                        icon-filled: true;
-                        icon-color: Theme.err;
-                        clicked => { root.stop-all(); }
-                    }
-                    Sep { y: (parent.height - self.height) / 2; }
-                    Text { text: "Simultáneas"; color: Theme.text; vertical-alignment: center; }
-                    SpinBox {
-                        width: 90px;
-                        minimum: 1;
-                        maximum: 20;
-                        value <=> root.max-active;
-                    }
-                    Text { text: "Conexiones por archivo"; color: Theme.text; vertical-alignment: center; }
-                    SpinBox {
-                        width: 90px;
-                        minimum: 1;
-                        maximum: 32;
-                        value <=> root.connections;
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    LineEdit {
-                        width: 240px;
-                        placeholder-text: "Buscar paquetes o archivos";
-                        edited(t) => { root.dl-search(t); }
                     }
                 }
             }
@@ -1337,13 +1339,33 @@ export component AppWindow inherits Window {
                     Text { text: "General"; font-size: 28px; font-weight: 700; color: Theme.text; }
                     SettingRow {
                         title: "Carpeta de descargas";
-                        subtitle: "Cada paquete se guarda en una subcarpeta con su nombre.";
+                        subtitle: "Donde se guarda todo lo que descargas.";
                         LineEdit {
                             width: 360px;
                             text <=> root.download-dir;
                             accepted => { root.settings-changed(); }
                         }
                         Btn { text: "Elegir…"; clicked => { root.choose-download-dir(); } }
+                    }
+                    SettingRow {
+                        title: "Una carpeta por paquete";
+                        subtitle: "Cada paquete va a una subcarpeta con su nombre (se quitan los caracteres que el sistema no admite). Se puede cambiar en el panel del paquete del Capturador.";
+                        Check {
+                            checked <=> root.package-folders;
+                            label: "Una carpeta por paquete";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "También para un solo archivo";
+                        subtitle: "Si se desactiva, los paquetes de un archivo van directos a la carpeta de descargas.";
+                        opacity: root.package-folders ? 1 : 0.5;
+                        Check {
+                            checked <=> root.single-file-folders;
+                            enabled: root.package-folders;
+                            label: "Carpeta también para paquetes de un solo archivo";
+                            toggled => { root.settings-changed(); }
+                        }
                     }
                     SettingRow {
                         title: "Vigilar portapapeles";

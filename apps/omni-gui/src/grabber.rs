@@ -7,7 +7,7 @@
 //!
 //! Igual que [`crate::manager`], no sabe nada de Slint.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -31,6 +31,29 @@ pub enum Check {
         resumable: bool,
     },
     Offline(String),
+}
+
+/// Dónde se guardan los paquetes: la carpeta de descargas y, si se quiere,
+/// una subcarpeta con el nombre de cada paquete.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dest {
+    pub base: PathBuf,
+    /// Una subcarpeta por paquete.
+    pub per_package: bool,
+    /// También cuando el paquete tiene un solo archivo.
+    pub single_file_too: bool,
+}
+
+impl Dest {
+    /// La carpeta por defecto de un paquete con `files` archivos. El nombre
+    /// se limpia de caracteres que Windows, Linux o macOS no admiten.
+    pub fn folder(&self, package: &str, files: usize) -> PathBuf {
+        if self.per_package && (files > 1 || self.single_file_too) {
+            self.base.join(omni_core::filename::sanitize(package))
+        } else {
+            self.base.clone()
+        }
+    }
 }
 
 /// Un archivo encontrado, para pintarlo.
@@ -404,16 +427,16 @@ impl Grabber {
     }
 
     /// Saca del capturador los archivos marcados y los devuelve para
-    /// descargarlos. `base` es la carpeta de descargas: cada paquete va a
-    /// `base/<paquete>` salvo que se haya elegido otra.
-    pub fn take_selected(&self, base: &Path) -> Vec<Picked> {
-        self.take_where(base, |i| i.selected)
+    /// descargarlos. Cada paquete va a la carpeta que diga `dest`, salvo que
+    /// se haya elegido otra a mano.
+    pub fn take_selected(&self, dest: &Dest) -> Vec<Picked> {
+        self.take_where(dest, |i| i.selected)
     }
 
     /// Saca de la lista lo marcado y disponible de una tanda de enlaces
     /// copiados; lo que aún se comprueba se queda en el capturador.
-    pub fn take_batch(&self, batch: u64, base: &Path) -> Vec<Picked> {
-        self.take_where(base, |i| {
+    pub fn take_batch(&self, batch: u64, dest: &Dest) -> Vec<Picked> {
+        self.take_where(dest, |i| {
             i.batch == batch && i.selected && matches!(i.check, Check::Online { .. })
         })
     }
@@ -438,13 +461,20 @@ impl Grabber {
         items
     }
 
-    fn take_where(&self, base: &Path, pick: impl Fn(&Item) -> bool) -> Vec<Picked> {
+    fn take_where(&self, dest: &Dest, pick: impl Fn(&Item) -> bool) -> Vec<Picked> {
         let mut st = self.shared.state();
         let mut picked = Vec::new();
         let packages: Vec<(u64, String, PathBuf, Priority)> = st
             .packages
             .iter()
-            .map(|p| (p.id, p.name.clone(), folder_of(p, base), p.priority))
+            .map(|p| {
+                (
+                    p.id,
+                    p.name.clone(),
+                    folder_of(p, &st.items, dest),
+                    p.priority,
+                )
+            })
             .collect();
         st.items.retain(|i| {
             if !pick(i) {
@@ -472,14 +502,14 @@ impl Grabber {
     }
 
     /// Los paquetes con sus archivos, en el orden en que llegaron.
-    pub fn snapshot(&self, base: &Path) -> Vec<GrabPackage> {
+    pub fn snapshot(&self, dest: &Dest) -> Vec<GrabPackage> {
         let st = self.shared.state();
         st.packages
             .iter()
             .map(|p| GrabPackage {
                 id: p.id,
                 name: p.name.clone(),
-                folder: folder_of(p, base),
+                folder: folder_of(p, &st.items, dest),
                 priority: p.priority,
                 items: st
                     .items
@@ -493,10 +523,12 @@ impl Grabber {
     }
 }
 
-fn folder_of(p: &Package, base: &Path) -> PathBuf {
-    p.folder
-        .clone()
-        .unwrap_or_else(|| base.join(omni_core::filename::sanitize(&p.name)))
+/// La carpeta elegida a mano para el paquete o, si no, la de los ajustes.
+fn folder_of(p: &Package, items: &[Item], dest: &Dest) -> PathBuf {
+    p.folder.clone().unwrap_or_else(|| {
+        let files = items.iter().filter(|i| i.package == p.id).count();
+        dest.folder(&p.name, files)
+    })
 }
 
 fn guess_name(url: &Url) -> String {
@@ -554,12 +586,13 @@ mod tests {
     use super::*;
     use omni_core::Network;
     use omni_testserver::{ServerConfig, TestServer, pseudo_random_bytes};
+    use std::path::Path;
     use std::time::{Duration, Instant};
 
     async fn wait_checked(g: &Grabber, n: usize) -> Vec<GrabPackage> {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let pkgs = g.snapshot(Path::new("/descargas"));
+            let pkgs = g.snapshot(&dest("/descargas"));
             let items: Vec<_> = pkgs.iter().flat_map(|p| &p.items).collect();
             if items.len() == n && items.iter().all(|i| i.check != Check::Checking) {
                 return pkgs;
@@ -567,6 +600,32 @@ mod tests {
             assert!(Instant::now() < deadline, "sin terminar: {pkgs:?}");
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+    }
+
+    fn dest(base: &str) -> Dest {
+        Dest {
+            base: base.into(),
+            per_package: true,
+            single_file_too: true,
+        }
+    }
+
+    #[test]
+    fn package_folders() {
+        let mut d = dest("/descargas");
+        assert_eq!(d.folder("Viaje", 3), Path::new("/descargas/Viaje"));
+        assert_eq!(d.folder("peli", 1), Path::new("/descargas/peli"));
+        // Nombres que Windows no admite.
+        assert_eq!(
+            d.folder("Fotos: 2026?", 2),
+            Path::new("/descargas/Fotos_ 2026_")
+        );
+        assert_eq!(d.folder("con", 2), Path::new("/descargas/_con"));
+        d.single_file_too = false;
+        assert_eq!(d.folder("peli", 1), Path::new("/descargas"));
+        assert_eq!(d.folder("Viaje", 3), Path::new("/descargas/Viaje"));
+        d.per_package = false;
+        assert_eq!(d.folder("Viaje", 3), Path::new("/descargas"));
     }
 
     #[test]
@@ -614,7 +673,7 @@ mod tests {
         g.set_package_priority(pkgs[0].id, Priority::High);
         g.set_item_selected(pkgs[0].items[1].id, false);
         g.set_package_selected(pkgs[1].id, false);
-        let picked = g.take_selected(Path::new("/descargas"));
+        let picked = g.take_selected(&dest("/descargas"));
         assert_eq!(picked.len(), 1);
         assert_eq!(picked[0].name, "fotos.part1.rar");
         assert_eq!(picked[0].package, "Viaje");
@@ -622,10 +681,10 @@ mod tests {
         assert_eq!(picked[0].priority, Priority::High);
 
         // Lo no marcado sigue en el capturador.
-        let left = g.snapshot(Path::new("/d"));
+        let left = g.snapshot(&dest("/d"));
         assert_eq!(left.iter().map(|p| p.items.len()).sum::<usize>(), 2);
         g.clear();
-        assert!(g.snapshot(Path::new("/d")).is_empty());
+        assert!(g.snapshot(&dest("/d")).is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -650,7 +709,7 @@ mod tests {
         assert!(matches!(items[0].check, Check::Offline(_)));
 
         // Solo se llevan los disponibles de la tanda.
-        let picked = g.take_batch(7, Path::new("/d"));
+        let picked = g.take_batch(7, &dest("/d"));
         let mut names: Vec<_> = picked.iter().map(|p| p.name.as_str()).collect();
         names.sort();
         assert_eq!(names, ["a.zip", "b.zip"]);

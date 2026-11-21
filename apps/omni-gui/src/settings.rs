@@ -22,8 +22,12 @@ pub struct Settings {
     /// 0 azul, 1 violeta, 2 verde, 3 naranja, 4 rosa, 5 grafito.
     pub accent: i32,
     pub reduce_transparency: bool,
-    /// Carpeta base; cada paquete va a una subcarpeta con su nombre.
+    /// Carpeta base de las descargas.
     pub download_dir: PathBuf,
+    /// Guardar cada paquete en una subcarpeta con su nombre.
+    pub package_folders: bool,
+    /// También los paquetes de un solo archivo.
+    pub single_file_folders: bool,
     pub max_active: i32,
     pub connections: i32,
     pub watch_clipboard: bool,
@@ -45,6 +49,8 @@ impl Default for Settings {
             accent: 0,
             reduce_transparency: false,
             download_dir: default_download_dir(),
+            package_folders: true,
+            single_file_folders: true,
             max_active: 3,
             connections: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
@@ -120,6 +126,7 @@ mod tests {
         assert!(s.compact);
         assert_eq!(s.max_active, 3);
         assert!(s.watch_clipboard);
+        assert!(s.package_folders);
         assert_eq!(s.clip_popup, 1);
         assert!(s.clip_popup_autoclose);
     }

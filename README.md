@@ -36,12 +36,18 @@ tiempo de comprobación, una rueda que se llena en verde (aptos) y rojo
 Apariencia › Portapapeles, junto con cerrarlo solo 1 s después de terminar
 (activado por defecto). En Wayland el sistema decide dónde se abre.
 
-La pestaña **Descargas** muestra el árbol de paquetes con progreso, velocidad,
-tiempo restante, prioridad y estado; abajo, el panel del paquete o archivo
-elegido y un resumen con los totales. La barra inferior tiene iniciar, pausar
-y detener todo, las descargas simultáneas y las conexiones por archivo.
+La pestaña **Descargas** tiene arriba la barra de controles (añadir enlaces,
+iniciar, pausar y detener todo, descargas simultáneas, conexiones por archivo
+y búsqueda) y debajo el árbol de paquetes con progreso, velocidad, tiempo
+restante, prioridad y estado, el panel del paquete o archivo elegido y un
+resumen con los totales.
 
-En **Ajustes** están la carpeta de descargas, la vigilancia del portapapeles y
+Cada paquete se guarda en una subcarpeta con su nombre dentro de la carpeta
+de descargas (sin los caracteres que Windows, Linux o macOS no admiten). En
+Ajustes › General se puede desactivar, o dejarlo solo para paquetes de más de
+un archivo; la carpeta de cada paquete se cambia en su panel del Capturador.
+
+En **Ajustes** están la carpeta de descargas y las subcarpetas, la vigilancia del portapapeles y
 la apariencia: cinco temas (Cristal claro, Cristal oscuro, Claro, Grafito y
 Alto contraste), seguir al sistema, posición del panel de propiedades,
 densidad, color de acento y reducir transparencia. Se guardan en
