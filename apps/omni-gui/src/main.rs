@@ -2,11 +2,11 @@
 //!
 //! La ventana corre en el hilo principal y el motor (`omni-core`) en un
 //! runtime de tokio dentro del mismo proceso. Un temporizador de Slint lee el
-//! progreso cuatro veces por segundo y actualiza la lista.
+//! estado cuatro veces por segundo y actualiza las tablas.
 //!
 //! Como en JDownloader, los enlaces no se descargan directamente: primero van
-//! al capturador ([`grabber`]), que enseña los archivos encontrados (también
-//! los enlazados desde una página) y deja elegir cuáles bajar.
+//! al capturador ([`grabber`]), que los agrupa en paquetes y enseña qué hay
+//! antes de bajar nada. De ahí pasan a la cola ([`manager`]).
 //!
 //! `omniload <url>...` abre la ventana y analiza esos enlaces.
 //!
@@ -17,23 +17,164 @@
 // Sin ventana de consola en Windows (solo en release, para poder depurar).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod clipboard;
 mod format;
 mod grabber;
 mod manager;
 mod platform;
+mod settings;
+mod views;
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use omni_core::DownloadOptions;
-use slint::{ModelRc, SharedString, Timer, TimerMode, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
-use grabber::{Check, Grabber};
-use manager::{Manager, RowInfo, State};
+use grabber::Grabber;
+use manager::{Manager, NewDownload, Priority};
+use settings::Settings;
+use views::{DlSelection, UiState};
 
 slint::include_modules!();
+
+/// Todo lo que comparten los callbacks de la ventana.
+struct App {
+    ui: slint::Weak<AppWindow>,
+    manager: Arc<Manager>,
+    grabber: Arc<Grabber>,
+    settings: RefCell<Settings>,
+    state: RefCell<UiState>,
+    dl_rows: Rc<VecModel<DlRow>>,
+    grab_rows: Rc<VecModel<GrabTreeRow>>,
+}
+
+impl App {
+    fn ui(&self) -> Option<AppWindow> {
+        self.ui.upgrade()
+    }
+
+    fn base_dir(&self) -> PathBuf {
+        self.settings.borrow().download_dir.clone()
+    }
+
+    fn show(&self, msg: &str, error: bool) {
+        if let Some(ui) = self.ui() {
+            ui.set_message(msg.into());
+            ui.set_message_is_error(error);
+        }
+    }
+
+    /// Redibuja todo a partir del estado del gestor y del capturador.
+    fn refresh(&self) {
+        let Some(ui) = self.ui() else { return };
+        let rows = self.manager.snapshot();
+        let grabbed = self.grabber.snapshot(&self.base_dir());
+        let mut st = self.state.borrow_mut();
+        views::fill_downloads(&ui, &self.dl_rows, &rows, &mut st);
+        views::fill_grabber(&ui, &self.grab_rows, &grabbed, &mut st);
+        drop(st);
+
+        let notes = self.grabber.take_notes();
+        if !notes.is_empty() {
+            self.show(&notes.join(" "), true);
+        } else if !ui.get_message_is_error()
+            && ui.get_message().starts_with("Analizando")
+            && !grabbed
+                .iter()
+                .flat_map(|p| &p.items)
+                .any(|i| i.check == grabber::Check::Checking)
+        {
+            self.show("", false);
+        }
+    }
+
+    fn analyze(&self, text: &str, quiet: bool) {
+        match self.grabber.analyze(text) {
+            Ok(n) => {
+                let msg = if n == 1 {
+                    "Analizando 1 enlace…".to_owned()
+                } else {
+                    format!("Analizando {n} enlaces…")
+                };
+                self.show(&msg, false);
+                if !quiet && let Some(ui) = self.ui() {
+                    ui.set_tab(1);
+                }
+            }
+            Err(msg) if !quiet => self.show(&msg, true),
+            Err(_) => {}
+        }
+        self.refresh();
+    }
+
+    /// Pasa lo marcado del capturador a la cola.
+    fn grab_to_queue(&self, start: bool) {
+        let picked = self.grabber.take_selected(&self.base_dir());
+        if picked.is_empty() {
+            self.show("No hay archivos marcados.", true);
+            return;
+        }
+        let mut errors = Vec::new();
+        for p in picked {
+            let new = NewDownload {
+                url: p.url,
+                dir: p.folder,
+                name: Some(p.name.clone()),
+                package: p.package,
+                priority: p.priority,
+                size: p.size,
+                start,
+            };
+            if let Err(msg) = self.manager.add(new) {
+                errors.push(format!("{}: {msg}.", p.name));
+            }
+        }
+        if errors.is_empty() {
+            self.show("", false);
+        } else {
+            self.show(&errors.join(" "), true);
+        }
+        if start {
+            self.manager.start_all();
+        }
+        if let Some(ui) = self.ui() {
+            ui.set_tab(0);
+        }
+        self.refresh();
+    }
+
+    /// Ids de las descargas que afecta la selección actual.
+    fn selected_ids(&self) -> Vec<u64> {
+        match &self.state.borrow().dl_selected {
+            Some(DlSelection::Package(name)) => self.manager.package_ids(name),
+            Some(DlSelection::File(id)) => vec![*id],
+            None => Vec::new(),
+        }
+    }
+
+    fn save_settings(&self) {
+        let Some(ui) = self.ui() else { return };
+        let theme = ui.global::<Theme>();
+        let mut s = self.settings.borrow_mut();
+        s.theme = theme.get_kind();
+        s.follow_system = theme.get_follow_system();
+        s.accent = theme.get_accent_index();
+        s.compact = theme.get_compact();
+        s.reduce_transparency = theme.get_reduce_transparency();
+        s.properties_panel = ui.get_properties_panel();
+        s.max_active = ui.get_max_active();
+        s.connections = ui.get_connections();
+        s.watch_clipboard = ui.get_watch_clipboard();
+        s.download_dir = PathBuf::from(ui.get_download_dir().as_str());
+        s.save();
+        self.manager.set_max_active(s.max_active as usize);
+        self.manager.set_connections(s.connections as usize);
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
@@ -42,213 +183,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .thread_name("omni-motor")
         .build()?;
+    let settings = Settings::load();
     let manager = Arc::new(Manager::new(
         rt.handle().clone(),
         DownloadOptions::default(),
     ));
-
-    let ui = AppWindow::new()?;
-    ui.set_folder(default_folder().display().to_string().into());
-    ui.set_connections(omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32);
-
+    manager.set_max_active(settings.max_active as usize);
+    manager.set_connections(settings.connections as usize);
     let grabber = Arc::new(Grabber::new(
         rt.handle().clone(),
         omni_core::Network::system_default()?.client().clone(),
     ));
 
-    let rows: Rc<VecModel<DownloadRow>> = Rc::new(VecModel::default());
-    ui.set_downloads(ModelRc::from(rows.clone()));
-    let grab_rows: Rc<VecModel<GrabRow>> = Rc::new(VecModel::default());
+    let ui = AppWindow::new()?;
+    apply_settings(&ui, &settings);
+
+    let dl_rows: Rc<VecModel<DlRow>> = Rc::new(VecModel::default());
+    ui.set_downloads(ModelRc::from(dl_rows.clone()));
+    let grab_rows: Rc<VecModel<GrabTreeRow>> = Rc::new(VecModel::default());
     ui.set_grabbed(ModelRc::from(grab_rows.clone()));
 
-    // Refresco de las dos listas.
-    let refresh = {
-        let manager = manager.clone();
-        let grabber = grabber.clone();
-        let ui_weak = ui.as_weak();
-        move || {
-            let Some(ui) = ui_weak.upgrade() else { return };
-            sync_model(&rows, manager.snapshot().into_iter().map(to_row).collect());
-            let grabbed = grabber.snapshot();
-            // Quita el "Analizando…" cuando ya se comprobó todo.
-            if !ui.get_message_is_error()
-                && ui.get_message().starts_with("Analizando")
-                && !grabbed.iter().any(|r| r.check == Check::Checking)
-            {
-                show(&ui, "", false);
-            }
-            ui.set_grab_summary(grab_summary(&grabbed).into());
-            ui.set_grab_selected(grabbed.iter().filter(|r| r.selected).count() as i32);
-            sync_model(&grab_rows, grabbed.into_iter().map(to_grab_row).collect());
-            let notes = grabber.take_notes();
-            if !notes.is_empty() {
-                show(&ui, &notes.join(" "), true);
-            }
-        }
-    };
+    let app = Rc::new(App {
+        ui: ui.as_weak(),
+        manager: manager.clone(),
+        grabber,
+        settings: RefCell::new(settings),
+        state: RefCell::new(UiState::default()),
+        dl_rows,
+        grab_rows,
+    });
+
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, Duration::from_millis(250), {
-        let refresh = refresh.clone();
-        move || refresh()
+        let app = app.clone();
+        move || app.refresh()
     });
 
-    ui.on_analyze({
-        let grabber = grabber.clone();
-        let ui_weak = ui.as_weak();
-        let refresh = refresh.clone();
-        move |text| {
-            let Some(ui) = ui_weak.upgrade() else { return };
-            match grabber.analyze(&text) {
-                Ok(n) => {
-                    ui.set_links(SharedString::new());
-                    ui.set_tab(0);
-                    let msg = if n == 1 {
-                        "Analizando 1 enlace…".to_owned()
-                    } else {
-                        format!("Analizando {n} enlaces…")
-                    };
-                    show(&ui, &msg, false);
-                }
-                Err(msg) => show(&ui, &msg, true),
+    // Vigilar el portapapeles, como JDownloader: lo que se copie con enlaces
+    // va al capturador.
+    let clip_timer = Timer::default();
+    {
+        let app = app.clone();
+        let mut watcher = clipboard::Watcher::new();
+        clip_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
+            let on = app.ui().is_some_and(|ui| ui.get_watch_clipboard());
+            if let Some(text) = watcher.poll(on) {
+                app.analyze(&text, true);
             }
-            refresh();
-        }
-    });
+        });
+    }
 
-    ui.on_grab_toggle({
-        let grabber = grabber.clone();
-        let refresh = refresh.clone();
-        move |i, on| {
-            grabber.set_selected(i as usize, on);
-            refresh();
-        }
-    });
-    ui.on_grab_select_all({
-        let grabber = grabber.clone();
-        let refresh = refresh.clone();
-        move |on| {
-            grabber.select_all(on);
-            refresh();
-        }
-    });
-    ui.on_grab_remove({
-        let grabber = grabber.clone();
-        let refresh = refresh.clone();
-        move |i| {
-            grabber.remove(i as usize);
-            refresh();
-        }
-    });
-    ui.on_grab_clear({
-        let grabber = grabber.clone();
-        let refresh = refresh.clone();
-        move || {
-            grabber.clear();
-            refresh();
-        }
-    });
-    ui.on_grab_download({
-        let grabber = grabber.clone();
-        let manager = manager.clone();
-        let ui_weak = ui.as_weak();
-        let refresh = refresh.clone();
-        move |folder, connections| {
-            let Some(ui) = ui_weak.upgrade() else { return };
-            let folder = PathBuf::from(folder.trim());
-            if folder.as_os_str().is_empty() {
-                show(&ui, "Elige una carpeta de destino.", true);
-                return;
-            }
-            let picked = grabber.take_selected();
-            let mut errors = Vec::new();
-            for p in &picked {
-                if let Err(msg) = manager.add(
-                    &p.url,
-                    folder.clone(),
-                    connections.max(1) as usize,
-                    Some(p.name.clone()),
-                ) {
-                    errors.push(format!("{}: {msg}", p.name));
-                }
-            }
-            if errors.is_empty() {
-                show(&ui, "", false);
-            } else {
-                show(&ui, &errors.join(" "), true);
-            }
-            ui.set_tab(1);
-            refresh();
-        }
-    });
-
-    ui.on_choose_folder({
-        let ui_weak = ui.as_weak();
-        move || {
-            let Some(ui) = ui_weak.upgrade() else { return };
-            let current = PathBuf::from(ui.get_folder().as_str());
-            let mut dialog = rfd::FileDialog::new().set_title("Carpeta de descargas");
-            if current.is_dir() {
-                dialog = dialog.set_directory(&current);
-            }
-            if let Some(dir) = dialog.pick_folder() {
-                ui.set_folder(dir.display().to_string().into());
-            }
-        }
-    });
-
-    ui.on_pause({
-        let manager = manager.clone();
-        let refresh = refresh.clone();
-        move |i| {
-            manager.pause(i as usize);
-            refresh();
-        }
-    });
-    ui.on_resume({
-        let manager = manager.clone();
-        let refresh = refresh.clone();
-        move |i| {
-            manager.resume(i as usize);
-            refresh();
-        }
-    });
-    ui.on_remove({
-        let manager = manager.clone();
-        let refresh = refresh.clone();
-        move |i| {
-            manager.remove(i as usize);
-            refresh();
-        }
-    });
-    ui.on_open_folder({
-        let manager = manager.clone();
-        let ui_weak = ui.as_weak();
-        move |i| {
-            let (Some(ui), Some(dir)) = (ui_weak.upgrade(), manager.folder(i as usize)) else {
-                return;
-            };
-            if let Err(e) = platform::open_folder(&dir) {
-                show(
-                    &ui,
-                    &format!("No se pudo abrir {}: {e}", dir.display()),
-                    true,
-                );
-            }
-        }
-    });
+    connect_header(&ui, &app);
+    connect_downloads(&ui, &app);
+    connect_grabber(&ui, &app);
+    connect_settings(&ui, &app);
 
     // Enlaces pasados como argumentos (`omniload <url>...`), por ejemplo desde
     // "Abrir con" o un acceso directo: van al capturador, como los pegados.
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {
-        ui.invoke_analyze(args.join("\n").into());
+        app.analyze(&args.join("\n"), false);
     }
-    refresh();
+    app.refresh();
 
     ui.run()?;
 
     // Al cerrar: pausar todo y dar tiempo al motor a guardar el progreso.
     drop(timer);
+    drop(clip_timer);
+    app.save_settings();
     if manager.any_active() {
         manager.shutdown(Duration::from_secs(5));
     }
@@ -256,14 +259,263 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn show(ui: &AppWindow, msg: &str, error: bool) {
-    ui.set_message(msg.into());
-    ui.set_message_is_error(error);
+fn apply_settings(ui: &AppWindow, s: &Settings) {
+    let theme = ui.global::<Theme>();
+    theme.set_kind(s.theme);
+    theme.set_follow_system(s.follow_system);
+    theme.set_accent_index(s.accent);
+    theme.set_compact(s.compact);
+    theme.set_reduce_transparency(s.reduce_transparency);
+    ui.set_properties_panel(s.properties_panel);
+    ui.set_max_active(s.max_active);
+    ui.set_connections(s.connections);
+    ui.set_watch_clipboard(s.watch_clipboard);
+    ui.set_download_dir(s.download_dir.display().to_string().into());
+}
+
+/// Elige carpeta con el diálogo nativo del sistema.
+fn pick_folder(current: &str) -> Option<PathBuf> {
+    let current = PathBuf::from(current);
+    let mut dialog = rfd::FileDialog::new().set_title("Elegir carpeta");
+    if current.is_dir() {
+        dialog = dialog.set_directory(&current);
+    }
+    dialog.pick_folder()
+}
+
+fn connect_header(ui: &AppWindow, app: &Rc<App>) {
+    ui.on_add_links({
+        let app = app.clone();
+        move |text| {
+            app.analyze(&text, false);
+            if let Some(ui) = app.ui() {
+                ui.set_add_dialog_open(false);
+                ui.set_add_dialog_text(SharedString::new());
+            }
+        }
+    });
+}
+
+fn connect_downloads(ui: &AppWindow, app: &Rc<App>) {
+    ui.on_dl_click({
+        let app = app.clone();
+        move |key, is_package| {
+            app.state.borrow_mut().select_download(key, is_package);
+            app.refresh();
+        }
+    });
+    ui.on_dl_toggle({
+        let app = app.clone();
+        move |key| {
+            app.state.borrow_mut().toggle_download_package(key);
+            app.refresh();
+        }
+    });
+    ui.on_start_all({
+        let app = app.clone();
+        move || {
+            app.manager.start_all();
+            app.refresh();
+        }
+    });
+    ui.on_pause_all({
+        let app = app.clone();
+        move || {
+            app.manager.pause_all();
+            app.refresh();
+        }
+    });
+    ui.on_stop_all({
+        let app = app.clone();
+        move || {
+            app.manager.stop_all();
+            app.refresh();
+        }
+    });
+    ui.on_queue_settings_changed({
+        let app = app.clone();
+        move || app.save_settings()
+    });
+    ui.on_dl_search({
+        let app = app.clone();
+        move |text| {
+            app.state.borrow_mut().dl_search = text.to_string();
+            app.refresh();
+        }
+    });
+    ui.on_sel_start({
+        let app = app.clone();
+        move || {
+            app.manager.start(&app.selected_ids());
+            app.refresh();
+        }
+    });
+    ui.on_sel_stop({
+        let app = app.clone();
+        move || {
+            app.manager.stop(&app.selected_ids());
+            app.refresh();
+        }
+    });
+    ui.on_sel_remove({
+        let app = app.clone();
+        move || {
+            app.manager.remove(&app.selected_ids());
+            app.state.borrow_mut().dl_selected = None;
+            app.refresh();
+        }
+    });
+    ui.on_change_sel_priority({
+        let app = app.clone();
+        move |i| {
+            app.manager
+                .set_priority(&app.selected_ids(), Priority::from_index(i as usize));
+            app.refresh();
+        }
+    });
+    ui.on_sel_open_folder({
+        let app = app.clone();
+        move || {
+            let folder = app.state.borrow().dl_selected_folder.clone();
+            if let Some(dir) = folder
+                && let Err(e) = platform::open_folder(&dir)
+            {
+                app.show(&format!("No se pudo abrir {}: {e}", dir.display()), true);
+            }
+        }
+    });
+}
+
+fn connect_grabber(ui: &AppWindow, app: &Rc<App>) {
+    ui.on_grab_click({
+        let app = app.clone();
+        move |key, is_package| {
+            app.state.borrow_mut().select_grab(key, is_package);
+            app.refresh();
+        }
+    });
+    ui.on_grab_toggle({
+        let app = app.clone();
+        move |key| {
+            app.state.borrow_mut().toggle_grab_package(key);
+            app.refresh();
+        }
+    });
+    ui.on_grab_check({
+        let app = app.clone();
+        move |key, is_package, on| {
+            if is_package {
+                app.grabber.set_package_selected(key as u64, on);
+            } else {
+                app.grabber.set_item_selected(key as u64, on);
+            }
+            app.refresh();
+        }
+    });
+    ui.on_grab_select_all({
+        let app = app.clone();
+        move |on| {
+            app.grabber.select_all(on);
+            app.refresh();
+        }
+    });
+    ui.on_grab_remove_offline({
+        let app = app.clone();
+        move || {
+            app.grabber.remove_offline();
+            app.refresh();
+        }
+    });
+    ui.on_grab_clear({
+        let app = app.clone();
+        move || {
+            app.grabber.clear();
+            app.refresh();
+        }
+    });
+    ui.on_grab_search({
+        let app = app.clone();
+        move |text| {
+            app.state.borrow_mut().grab_search = text.to_string();
+            app.refresh();
+        }
+    });
+    ui.on_grab_to_downloads({
+        let app = app.clone();
+        move |start| app.grab_to_queue(start)
+    });
+    ui.on_pkg_rename({
+        let app = app.clone();
+        move |name| {
+            if let Some(id) = app.state.borrow().grab_package() {
+                app.grabber.rename_package(id, &name);
+            }
+            app.refresh();
+        }
+    });
+    ui.on_pkg_folder({
+        let app = app.clone();
+        move |folder| {
+            if let Some(id) = app.state.borrow().grab_package() {
+                app.grabber
+                    .set_package_folder(id, PathBuf::from(folder.trim()));
+            }
+            app.refresh();
+        }
+    });
+    ui.on_pkg_choose_folder({
+        let app = app.clone();
+        move || {
+            let Some(ui) = app.ui() else { return };
+            let id = app.state.borrow().grab_package();
+            if let (Some(id), Some(dir)) = (id, pick_folder(&ui.get_pkg_folder_text())) {
+                app.grabber.set_package_folder(id, dir);
+                app.refresh();
+            }
+        }
+    });
+    ui.on_change_pkg_priority({
+        let app = app.clone();
+        move |i| {
+            if let Some(id) = app.state.borrow().grab_package() {
+                app.grabber
+                    .set_package_priority(id, Priority::from_index(i as usize));
+            }
+            app.refresh();
+        }
+    });
+    ui.on_pkg_remove({
+        let app = app.clone();
+        move || {
+            let id = app.state.borrow().grab_package();
+            if let Some(id) = id {
+                app.grabber.remove_package(id);
+            }
+            app.refresh();
+        }
+    });
+}
+
+fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
+    ui.on_settings_changed({
+        let app = app.clone();
+        move || app.save_settings()
+    });
+    ui.on_choose_download_dir({
+        let app = app.clone();
+        move || {
+            let Some(ui) = app.ui() else { return };
+            if let Some(dir) = pick_folder(&ui.get_download_dir()) {
+                ui.set_download_dir(dir.display().to_string().into());
+                app.save_settings();
+                app.refresh();
+            }
+        }
+    });
 }
 
 /// Copia una foto al modelo de Slint, tocando solo las filas que cambiaron.
 fn sync_model<T: Clone + PartialEq + 'static>(model: &VecModel<T>, new: Vec<T>) {
-    use slint::Model;
     if model.row_count() != new.len() {
         model.set_vec(new);
         return;
@@ -273,65 +525,6 @@ fn sync_model<T: Clone + PartialEq + 'static>(model: &VecModel<T>, new: Vec<T>) 
             model.set_row_data(i, row);
         }
     }
-}
-
-fn grab_summary(rows: &[grabber::GrabRow]) -> String {
-    let checking = rows.iter().filter(|r| r.check == Check::Checking).count();
-    let selected: Vec<_> = rows.iter().filter(|r| r.selected).collect();
-    let mut s = format!("{} archivos · {} seleccionados", rows.len(), selected.len());
-    let known: u64 = selected.iter().filter_map(|r| r.bytes).sum();
-    if known > 0 {
-        s.push_str(&format!(" · {}", format::bytes(known)));
-    }
-    if checking > 0 {
-        s.push_str(&format!(" · comprobando {checking}…"));
-    }
-    s
-}
-
-fn to_grab_row(r: grabber::GrabRow) -> GrabRow {
-    GrabRow {
-        name: r.name.into(),
-        size: r.size.into(),
-        source: r.source.into(),
-        status: r.status.into(),
-        state: match r.check {
-            Check::Checking => GrabState::Checking,
-            Check::Online { .. } => GrabState::Online,
-            Check::Offline(_) => GrabState::Offline,
-        },
-        selected: r.selected,
-    }
-}
-
-fn to_row(r: RowInfo) -> DownloadRow {
-    DownloadRow {
-        name: r.name.into(),
-        folder: r.folder.into(),
-        state: match r.state {
-            State::Starting => RowState::Starting,
-            State::Running => RowState::Running,
-            State::Pausing => RowState::Pausing,
-            State::Paused => RowState::Paused,
-            State::Done => RowState::Done,
-            State::Failed => RowState::Failed,
-        },
-        fraction: r.fraction.unwrap_or(-1.0),
-        status: r.status.into(),
-        sizes: r.sizes.into(),
-        speed: r.speed.into(),
-        eta: r.eta.into(),
-        connections: r.connections.into(),
-        detail: r.detail.into(),
-    }
-}
-
-/// La carpeta de descargas del usuario, o la actual si no hay.
-fn default_folder() -> PathBuf {
-    dirs::download_dir()
-        .or_else(dirs::home_dir)
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn init_logging() {

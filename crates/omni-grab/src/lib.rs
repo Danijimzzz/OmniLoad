@@ -26,8 +26,12 @@ pub const MAX_LINKS_PER_PAGE: usize = 500;
 pub enum Found {
     /// Un archivo descargable.
     File(RemoteInfo),
-    /// Una página web, con los enlaces a archivos que contiene.
-    Page { url: Url, links: Vec<Url> },
+    /// Una página web, con su título y los enlaces a archivos que contiene.
+    Page {
+        url: Url,
+        title: Option<String>,
+        links: Vec<Url>,
+    },
 }
 
 /// Mira qué hay detrás de `url`: un archivo o una página con enlaces.
@@ -53,6 +57,7 @@ pub async fn inspect(client: &reqwest::Client, url: &Url) -> omni_core::Result<F
     links.truncate(MAX_LINKS_PER_PAGE);
     Ok(Found::Page {
         url: page_url,
+        title: page_title(&html),
         links,
     })
 }
@@ -201,7 +206,18 @@ fn href_values(html: &str) -> Vec<&str> {
     out
 }
 
-/// Las entidades HTML que aparecen en URLs.
+/// El `<title>` de una página, limpio de espacios.
+pub fn page_title(html: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let open = lower.find("<title")?;
+    let start = open + lower[open..].find('>')? + 1;
+    let end = start + lower[start..].find("</title")?;
+    let title = decode_entities(&html[start..end]);
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!title.is_empty()).then_some(title)
+}
+
+/// Las entidades HTML que aparecen en URLs y títulos.
 fn decode_entities(s: &str) -> String {
     s.replace("&amp;", "&")
         .replace("&#38;", "&")
@@ -233,6 +249,16 @@ mod tests {
         );
         assert!(extract_urls("nada por aquí").is_empty());
         assert_eq!(urls(extract_urls("HTTPS://A.COM/B")), ["https://a.com/B"]);
+    }
+
+    #[test]
+    fn title() {
+        assert_eq!(
+            page_title("<html><head><TITLE>\n Descargas &amp; más </title>").as_deref(),
+            Some("Descargas & más")
+        );
+        assert_eq!(page_title("<title></title>"), None);
+        assert_eq!(page_title("sin título"), None);
     }
 
     #[test]

@@ -1,9 +1,13 @@
-//! Capturador de enlaces de la ventana: analiza lo que se pega, enseña los
-//! archivos encontrados y deja elegir cuáles descargar.
+//! Capturador de enlaces de la ventana: analiza lo que se pega, agrupa los
+//! archivos encontrados en paquetes y deja elegir cuáles descargar y dónde.
 //!
-//! Igual que [`crate::manager`], no sabe nada de Slint: la interfaz pide una
-//! foto ([`GrabRow`]) cuatro veces por segundo.
+//! Como en JDownloader, los enlaces de una página forman un paquete con el
+//! título de la página, y los enlaces sueltos se agrupan por nombre
+//! (`fotos.part1.rar` y `fotos.part2.rar` van juntos).
+//!
+//! Igual que [`crate::manager`], no sabe nada de Slint.
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -12,7 +16,7 @@ use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 use url::Url;
 
-use crate::format;
+use crate::manager::Priority;
 
 /// Enlaces que se comprueban a la vez.
 const PARALLEL_CHECKS: usize = 8;
@@ -29,17 +33,25 @@ pub enum Check {
     Offline(String),
 }
 
-/// Lo que la interfaz necesita para pintar un archivo encontrado.
+/// Un archivo encontrado, para pintarlo.
 #[derive(Clone, Debug, PartialEq)]
-pub struct GrabRow {
+pub struct GrabItem {
+    pub id: u64,
     pub name: String,
-    pub size: String,
-    /// Tamaño en bytes, si se conoce.
-    pub bytes: Option<u64>,
-    pub source: String,
-    pub status: String,
+    pub host: String,
+    pub size: Option<u64>,
     pub check: Check,
     pub selected: bool,
+}
+
+/// Un paquete del capturador, para pintarlo.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GrabPackage {
+    pub id: u64,
+    pub name: String,
+    pub folder: PathBuf,
+    pub priority: Priority,
+    pub items: Vec<GrabItem>,
 }
 
 /// Un archivo elegido para descargar.
@@ -47,60 +59,77 @@ pub struct GrabRow {
 pub struct Picked {
     pub url: String,
     pub name: String,
+    pub package: String,
+    pub folder: PathBuf,
+    pub priority: Priority,
+    /// Tamaño visto al comprobar el enlace.
+    pub size: Option<u64>,
+}
+
+struct Package {
+    id: u64,
+    name: String,
+    /// `true` si se creó agrupando enlaces sueltos por nombre (y no se ha
+    /// renombrado): los archivos pueden cambiar de paquete al saber su nombre
+    /// real, y se borra al quedarse vacío.
+    auto: bool,
+    folder: Option<PathBuf>,
+    priority: Priority,
 }
 
 struct Item {
     id: u64,
+    package: u64,
     url: Url,
     name: String,
     size: Option<u64>,
-    /// De dónde salió: el enlace pegado o la página donde estaba.
-    source: String,
     check: Check,
     selected: bool,
 }
 
 #[derive(Default)]
+struct State {
+    packages: Vec<Package>,
+    items: Vec<Item>,
+}
+
+impl State {
+    fn package_named(&mut self, ids: &AtomicU64, name: &str, auto: bool) -> u64 {
+        if let Some(p) = self
+            .packages
+            .iter()
+            .find(|p| p.name == name && p.auto == auto)
+        {
+            return p.id;
+        }
+        let id = ids.fetch_add(1, Ordering::Relaxed);
+        self.packages.push(Package {
+            id,
+            name: name.to_owned(),
+            auto,
+            folder: None,
+            priority: Priority::Normal,
+        });
+        id
+    }
+
+    fn drop_empty_packages(&mut self) {
+        let items = &self.items;
+        self.packages
+            .retain(|p| items.iter().any(|i| i.package == p.id));
+    }
+}
+
+#[derive(Default)]
 struct Shared {
-    items: Mutex<Vec<Item>>,
+    state: Mutex<State>,
     /// Avisos para el usuario ("esa página no tiene archivos").
     notes: Mutex<Vec<String>>,
 }
 
 impl Shared {
-    fn items(&self) -> MutexGuard<'_, Vec<Item>> {
-        self.items.lock().expect("capturador envenenado")
-    }
-
-    fn update(&self, id: u64, f: impl FnOnce(&mut Item)) {
-        if let Some(item) = self.items().iter_mut().find(|i| i.id == id) {
-            f(item);
-        }
-    }
-
-    fn remove(&self, id: u64) {
-        self.items().retain(|i| i.id != id);
-    }
-
-    /// Añade un enlace si no está ya; devuelve su id.
-    fn push(&self, ids: &AtomicU64, url: Url, source: String) -> Option<u64> {
-        let mut items = self.items();
-        if items.iter().any(|i| i.url == url) {
-            return None;
-        }
-        let id = ids.fetch_add(1, Ordering::Relaxed);
-        let name = omni_core::filename::from_url(&url)
-            .unwrap_or_else(|| url.host_str().unwrap_or("archivo").to_owned());
-        items.push(Item {
-            id,
-            url,
-            name,
-            size: None,
-            source,
-            check: Check::Checking,
-            selected: true,
-        });
-        Some(id)
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.state.lock().expect("capturador envenenado")
     }
 }
 
@@ -119,7 +148,7 @@ impl Grabber {
             rt,
             client,
             shared: Arc::default(),
-            ids: Arc::default(),
+            ids: Arc::new(AtomicU64::new(1)),
             limit: Arc::new(Semaphore::new(PARALLEL_CHECKS)),
         }
     }
@@ -133,20 +162,37 @@ impl Grabber {
         }
         let mut added = 0;
         for url in urls {
-            let source = short(&url);
-            if let Some(id) = self.shared.push(&self.ids, url.clone(), source) {
-                added += 1;
-                self.spawn_check(id, url, true);
-            }
+            let name = guess_name(&url);
+            let id = {
+                let mut st = self.shared.state();
+                if st.items.iter().any(|i| i.url == url) {
+                    continue;
+                }
+                let package = st.package_named(&self.ids, &package_name(&name), true);
+                let id = self.ids.fetch_add(1, Ordering::Relaxed);
+                st.items.push(Item {
+                    id,
+                    package,
+                    url: url.clone(),
+                    name,
+                    size: None,
+                    check: Check::Checking,
+                    selected: true,
+                });
+                id
+            };
+            added += 1;
+            self.spawn_check(id, url, true);
         }
         if added == 0 {
-            return Err("Esos enlaces ya están en la lista.".into());
+            return Err("Esos enlaces ya están en el capturador.".into());
         }
         Ok(added)
     }
 
     /// Comprueba un enlace en segundo plano. Si es una página y
-    /// `follow_pages`, sus enlaces a archivos pasan a la lista en su lugar.
+    /// `follow_pages`, sus enlaces a archivos pasan a la lista en su lugar,
+    /// en un paquete con el título de la página.
     fn spawn_check(&self, id: u64, url: Url, follow_pages: bool) {
         let shared = self.shared.clone();
         let client = self.client.clone();
@@ -158,16 +204,36 @@ impl Grabber {
                 let _permit = limit.acquire().await;
                 inspect(&client, &url).await
             };
+            let mut st = shared.state();
             match found {
-                Ok(Found::File(info)) => shared.update(id, |i| {
-                    i.name = info.filename.clone();
-                    i.size = info.size;
-                    i.check = Check::Online {
+                Ok(Found::File(info)) => {
+                    let Some(i) = st.items.iter().position(|i| i.id == id) else {
+                        return; // lo quitaron mientras tanto
+                    };
+                    // Un enlace suelto se agrupa por su nombre real.
+                    let auto = st
+                        .packages
+                        .iter()
+                        .any(|p| p.id == st.items[i].package && p.auto);
+                    if auto {
+                        let pkg = st.package_named(&ids, &package_name(&info.filename), true);
+                        st.items[i].package = pkg;
+                    }
+                    let item = &mut st.items[i];
+                    item.name = info.filename.clone();
+                    item.size = info.size;
+                    item.check = Check::Online {
                         resumable: info.is_segmentable(),
                     };
-                }),
-                Ok(Found::Page { url: page, links }) => {
-                    shared.remove(id);
+                    st.drop_empty_packages();
+                }
+                Ok(Found::Page {
+                    url: page,
+                    title,
+                    links,
+                }) => {
+                    st.items.retain(|i| i.id != id);
+                    st.drop_empty_packages();
                     if !follow_pages {
                         // Un enlace de una página que resulta ser otra página:
                         // no lo seguimos.
@@ -178,20 +244,43 @@ impl Grabber {
                             .notes
                             .lock()
                             .expect("avisos envenenados")
-                            .push(format!("En {} no hay enlaces a archivos.", short(&page)));
+                            .push(format!(
+                                "En {} no hay enlaces a archivos.",
+                                page.host_str().unwrap_or("esa página")
+                            ));
                         return;
                     }
-                    let source = short(&page);
+                    let name =
+                        title.unwrap_or_else(|| page.host_str().unwrap_or("Página").to_owned());
+                    let package = st.package_named(&ids, &name, false);
+                    let mut new = Vec::new();
                     for link in links {
-                        if let Some(id) = shared.push(&ids, link.clone(), source.clone()) {
-                            grabber.spawn_check(id, link, false);
+                        if st.items.iter().any(|i| i.url == link) {
+                            continue;
                         }
+                        let id = ids.fetch_add(1, Ordering::Relaxed);
+                        st.items.push(Item {
+                            id,
+                            package,
+                            url: link.clone(),
+                            name: guess_name(&link),
+                            size: None,
+                            check: Check::Checking,
+                            selected: true,
+                        });
+                        new.push((id, link));
+                    }
+                    drop(st);
+                    for (id, link) in new {
+                        grabber.spawn_check(id, link, false);
                     }
                 }
-                Err(e) => shared.update(id, |i| {
-                    i.check = Check::Offline(short_error(&e));
-                    i.selected = false;
-                }),
+                Err(e) => {
+                    if let Some(item) = st.items.iter_mut().find(|i| i.id == id) {
+                        item.check = Check::Offline(short_error(&e));
+                        item.selected = false;
+                    }
+                }
             }
         });
     }
@@ -207,43 +296,121 @@ impl Grabber {
         }
     }
 
-    pub fn set_selected(&self, i: usize, selected: bool) {
-        if let Some(item) = self.shared.items().get_mut(i)
+    pub fn set_item_selected(&self, id: u64, selected: bool) {
+        if let Some(item) = self.shared.state().items.iter_mut().find(|i| i.id == id)
             && !matches!(item.check, Check::Offline(_))
         {
             item.selected = selected;
         }
     }
 
-    pub fn select_all(&self, selected: bool) {
-        for item in self.shared.items().iter_mut() {
+    pub fn set_package_selected(&self, package: u64, selected: bool) {
+        for item in self
+            .shared
+            .state()
+            .items
+            .iter_mut()
+            .filter(|i| i.package == package)
+        {
             item.selected = selected && !matches!(item.check, Check::Offline(_));
         }
     }
 
-    pub fn remove(&self, i: usize) {
-        let mut items = self.shared.items();
-        if i < items.len() {
-            items.remove(i);
+    pub fn select_all(&self, selected: bool) {
+        for item in self.shared.state().items.iter_mut() {
+            item.selected = selected && !matches!(item.check, Check::Offline(_));
         }
     }
 
-    pub fn clear(&self) {
-        self.shared.items().clear();
+    pub fn remove_package(&self, package: u64) {
+        let mut st = self.shared.state();
+        st.items.retain(|i| i.package != package);
+        st.drop_empty_packages();
     }
 
-    /// Saca de la lista los seleccionados y los devuelve para descargarlos.
-    pub fn take_selected(&self) -> Vec<Picked> {
-        let mut items = self.shared.items();
-        let (picked, rest): (Vec<Item>, Vec<Item>) = items.drain(..).partition(|i| i.selected);
-        *items = rest;
+    /// Quita los enlaces que no están disponibles.
+    pub fn remove_offline(&self) {
+        let mut st = self.shared.state();
+        st.items.retain(|i| !matches!(i.check, Check::Offline(_)));
+        st.drop_empty_packages();
+    }
+
+    pub fn clear(&self) {
+        let mut st = self.shared.state();
+        st.items.clear();
+        st.packages.clear();
+    }
+
+    pub fn rename_package(&self, package: u64, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        if let Some(p) = self
+            .shared
+            .state()
+            .packages
+            .iter_mut()
+            .find(|p| p.id == package)
+        {
+            p.name = name.to_owned();
+            p.auto = false;
+        }
+    }
+
+    pub fn set_package_folder(&self, package: u64, folder: PathBuf) {
+        if let Some(p) = self
+            .shared
+            .state()
+            .packages
+            .iter_mut()
+            .find(|p| p.id == package)
+        {
+            p.folder = (!folder.as_os_str().is_empty()).then_some(folder);
+        }
+    }
+
+    pub fn set_package_priority(&self, package: u64, priority: Priority) {
+        if let Some(p) = self
+            .shared
+            .state()
+            .packages
+            .iter_mut()
+            .find(|p| p.id == package)
+        {
+            p.priority = priority;
+        }
+    }
+
+    /// Saca del capturador los archivos marcados y los devuelve para
+    /// descargarlos. `base` es la carpeta de descargas: cada paquete va a
+    /// `base/<paquete>` salvo que se haya elegido otra.
+    pub fn take_selected(&self, base: &Path) -> Vec<Picked> {
+        let mut st = self.shared.state();
+        let mut picked = Vec::new();
+        let packages: Vec<(u64, String, PathBuf, Priority)> = st
+            .packages
+            .iter()
+            .map(|p| (p.id, p.name.clone(), folder_of(p, base), p.priority))
+            .collect();
+        st.items.retain(|i| {
+            if !i.selected {
+                return true;
+            }
+            if let Some((_, name, folder, prio)) = packages.iter().find(|p| p.0 == i.package) {
+                picked.push(Picked {
+                    url: i.url.to_string(),
+                    name: i.name.clone(),
+                    package: name.clone(),
+                    folder: folder.clone(),
+                    priority: *prio,
+                    size: i.size,
+                });
+            }
+            false
+        });
+        st.drop_empty_packages();
         picked
-            .into_iter()
-            .map(|i| Picked {
-                url: i.url.into(),
-                name: i.name,
-            })
-            .collect()
     }
 
     /// Avisos pendientes; se vacían al leerlos.
@@ -251,27 +418,74 @@ impl Grabber {
         std::mem::take(&mut *self.shared.notes.lock().expect("avisos envenenados"))
     }
 
-    pub fn snapshot(&self) -> Vec<GrabRow> {
-        self.shared
-            .items()
+    /// Los paquetes con sus archivos, en el orden en que llegaron.
+    pub fn snapshot(&self, base: &Path) -> Vec<GrabPackage> {
+        let st = self.shared.state();
+        st.packages
             .iter()
-            .map(|i| GrabRow {
-                name: i.name.clone(),
-                size: i.size.map(format::bytes).unwrap_or_default(),
-                bytes: i.size,
-                source: i.source.clone(),
-                status: match &i.check {
-                    Check::Checking => "Comprobando…".into(),
-                    Check::Online { resumable: true } => "Disponible".into(),
-                    Check::Online { resumable: false } => {
-                        "Disponible (una conexión, sin reanudar)".into()
-                    }
-                    Check::Offline(e) => format!("No disponible: {e}"),
-                },
-                check: i.check.clone(),
-                selected: i.selected,
+            .map(|p| GrabPackage {
+                id: p.id,
+                name: p.name.clone(),
+                folder: folder_of(p, base),
+                priority: p.priority,
+                items: st
+                    .items
+                    .iter()
+                    .filter(|i| i.package == p.id)
+                    .map(|i| GrabItem {
+                        id: i.id,
+                        name: i.name.clone(),
+                        host: i.url.host_str().unwrap_or("").to_owned(),
+                        size: i.size,
+                        check: i.check.clone(),
+                        selected: i.selected,
+                    })
+                    .collect(),
             })
+            .filter(|p| !p.items.is_empty())
             .collect()
+    }
+}
+
+fn folder_of(p: &Package, base: &Path) -> PathBuf {
+    p.folder
+        .clone()
+        .unwrap_or_else(|| base.join(omni_core::filename::sanitize(&p.name)))
+}
+
+fn guess_name(url: &Url) -> String {
+    omni_core::filename::from_url(url)
+        .unwrap_or_else(|| url.host_str().unwrap_or("archivo").to_owned())
+}
+
+/// Nombre de paquete para un archivo suelto: el nombre sin extensiones ni
+/// numeración de partes, para que los volúmenes de un mismo archivo vayan
+/// juntos ("fotos.part2.rar" → "fotos", "copia.7z.001" → "copia").
+pub fn package_name(file: &str) -> String {
+    let mut stem = file;
+    // Hasta tres extensiones: ".part1.rar", ".tar.gz", ".7z.001".
+    for _ in 0..3 {
+        let Some((head, ext)) = stem.rsplit_once('.') else {
+            break;
+        };
+        let lower = ext.to_ascii_lowercase();
+        let is_part = lower
+            .strip_prefix("part")
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+        let is_ext = !head.is_empty()
+            && (ext.len() <= 5 || is_part)
+            && (lower.chars().all(|c| c.is_ascii_alphanumeric()))
+            && (lower.chars().any(|c| c.is_ascii_alphabetic())
+                || lower.chars().all(|c| c.is_ascii_digit()) && lower.len() == 3);
+        if !is_ext {
+            break;
+        }
+        stem = head;
+    }
+    if stem.is_empty() {
+        file.to_owned()
+    } else {
+        stem.to_owned()
     }
 }
 
@@ -289,14 +503,6 @@ fn short_error(e: &omni_core::Error) -> String {
     }
 }
 
-/// "ejemplo.com/descargas/" para mostrar de dónde salió un enlace.
-fn short(url: &Url) -> String {
-    let host = url.host_str().unwrap_or("");
-    let path = url.path();
-    let dir = &path[..path.rfind('/').map_or(0, |p| p + 1)];
-    format!("{host}{dir}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,53 +510,75 @@ mod tests {
     use omni_testserver::{ServerConfig, TestServer, pseudo_random_bytes};
     use std::time::{Duration, Instant};
 
-    async fn wait_checked(g: &Grabber, n: usize) -> Vec<GrabRow> {
+    async fn wait_checked(g: &Grabber, n: usize) -> Vec<GrabPackage> {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let rows = g.snapshot();
-            if rows.len() == n && rows.iter().all(|r| r.check != Check::Checking) {
-                return rows;
+            let pkgs = g.snapshot(Path::new("/descargas"));
+            let items: Vec<_> = pkgs.iter().flat_map(|p| &p.items).collect();
+            if items.len() == n && items.iter().all(|i| i.check != Check::Checking) {
+                return pkgs;
             }
-            assert!(Instant::now() < deadline, "sin terminar: {rows:?}");
+            assert!(Instant::now() < deadline, "sin terminar: {pkgs:?}");
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
 
+    #[test]
+    fn package_names() {
+        assert_eq!(package_name("asturias-2026.part1.rar"), "asturias-2026");
+        assert_eq!(package_name("asturias-2026.part12.rar"), "asturias-2026");
+        assert_eq!(package_name("copia.7z.001"), "copia");
+        assert_eq!(package_name("linux.tar.gz"), "linux");
+        assert_eq!(
+            package_name("ubuntu-24.04.3-desktop-amd64.iso"),
+            "ubuntu-24.04.3-desktop-amd64"
+        );
+        assert_eq!(package_name("SHA256SUMS"), "SHA256SUMS");
+        assert_eq!(package_name(".bashrc"), ".bashrc");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn shows_files_before_downloading() {
+    async fn groups_into_packages_and_picks_selected() {
         let server = TestServer::start(pseudo_random_bytes(5000, 1), ServerConfig::default()).await;
         let net = Network::system_default().unwrap();
         let g = Grabber::new(Handle::current(), net.client().clone());
 
         let text = format!(
-            "{} y {}",
-            server.url("pelicula.mkv"),
-            server.url("subtitulos.srt")
+            "{} {} {}",
+            server.url("fotos.part1.rar"),
+            server.url("fotos.part2.rar"),
+            server.url("pelicula.mkv")
         );
-        assert_eq!(g.analyze(&text), Ok(2));
-        let rows = wait_checked(&g, 2).await;
-        assert_eq!(rows[0].name, "pelicula.mkv");
-        assert_eq!(rows[0].size, "4,9 KiB");
-        assert_eq!(rows[0].check, Check::Online { resumable: true });
-        assert!(rows.iter().all(|r| r.selected));
+        assert_eq!(g.analyze(&text), Ok(3));
+        let pkgs = wait_checked(&g, 3).await;
+        assert_eq!(pkgs.len(), 2);
+        assert_eq!(pkgs[0].name, "fotos");
+        assert_eq!(pkgs[0].items.len(), 2);
+        assert_eq!(pkgs[0].folder, Path::new("/descargas/fotos"));
+        assert_eq!(pkgs[1].name, "pelicula");
+        assert_eq!(pkgs[1].items[0].size, Some(5000));
+        assert_eq!(pkgs[1].items[0].check, Check::Online { resumable: true });
 
         // Repetir los mismos enlaces no los duplica.
         assert!(g.analyze(&text).is_err());
         assert!(g.analyze("sin enlaces").is_err());
 
-        // Solo se descarga lo marcado.
-        g.set_selected(1, false);
-        let picked = g.take_selected();
+        // Propiedades del paquete y selección.
+        g.rename_package(pkgs[0].id, "Viaje");
+        g.set_package_priority(pkgs[0].id, Priority::High);
+        g.set_item_selected(pkgs[0].items[1].id, false);
+        g.set_package_selected(pkgs[1].id, false);
+        let picked = g.take_selected(Path::new("/descargas"));
         assert_eq!(picked.len(), 1);
-        assert_eq!(picked[0].name, "pelicula.mkv");
-        assert_eq!(g.snapshot().len(), 1);
-        g.clear();
-        assert!(g.snapshot().is_empty());
-    }
+        assert_eq!(picked[0].name, "fotos.part1.rar");
+        assert_eq!(picked[0].package, "Viaje");
+        assert_eq!(picked[0].folder, Path::new("/descargas/Viaje"));
+        assert_eq!(picked[0].priority, Priority::High);
 
-    #[test]
-    fn short_source() {
-        let u = Url::parse("https://ejemplo.com/a/b/c.zip?x=1").unwrap();
-        assert_eq!(short(&u), "ejemplo.com/a/b/");
+        // Lo no marcado sigue en el capturador.
+        let left = g.snapshot(Path::new("/d"));
+        assert_eq!(left.iter().map(|p| p.items.len()).sum::<usize>(), 2);
+        g.clear();
+        assert!(g.snapshot(Path::new("/d")).is_empty());
     }
 }
