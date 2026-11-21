@@ -1,144 +1,123 @@
+<div align="center">
+
 # OmniLoad
 
-Gestor de descargas de escritorio escrito en Rust, pensado como alternativa
-rápida y ligera a JDownloader. Funciona en Windows, Linux y macOS.
+**Descarga más rápido, con todo ordenado y sin anuncios.**
 
-> Estado: **fase 1**, núcleo por línea de comandos, y una primera versión de la
-> interfaz nativa (Slint).
+Un gestor de descargas libre y gratuito para Windows, macOS y Linux.
+Copias un enlace y OmniLoad se encarga del resto.
 
-## Interfaz gráfica
+![Windows](https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)
+![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black)
+![Licencia GPL-3.0](https://img.shields.io/badge/licencia-GPL--3.0-blue?style=flat-square)
+[![Pruebas](https://github.com/Danijimzzz/OmniLoad/actions/workflows/ci.yml/badge.svg)](https://github.com/Danijimzzz/OmniLoad/actions)
 
-```sh
-cargo run --release -p omni-gui            # abre la ventana
-cargo run --release -p omni-gui -- <url>   # y analiza ese enlace
-```
+<img src="docs/capturas/descargas.png" alt="La ventana de OmniLoad descargando varios paquetes a la vez" width="860">
 
-El ejecutable queda en `target/release/omniload(.exe)`. Funciona como el
-capturador de enlaces de JDownloader:
+</div>
 
-1. Pega uno o varios enlaces (sueltos o dentro de un texto) y pulsa
-   **Analizar enlaces**.
-2. La pestaña **Capturador de enlaces** enseña los archivos encontrados, con
-   nombre, tamaño y si están disponibles, antes de descargar nada. Si el enlace
-   es una página web, aparecen los archivos enlazados desde ella (un nivel, sin
-   seguir otras páginas).
-3. Marca los que quieras, elige carpeta y conexiones y pulsa **Descargar
-   seleccionados**.
+## ¿Por qué OmniLoad?
 
-La pestaña **Descargas** muestra progreso, velocidad, tiempo restante,
-conexiones activas (y el límite si el servidor rechaza conexiones de más) y
-los botones de pausar y reanudar.
+- ⚡ **Más rápido.** Cada archivo se baja por varios trozos a la vez, así
+  aprovechas toda tu conexión aunque el servidor vaya lento.
+- ⏯️ **Nunca empiezas de cero.** Pausa cuando quieras; si se corta internet,
+  se apaga el ordenador o se va la luz, sigue justo donde lo dejó.
+- 📋 **Copia y listo.** Copia un enlace en cualquier sitio y OmniLoad lo detecta
+  solo. No hace falta pegar nada.
+- 🔎 **Mira antes de bajar.** Antes de descargar te enseña qué hay detrás de
+  cada enlace: nombre, tamaño y si sigue disponible.
+- 🗂️ **Todo en su sitio.** Cada grupo de archivos va a su propia carpeta, con
+  su nombre.
+- 🎨 **A tu gusto.** Cinco temas, modo oscuro y colores para elegir.
+- 🪶 **Ligero y libre.** Programa nativo, sin navegador escondido dentro, sin
+  anuncios y con el código abierto.
 
-Pausar guarda el progreso; reanudar sigue donde se quedó. Al cerrar la ventana
-se pausa todo. La lista aún no se guarda entre sesiones (llegará con
-`omni-store` en la fase 2), pero volver a añadir el mismo enlace en la misma
-carpeta reanuda desde el `.part`.
+## Cómo se usa
 
-En Linux hacen falta `libfontconfig` y `libxkbcommon-x11` (vienen en cualquier
-escritorio). Para compilar: `sudo apt install libfontconfig-dev libxkbcommon-dev`
-en Debian/Ubuntu.
+1. **Copia los enlaces** que quieras bajar (de una web, un correo, un chat…).
+   También puedes pulsar **Añadir enlaces** y pegarlos.
+2. **Elige qué bajar.** OmniLoad comprueba cada enlace y agrupa los archivos
+   que van juntos (por ejemplo, las partes de un mismo `.rar`). Si pegas una
+   página web, encuentra los archivos que enlaza.
+3. **Pulsa Iniciar descargas** y olvídate. Puedes cerrar la ventana cuando
+   quieras: la próxima vez continúa donde se quedó.
 
-## Línea de comandos
+## Lo que puedes hacer
 
-La CLI sigue siendo la mejor forma de depurar, porque muestra los errores en la
-terminal:
+### Capturador de enlaces
 
-```sh
-omni get https://ejemplo.com/archivo.iso              # a la carpeta actual
-omni get https://ejemplo.com/archivo.iso -d Descargas # a otra carpeta
-omni get https://ejemplo.com/archivo.iso -o copia.iso # nombre exacto
-omni get <url> -x 16 --sha256 <hash>                  # 16 conexiones y verificación
-```
+<img src="docs/capturas/capturador.png" alt="El capturador de enlaces con varios paquetes comprobados" width="860">
 
-Ctrl+C pausa la descarga. Volver a ejecutar el mismo comando la reanuda donde
-se quedó, también tras un cierre forzado o un corte de luz.
+Todo lo que copias o pegas llega aquí antes de descargarse. Verás cada archivo
+con su tamaño y si está **en línea** o **caído**, agrupado en paquetes. Marca lo
+que quieras, cambia el nombre o la carpeta del paquete y elige su prioridad.
 
-## Cómo descarga
+### Aviso al copiar enlaces
 
-1. **Sondeo**: un `GET` con `Range: bytes=0-0` averigua tamaño, nombre, ETag,
-   Last-Modified y si el servidor acepta rangos.
-2. **Reserva**: se crea `archivo.part` con su tamaño final, para detectar la
-   falta de espacio al principio.
-3. **Cola de bloques**: el archivo se reparte en bloques de 8 MiB. Empiezan 8
-   conexiones repartidas a lo largo del archivo; cada una pide con una sola
-   petición HTTP todo el tramo libre que tiene por delante y va encadenando
-   bloques mientras el siguiente siga libre. Así la conexión más rápida
-   descarga más y el servidor recibe pocas peticiones (algunos limitan cuántas
-   aceptan por minuto).
-4. **Final rápido**: cuando no quedan bloques libres, una conexión ociosa parte
-   por la mitad el bloque al que más le falta (mínimo 1 MiB por mitad) o, si ya
-   es pequeño, compite con él; gana la primera que acabe.
-5. **Escritura directa**: cada conexión escribe en su posición del archivo
-   final (`pwrite` en Unix, `seek_write` en Windows); no hay paso de "unir
-   partes".
-6. **Reanudación**: cada medio segundo se hace `fsync` del `.part` y se guarda
-   el progreso en `archivo.part.omni`. Al reanudar se comprueba que tamaño,
-   ETag y Last-Modified no hayan cambiado; si cambiaron, se empieza de cero.
-   Además cada petición lleva `If-Range`, así que un cambio a mitad de
-   descarga se detecta en vez de mezclar dos versiones del archivo.
-7. **Reintentos**: cortes de red, 5xx y 429 se reintentan con espera
-   exponencial (1, 2, 4… hasta 60 s, respetando `Retry-After`). 403, 404 y 410
-   marcan el enlace como caducado.
-   Si el servidor rechaza conexiones por exceso (429 o 503 con varias
-   abiertas), se baja al número que acepta, se recuerda ese máximo y se
-   trabaja con él sin volver a probar por encima.
-   Siempre HTTP/1.1: cada conexión es una conexión TCP propia.
-8. **Cierre**: se comprueba el tamaño (y el SHA-256 si se pidió) y se renombra
-   `.part` al nombre final.
+<p>
+<img src="docs/capturas/aviso-compacto.png" alt="Aviso compacto con la rueda de enlaces aptos" height="110">
+&nbsp;
+<img src="docs/capturas/aviso-completo.png" alt="Aviso completo con la lista de enlaces copiados" height="260">
+</p>
 
-Si el servidor no acepta rangos, se descarga en un solo flujo sin reanudación.
+Al copiar enlaces aparece un pequeño aviso abajo a la derecha, sin taparte lo
+que estés haciendo. La rueda se llena de **verde** con los enlaces buenos y de
+**rojo** con los caídos, y con el botón ▶ empiezas a descargar al momento.
+Puedes elegir el aviso **compacto**, el **completo** con la lista de enlaces, o
+quitarlo. Se cierra solo al terminar de comprobar.
 
-### Preparado para varias redes
+### Descargas
 
-La descarga multi-red irá al final del plan, pero el motor ya trabaja con
-varias redes:
+- Varias descargas a la vez, y tú decides cuántas.
+- Prioridad alta, normal o baja para cada paquete.
+- Velocidad, tiempo restante y progreso de cada archivo y de cada paquete.
+- Iniciar, pausar o detener todo con un clic, y buscar entre tus descargas.
+- Si un servidor limita las conexiones, OmniLoad se adapta solo.
+- Si un enlace caduca, te lo dice claramente.
 
-- `DownloadOptions::networks` acepta una lista de `Network`, cada una con su
-  propio cliente HTTP, y el motor abre sus conexiones en cada una.
-- La cola de bloques sabe qué red descarga cada bloque y, al competir por el
-  último trozo, prefiere ayudar a otra red.
-- El límite de conexiones y el progreso van por red.
-- La prueba `splits_blocks_between_networks` descarga con dos redes a la vez.
+### Apariencia
 
-Lo que faltará entonces es descubrir las interfaces del equipo y construir el
-cliente HTTP de cada una atado a su interfaz (en `platform/`), sin tocar la
-cola ni el motor.
+<img src="docs/capturas/temas.png" alt="Ajustes de apariencia con los cinco temas" width="860">
 
-## Estructura
+Elige entre **Cristal claro**, **Cristal oscuro**, **Claro**, **Grafito** y
+**Alto contraste**, o deja que cambie solo entre claro y oscuro con tu sistema.
+También puedes elegir el color de acento, una vista más compacta para ver más
+descargas y dónde se muestran los detalles.
 
-```
-crates/
-  omni-core/        motor de descarga (biblioteca)
-  omni-grab/        capturador de enlaces: archivo o página con archivos
-    src/platform/   todo el código propio de cada sistema operativo
-  omni-testserver/  servidor HTTP falso para las pruebas (cortes, 503, ETag)
-apps/
-  omni-cli/         binario `omni`
-  omni-gui/         binario `omniload`, la ventana (Slint)
-    ui/app.slint    diseño de la ventana
-```
+## Descargar
 
-## Desarrollo
+Aún no hay instaladores publicados: llegarán a la página de
+[Releases](https://github.com/Danijimzzz/OmniLoad/releases) para Windows, macOS
+y Linux.
 
-```sh
-cargo test --workspace      # pruebas, incluida la de matar el proceso y reanudar
-cargo clippy --workspace --all-targets -- -D warnings
-cargo build --release -p omni-cli   # target/release/omni(.exe)
-cargo build --release -p omni-gui   # target/release/omniload(.exe)
-```
+Mientras tanto puedes compilarlo tú mismo en dos pasos:
 
-Antes de subir cambios, pasa estas tres comprobaciones en tu equipo (son las
-mismas que haría el CI):
+1. Instala [Rust](https://rustup.rs).
+2. Descarga este proyecto y, dentro de su carpeta, ejecuta:
 
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
+   ```sh
+   cargo run --release -p omni-gui
+   ```
 
-Además, GitHub Actions compila y prueba en Windows, Linux y macOS en cada
-cambio.
+En Linux necesitas además `libfontconfig-dev` y `libxkbcommon-dev`
+(`sudo apt install libfontconfig-dev libxkbcommon-dev` en Debian/Ubuntu).
+
+## Próximamente
+
+- La lista de descargas se guardará entre sesiones.
+- Límite de velocidad.
+- Descomprimir automáticamente, con contraseñas.
+- Descargar usando varias conexiones a internet a la vez (por ejemplo, wifi y
+  cable juntos).
+
+## Para desarrolladores
+
+¿Quieres compilar, usar la versión de terminal (`omni`) o saber cómo funciona
+por dentro? Está todo en [docs/DESARROLLO.md](docs/DESARROLLO.md).
 
 ## Licencia
 
-GPL-3.0-or-later. Ver [LICENSE](LICENSE).
+OmniLoad es software libre bajo la licencia
+[GPL-3.0-or-later](LICENSE): puedes usarlo, estudiarlo, compartirlo y
+mejorarlo.

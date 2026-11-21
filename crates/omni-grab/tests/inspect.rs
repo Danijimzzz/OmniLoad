@@ -14,7 +14,7 @@ async fn start() -> String {
             "/",
             get(|| async {
                 Html(
-                    r#"<html><body>
+                    r#"<html><head><title>Mis archivos</title></head><body>
                     <a href="a.bin">A</a> <a href="/sub/b.zip">B</a>
                     <a href="otra.html">página</a>
                     </body></html>"#,
@@ -61,7 +61,8 @@ async fn file_and_page() {
         .await
         .unwrap();
     match page {
-        Found::Page { links, .. } => {
+        Found::Page { links, title, .. } => {
+            assert_eq!(title.as_deref(), Some("Mis archivos"));
             let links: Vec<String> = links.into_iter().map(String::from).collect();
             assert_eq!(
                 links,

@@ -12,12 +12,15 @@ name = "omniload"
 path = "src/main.rs"
 
 [dependencies]
+arboard.workspace = true
 dirs.workspace = true
 omni-core.workspace = true
 omni-grab.workspace = true
 reqwest.workspace = true
 rfd.workspace = true
-slint.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slint = { workspace = true, features = ["unstable-winit-030"] }
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

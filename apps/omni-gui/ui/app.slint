@@ -1,367 +1,1875 @@
-// Ventana principal de OmniLoad.
+// Ventana principal de OmniLoad, con la distribución de JDownloader: pestañas
+// Descargas / Capturador de enlaces, tabla en árbol de paquetes, resumen y
+// barra inferior. Ajustes › Apariencia cambia el tema en caliente.
 //
-// La lógica vive en Rust (src/main.rs); aquí solo está la presentación. Cada
-// fila de la lista es un `DownloadRow` que Rust rellena cuatro veces por
-// segundo a partir del `Progress` del motor.
+// La lógica vive en Rust (src/); aquí solo está la presentación.
 
-import { Button, CheckBox, LineEdit, ListView, Palette, ProgressIndicator, SpinBox, TabWidget, TextEdit } from "std-widgets.slint";
+import { ComboBox, LineEdit, ListView, Palette, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 
-// Estado de una descarga, tal como lo pinta la interfaz.
-export enum RowState { starting, running, pausing, paused, done, failed }
+// ---------------------------------------------------------------- Tema ----
 
-export struct DownloadRow {
+// Los cinco temas aprobados. `kind`: 0 Cristal claro, 1 Cristal oscuro,
+// 2 Claro, 3 Grafito, 4 Alto contraste.
+export global Theme {
+    in-out property <int> kind: 0;
+    in-out property <bool> follow-system: true;
+    // Lo rellena la ventana al arrancar con el modo del sistema.
+    in-out property <bool> system-dark: false;
+    in-out property <int> accent-index: 0;
+    in-out property <bool> compact: false;
+    in-out property <bool> reduce-transparency: false;
+
+    // Tema efectivo: con "según el sistema", cada tema pasa a su pareja
+    // clara u oscura (Cristal claro ↔ Cristal oscuro, Claro ↔ Grafito).
+    out property <int> eff: !follow-system || kind == 4 ? kind
+        : kind <= 1 ? (system-dark ? 1 : 0)
+        : (system-dark ? 3 : 2);
+    out property <bool> dark: eff == 1 || eff == 3 || eff == 4;
+    out property <bool> glass: eff <= 1 && !reduce-transparency;
+    // Paleta de los paneles: "Reducir transparencia" usa la plana equivalente.
+    out property <int> pal: glass || eff > 1 ? eff : (eff == 0 ? 2 : 3);
+
+    out property <color> wall: [#eef1f6, #0d1017, #eef0f3, #121418, #000000][eff];
+    out property <color> blob1: [#78a0f029, #5078dc1f, #00000000, #00000000, #00000000][eff];
+    out property <color> blob2: [#beaaf01f, #8c64dc17, #00000000, #00000000, #00000000][eff];
+    out property <color> panel: [#ffffff80, #1c223685, #ffffff, #1c1f25, #000000][pal];
+    out property <color> panel2: [#ffffff5c, #28304a61, #f7f8fa, #22262d, #0d0d0d][pal];
+    out property <color> head: [#ffffff8c, #323a5880, #f3f4f7, #252930, #000000][pal];
+    out property <color> rim: [#ffffffc7, #ffffff29, #d9dde4, #323844, #ffffff][pal];
+    out property <color> spec: [#fffffff2, #ffffff42, #00000000, #00000000, #00000000][pal];
+    out property <color> shadow: [#1e285029, #00000073, #0000000d, #00000000, #00000000][pal];
+    out property <color> text: [#0d1424, #f2f5fb, #14181f, #e9ecf2, #ffffff][pal];
+    out property <color> muted: [#3e4a5f, #b3bdd0, #4f5867, #a3acbb, #e6e6e6][pal];
+    out property <color> line: [#141e3c1a, #ffffff14, #e8eaef, #2b3039, #666666][pal];
+    out property <color> track: [#141e3c1f, #ffffff24, #e3e6ec, #323844, #4d4d4d][pal];
+
+    out property <color> accent: eff == 4 ? #ffd400 : dark
+        ? [#6fb1ff, #b39bff, #5fd49a, #ffab6b, #ff8fc0, #c9d1de][accent-index]
+        : [#0a5fd0, #6a3fd6, #137a4b, #b4500a, #b8306a, #3d4654][accent-index];
+    out property <color> on-accent: eff == 4 ? #000000 : dark ? #06142b : #ffffff;
+    out property <color> selbg: eff == 4 ? #332b00 : accent.with-alpha(0.16);
+    out property <color> ok: eff == 4 ? #6dff9e : dark ? #5fd49a : #127a46;
+    out property <color> warn: eff == 4 ? #ffd400 : dark ? #f3b860 : #93560a;
+    out property <color> err: eff == 4 ? #ff7b7b : dark ? #ff8a80 : #b3261e;
+
+    out property <length> r: eff <= 1 ? 18px : eff == 4 ? 2px : 8px;
+    out property <length> r2: eff <= 1 ? 10px : eff == 4 ? 2px : 6px;
+    out property <length> lw: eff == 4 ? 2px : 1px;
+    out property <length> row-h: compact ? 26px : 34px;
+    out property <length> font: compact ? 12.5px : 13px;
+
+    // Color de un estado: 0 acento, 1 bien, 2 aviso, 3 error, 4 apagado.
+    public pure function tone(t: int) -> color {
+        if t == 1 { return ok; }
+        if t == 2 { return warn; }
+        if t == 3 { return err; }
+        if t == 4 { return muted; }
+        return accent;
+    }
+}
+
+// ----------------------------------------------------------- Modelos ----
+
+export struct DlRow {
+    key: int,
+    is-package: bool,
+    expanded: bool,
+    selected: bool,
     name: string,
-    folder: string,
-    state: RowState,
-    // 0..1; negativo si aún no se sabe el tamaño.
+    host: string,
+    size: string,
+    // 0..1; negativo si no se conoce el tamaño.
     fraction: float,
-    status: string,
-    sizes: string,
+    progress: string,
     speed: string,
     eta: string,
-    connections: string,
-    detail: string,
-}
-
-// Estado de un enlace del capturador.
-export enum GrabState { checking, online, offline }
-
-export struct GrabRow {
-    name: string,
-    size: string,
-    source: string,
+    priority: string,
     status: string,
-    state: GrabState,
+    tone: int,
+}
+
+export struct GrabTreeRow {
+    key: int,
+    is-package: bool,
+    expanded: bool,
     selected: bool,
+    checked: bool,
+    dim: bool,
+    name: string,
+    host: string,
+    size: string,
+    avail: string,
+    tone: int,
+    priority: string,
+    dest: string,
 }
 
-// Una fila del capturador: casilla, nombre, tamaño, estado y origen.
-component GrabLine inherits Rectangle {
-    in property <GrabRow> item;
-    callback toggled(bool);
-    callback remove();
+export struct Stat {
+    label: string,
+    value: string,
+}
 
-    background: Palette.alternate-background;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: Palette.border;
+// ------------------------------------------------------ Componentes ----
 
-    HorizontalLayout {
-        padding: 8px;
-        spacing: 10px;
-        CheckBox {
-            checked: item.selected;
-            enabled: item.state != GrabState.offline;
-            toggled => { root.toggled(self.checked); }
-        }
-        VerticalLayout {
-            horizontal-stretch: 1;
-            alignment: center;
-            Text {
-                text: item.name;
-                font-weight: 600;
-                overflow: elide;
-            }
-            Text {
-                text: item.source;
-                opacity: 0.6;
-                font-size: 11px;
-                overflow: elide;
-            }
-        }
-        Text {
-            text: item.size;
-            vertical-alignment: center;
-            min-width: 80px;
-            horizontal-alignment: right;
-        }
-        Text {
-            text: item.status;
-            vertical-alignment: center;
-            width: 230px;
-            overflow: elide;
-            color: item.state == GrabState.offline ? #d13438
-                : item.state == GrabState.online ? #2e9d4e
-                : Palette.foreground;
-        }
-        Button {
-            text: "Quitar";
-            clicked => { root.remove(); }
-        }
+component Icon inherits Path {
+    in property <length> size: 14px;
+    in property <bool> filled: false;
+    in property <color> ink: Theme.text;
+    width: size;
+    height: size;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: filled ? transparent : ink;
+    fill: filled ? ink : transparent;
+    stroke-width: 2.2px;
+    stroke-line-cap: round;
+}
+
+// Un panel de la ventana: cristal (translúcido, borde claro, brillo arriba y
+// sombra) o plano, según el tema.
+component Panel inherits Rectangle {
+    background: Theme.panel;
+    border-color: Theme.rim;
+    border-width: Theme.lw;
+    border-radius: Theme.r;
+    drop-shadow-blur: Theme.glass ? 32px : 0px;
+    drop-shadow-offset-y: Theme.glass ? 12px : 0px;
+    drop-shadow-color: Theme.shadow;
+    @children
+    Rectangle {
+        x: Theme.r;
+        y: 1px;
+        width: max(0px, parent.width - 2 * Theme.r);
+        height: 1px;
+        background: Theme.spec;
     }
 }
 
-component Card inherits Rectangle {
-    in property <DownloadRow> item;
-    callback pause();
-    callback resume();
-    callback open-folder();
-    callback remove();
+component Btn inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> icon-filled: false;
+    in property <color> icon-color: primary ? Theme.on-accent : Theme.text;
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    in property <string> label: text;
+    callback clicked();
 
-    background: Palette.alternate-background;
-    border-radius: 8px;
-    border-width: 1px;
-    border-color: Palette.border;
-
-    VerticalLayout {
-        padding: 12px;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { if enabled { clicked(); } }
+    height: Theme.compact ? 30px : 34px;
+    min-width: max(self.height, content.min-width);
+    horizontal-stretch: 0;
+    border-radius: Theme.r2;
+    border-width: Theme.lw;
+    border-color: primary ? Theme.accent : Theme.rim;
+    background: primary ? Theme.accent : touch.has-hover ? Theme.head : Theme.panel2;
+    opacity: enabled ? 1 : 0.45;
+    content := HorizontalLayout {
+        padding-left: text == "" ? 0px : 12px;
+        padding-right: text == "" ? 0px : 12px;
         spacing: 6px;
-
-        HorizontalLayout {
-            spacing: 8px;
-            Text {
-                text: item.name;
-                font-weight: 700;
-                font-size: 14px;
-                overflow: elide;
-                horizontal-stretch: 1;
-            }
-            Text {
-                text: item.status;
-                color: item.state == RowState.failed ? #d13438
-                    : item.state == RowState.done ? #2e9d4e
-                    : Palette.foreground;
-            }
+        alignment: center;
+        if icon != "": Icon {
+            y: (parent.height - self.height) / 2;
+            commands: icon;
+            filled: icon-filled;
+            ink: icon-color;
         }
-
-        ProgressIndicator {
-            progress: max(item.fraction, 0);
-            indeterminate: item.fraction < 0 && (item.state == RowState.running || item.state == RowState.starting);
+        if text != "": Text {
+            text: root.text;
+            color: primary ? Theme.on-accent : Theme.text;
+            font-size: Theme.font;
+            font-weight: primary ? 600 : 500;
+            vertical-alignment: center;
         }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
 
-        HorizontalLayout {
-            spacing: 16px;
-            Text { text: item.sizes; }
-            Text { text: item.speed; }
-            Text { text: item.eta; }
-            Text {
-                text: item.connections;
-                horizontal-stretch: 1;
-                horizontal-alignment: right;
-                overflow: elide;
-            }
+component Check inherits Rectangle {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback toggled(bool);
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: checked;
+    accessible-label: label;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border-width: checked ? 0px : 1.5px;
+    border-color: Theme.muted;
+    background: checked ? Theme.accent : transparent;
+    opacity: enabled ? 1 : 0.4;
+    if checked: Icon {
+        size: 12px;
+        x: 2px;
+        y: 2px;
+        commands: "M5 12l5 5 9-10";
+        ink: Theme.on-accent;
+        stroke-width: 3px;
+    }
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
         }
+    }
+}
 
-        if item.detail != "": Text {
-            text: item.detail;
-            wrap: word-wrap;
-            color: item.state == RowState.failed ? #d13438 : Palette.foreground;
-        }
-
-        HorizontalLayout {
-            spacing: 8px;
-            alignment: start;
-            Text {
-                text: item.folder;
-                opacity: 0.7;
-                overflow: elide;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-            }
-            if item.state == RowState.running || item.state == RowState.starting: Button {
-                text: "Pausar";
-                clicked => { root.pause(); }
-            }
-            if item.state == RowState.paused || item.state == RowState.failed: Button {
-                text: item.state == RowState.failed ? "Reintentar" : "Reanudar";
-                primary: true;
-                clicked => { root.resume(); }
-            }
-            Button {
-                text: "Abrir carpeta";
-                clicked => { root.open-folder(); }
-            }
-            Button {
-                text: "Quitar";
-                enabled: item.state != RowState.pausing;
-                clicked => { root.remove(); }
+component LabeledCheck inherits HorizontalLayout {
+    in property <string> text;
+    in-out property <bool> checked;
+    callback toggled(bool);
+    spacing: 8px;
+    alignment: start;
+    Check {
+        y: (parent.height - self.height) / 2;
+        checked <=> root.checked;
+        label: root.text;
+        toggled(v) => { root.toggled(v); }
+    }
+    Text {
+        text: root.text;
+        color: Theme.text;
+        font-size: Theme.font;
+        vertical-alignment: center;
+        TouchArea {
+            clicked => {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
             }
         }
     }
 }
+
+component Sep inherits Rectangle {
+    width: 1px;
+    height: 24px;
+    background: Theme.rim;
+}
+
+component Bar inherits Rectangle {
+    in property <float> fraction;
+    in property <string> text;
+    in property <color> fill: Theme.accent;
+    height: 16px;
+    border-radius: 5px;
+    background: Theme.track;
+    clip: true;
+    Rectangle {
+        x: 0;
+        width: parent.width * max(0, root.fraction);
+        background: root.fill;
+        opacity: 0.85;
+    }
+    Text {
+        x: 6px;
+        text: root.text;
+        font-size: 11px;
+        font-weight: 600;
+        color: Theme.text;
+        vertical-alignment: center;
+    }
+}
+
+component Cell inherits Text {
+    font-size: Theme.font;
+    color: Theme.text;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+component HeadCell inherits Rectangle {
+    in property <string> text;
+    border-width: 0;
+    Text {
+        x: 10px;
+        width: parent.width - 12px;
+        text: root.text;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: Theme.muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        background: Theme.line;
+    }
+}
+
+component Expander inherits Rectangle {
+    in property <bool> expanded;
+    callback toggle();
+    width: 22px;
+    height: 22px;
+    accessible-role: button;
+    accessible-label: expanded ? "Contraer paquete" : "Desplegar paquete";
+    accessible-action-default => { toggle(); }
+    Icon {
+        size: 12px;
+        x: 5px;
+        y: 5px;
+        commands: expanded ? "M6 9l6 6 6-6" : "M9 6l6 6-6 6";
+        stroke-width: 3px;
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggle(); }
+    }
+}
+
+component FolderIcon inherits Icon {
+    size: 16px;
+    commands: "M3 6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z";
+    ink: Theme.accent;
+    stroke-width: 2px;
+}
+
+// Columnas de la tabla de descargas.
+global DlCols {
+    out property <length> host: 150px;
+    out property <length> size: 90px;
+    out property <length> progress: 170px;
+    out property <length> speed: 95px;
+    out property <length> eta: 95px;
+    out property <length> prio: 75px;
+    out property <length> status: 210px;
+}
+
+component DlHeader inherits Rectangle {
+    height: 32px;
+    background: Theme.head;
+    HorizontalLayout {
+        HeadCell { text: "Nombre"; horizontal-stretch: 1; }
+        HeadCell { text: "Host"; width: DlCols.host; }
+        HeadCell { text: "Tamaño"; width: DlCols.size; }
+        HeadCell { text: "Progreso"; width: DlCols.progress; }
+        HeadCell { text: "Velocidad"; width: DlCols.speed; }
+        HeadCell { text: "Restante"; width: DlCols.eta; }
+        HeadCell { text: "Prioridad"; width: DlCols.prio; }
+        HeadCell { text: "Estado"; width: DlCols.status; }
+    }
+    Rectangle {
+        y: parent.height - Theme.lw;
+        height: Theme.lw;
+        background: Theme.rim;
+    }
+}
+
+component DlLine inherits Rectangle {
+    in property <DlRow> item;
+    callback clicked();
+    callback toggle();
+    height: Theme.row-h;
+    background: item.selected ? Theme.selbg : item.is-package ? Theme.panel2 : transparent;
+    TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            padding-left: item.is-package ? 6px : 58px;
+            padding-right: 8px;
+            spacing: 6px;
+            if item.is-package: Expander {
+                y: (parent.height - self.height) / 2;
+                expanded: item.expanded;
+                toggle => { root.toggle(); }
+            }
+            if item.is-package: FolderIcon { y: (parent.height - self.height) / 2; }
+            Cell {
+                text: item.name;
+                font-weight: item.is-package ? 600 : 400;
+                horizontal-stretch: 1;
+            }
+        }
+        Cell { text: item.host; color: Theme.muted; width: DlCols.host; }
+        Cell { text: item.size; width: DlCols.size; }
+        Rectangle {
+            width: DlCols.progress;
+            Bar {
+                x: 0;
+                width: parent.width - 10px;
+                y: (parent.height - self.height) / 2;
+                fraction: item.fraction;
+                text: item.progress;
+                fill: Theme.tone(item.tone);
+            }
+        }
+        Cell { text: item.speed; width: DlCols.speed; }
+        Cell { text: item.eta; width: DlCols.eta; }
+        Cell { text: item.priority; width: DlCols.prio; }
+        Cell {
+            text: item.status;
+            width: DlCols.status;
+            color: Theme.tone(item.tone);
+            font-weight: 600;
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.line;
+    }
+}
+
+global GrabCols {
+    out property <length> host: 160px;
+    out property <length> size: 90px;
+    out property <length> avail: 230px;
+    out property <length> prio: 75px;
+    out property <length> dest: 240px;
+}
+
+component GrabHeader inherits Rectangle {
+    height: 32px;
+    background: Theme.head;
+    HorizontalLayout {
+        HeadCell { text: "Nombre"; horizontal-stretch: 1; }
+        HeadCell { text: "Host"; width: GrabCols.host; }
+        HeadCell { text: "Tamaño"; width: GrabCols.size; }
+        HeadCell { text: "Disponibilidad"; width: GrabCols.avail; }
+        HeadCell { text: "Prioridad"; width: GrabCols.prio; }
+        HeadCell { text: "Guardar en"; width: GrabCols.dest; }
+    }
+    Rectangle {
+        y: parent.height - Theme.lw;
+        height: Theme.lw;
+        background: Theme.rim;
+    }
+}
+
+component GrabLine inherits Rectangle {
+    in property <GrabTreeRow> item;
+    callback clicked();
+    callback toggle();
+    callback check(bool);
+    height: Theme.row-h;
+    background: item.selected ? Theme.selbg : item.is-package ? Theme.panel2 : transparent;
+    TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            padding-left: item.is-package ? 6px : 38px;
+            padding-right: 8px;
+            spacing: 8px;
+            if item.is-package: Expander {
+                y: (parent.height - self.height) / 2;
+                expanded: item.expanded;
+                toggle => { root.toggle(); }
+            }
+            Check {
+                y: (parent.height - self.height) / 2;
+                checked: item.checked;
+                label: "Incluir " + item.name;
+                toggled(v) => { root.check(v); }
+            }
+            if item.is-package: FolderIcon { y: (parent.height - self.height) / 2; }
+            Cell {
+                text: item.name;
+                font-weight: item.is-package ? 600 : 400;
+                opacity: item.dim ? 0.55 : 1;
+                horizontal-stretch: 1;
+            }
+        }
+        Cell { text: item.host; color: Theme.muted; width: GrabCols.host; }
+        Cell { text: item.size; width: GrabCols.size; }
+        Cell {
+            text: item.avail;
+            width: GrabCols.avail;
+            color: Theme.tone(item.tone);
+            font-weight: 600;
+        }
+        Cell { text: item.priority; width: GrabCols.prio; }
+        Cell { text: item.dest; color: Theme.muted; width: GrabCols.dest; }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.line;
+    }
+}
+
+component FieldLabel inherits Text {
+    font-size: 12px;
+    font-weight: 600;
+    color: Theme.muted;
+}
+
+component SectionTitle inherits Text {
+    font-size: 15px;
+    font-weight: 700;
+    color: Theme.text;
+}
+
+// Botones de opción en fila ("Abajo | A la derecha | Oculto").
+component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    callback changed-by-user(int);
+    border-radius: Theme.r2;
+    border-width: Theme.lw;
+    border-color: Theme.rim;
+    background: Theme.panel2;
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        for opt[i] in options: Rectangle {
+            height: 32px;
+            border-radius: Theme.r2 - 2px;
+            background: i == root.current ? Theme.panel : transparent;
+            border-width: i == root.current ? Theme.lw : 0px;
+            border-color: Theme.rim;
+            accessible-role: button;
+            accessible-label: opt;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                Text {
+                    text: opt;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.current = i;
+                    root.changed-by-user(i);
+                }
+            }
+        }
+    }
+}
+
+component SettingRow inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> subtitle;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    spacing: 16px;
+    VerticalLayout {
+        horizontal-stretch: 1;
+        alignment: center;
+        spacing: 2px;
+        Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.text; }
+        if root.subtitle != "": Text {
+            text: root.subtitle;
+            font-size: 13px;
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+    }
+    @children
+}
+
+// Miniatura de un tema en Ajustes › Apariencia.
+component ThemeCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <color> bg;
+    in property <color> pan;
+    in property <color> bd;
+    in property <length> rad;
+    in property <bool> selected;
+    callback picked();
+    accessible-role: button;
+    accessible-label: title;
+    height: 150px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
+    border-radius: Theme.r2 + 4px;
+    border-width: 2px;
+    border-color: selected ? Theme.accent : transparent;
+    background: Theme.panel2;
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        Rectangle {
+            height: 80px;
+            border-radius: 10px;
+            background: root.bg;
+            border-width: 1px;
+            border-color: #7f7f7f4d;
+            clip: true;
+            Rectangle {
+                x: 8px; y: 8px; width: parent.width * 0.3; height: parent.height - 16px;
+                border-radius: root.rad; background: root.pan; border-width: 1px; border-color: root.bd;
+            }
+            Rectangle {
+                x: parent.width * 0.42; y: 8px; width: parent.width * 0.58 - 8px; height: 18px;
+                border-radius: root.rad; background: root.pan; border-width: 1px; border-color: root.bd;
+            }
+            Rectangle {
+                x: parent.width * 0.42; y: 34px; width: parent.width * 0.58 - 8px; height: 18px;
+                border-radius: root.rad; background: root.pan; border-width: 1px; border-color: root.bd;
+            }
+            Rectangle {
+                x: parent.width * 0.42; y: 60px; width: parent.width * 0.3; height: 6px;
+                border-radius: 3px; background: Theme.accent;
+            }
+        }
+        Text { text: root.title; font-size: 13px; font-weight: 600; color: Theme.text; }
+        Text { text: root.subtitle; font-size: 12px; color: Theme.muted; }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+component Swatch inherits Rectangle {
+    in property <color> c;
+    in property <string> name;
+    in property <bool> selected;
+    callback picked();
+    accessible-role: button;
+    accessible-label: name;
+    width: 32px;
+    height: 32px;
+    border-radius: 16px;
+    background: c;
+    border-width: selected ? 3px : 1px;
+    border-color: selected ? Theme.text : Theme.rim;
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+component TabBtn inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <int> badge: 0;
+    callback clicked();
+    accessible-role: tab;
+    accessible-label: text;
+    height: 38px;
+    border-radius: Theme.r2;
+    border-width: active ? Theme.lw : 0px;
+    border-color: Theme.rim;
+    background: active ? Theme.panel2 : transparent;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        Text {
+            text: root.text;
+            font-size: 14px;
+            font-weight: 600;
+            color: active ? Theme.text : Theme.muted;
+            vertical-alignment: center;
+        }
+        if badge > 0: Rectangle {
+            y: (parent.height - 18px) / 2;
+            height: 18px;
+            min-width: 22px;
+            border-radius: 9px;
+            background: Theme.accent;
+            HorizontalLayout {
+                padding-left: 7px;
+                padding-right: 7px;
+                Text {
+                    text: badge;
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: Theme.on-accent;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ------------------------------------------------------------ Ventana ----
 
 export component AppWindow inherits Window {
     title: "OmniLoad";
     icon: @image-url("icon.png");
-    preferred-width: 900px;
-    preferred-height: 620px;
-    min-width: 640px;
-    min-height: 420px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 980px;
+    min-height: 560px;
+    background: Theme.wall;
+    default-font-size: Theme.font;
 
-    in-out property <string> links;
-    in-out property <string> folder;
-    in-out property <int> connections: 8;
-    // 0 = capturador de enlaces, 1 = descargas.
+    // 0 Descargas, 1 Capturador de enlaces, 2 Ajustes.
     in-out property <int> tab: 0;
-    in property <[GrabRow]> grabbed;
-    in property <string> grab-summary;
-    in property <int> grab-selected;
-    in property <[DownloadRow]> downloads;
+    in-out property <int> settings-section: 1;
     in property <string> message;
     in property <bool> message-is-error;
 
-    callback analyze(/* texto pegado */ string);
-    callback choose-folder();
-    // Capturador.
-    callback grab-toggle(int, bool);
-    callback grab-select-all(bool);
-    callback grab-remove(int);
-    callback grab-clear();
-    callback grab-download(/* carpeta */ string, /* conexiones */ int);
+    // Ajustes que se guardan.
+    in-out property <int> properties-panel: 0;
+    in-out property <int> max-active: 3;
+    in-out property <int> connections: 8;
+    in-out property <bool> watch-clipboard: true;
+    in-out property <int> clip-popup: 1;
+    in-out property <bool> package-folders: true;
+    in-out property <bool> single-file-folders: true;
+    in-out property <bool> clip-autoclose: true;
+    in-out property <string> download-dir;
+
+    // Cabecera.
+    in property <string> header-speed;
+    in property <string> speed-path: "M 0 28 L 140 28";
+
     // Descargas.
-    callback pause(int);
-    callback resume(int);
-    callback open-folder(int);
-    callback remove(int);
+    in property <[DlRow]> downloads;
+    in property <[Stat]> totals;
+    in property <string> net-text;
+    // Panel de propiedades: 0 nada, 1 paquete, 2 archivo.
+    in property <int> sel-kind;
+    in property <string> sel-title;
+    in property <[Stat]> sel-lines;
+    in property <int> sel-priority: 1;
+    in property <bool> sel-can-start;
+    in property <bool> sel-can-stop;
+
+    // Capturador.
+    in property <[GrabTreeRow]> grabbed;
+    in property <int> grab-count;
+    in property <int> grab-selected-count;
+    in property <string> grab-summary;
+    in property <bool> pkg-selected;
+    in property <string> pkg-title;
+    in-out property <string> pkg-name-text;
+    in-out property <string> pkg-folder-text;
+    in property <int> pkg-priority: 1;
+
+    // Diálogo "Añadir enlaces".
+    in-out property <bool> add-dialog-open: false;
+    in-out property <string> add-dialog-text;
+
+    callback add-links(string);
+    callback dl-click(int, bool);
+    callback dl-toggle(int);
+    callback dl-search(string);
+    callback start-all();
+    callback pause-all();
+    callback stop-all();
+    callback queue-settings-changed();
+    callback sel-start();
+    callback sel-stop();
+    callback sel-remove();
+    callback change-sel-priority(int);
+    callback sel-open-folder();
+
+    callback grab-click(int, bool);
+    callback grab-toggle(int);
+    callback grab-check(int, bool, bool);
+    callback grab-select-all(bool);
+    callback grab-remove-offline();
+    callback grab-clear();
+    callback grab-search(string);
+    // true = "Iniciar descargas"; false = "Añadir a descargas".
+    callback grab-to-downloads(bool);
+    callback pkg-rename(string);
+    callback pkg-folder(string);
+    callback pkg-choose-folder();
+    callback change-pkg-priority(int);
+    callback pkg-remove();
+
+    callback settings-changed();
+    callback choose-download-dir();
+
+    private property <[string]> priorities: ["Alta", "Normal", "Baja"];
+    private property <bool> theme-dark: Theme.dark;
+    changed theme-dark => { Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light; }
+    changed max-active => { queue-settings-changed(); }
+    changed connections => { queue-settings-changed(); }
+    changed watch-clipboard => { settings-changed(); }
+    init => {
+        Theme.system-dark = Palette.color-scheme == ColorScheme.dark;
+        Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    // Fondo: dos manchas de color muy suaves que se ven a través del cristal.
+    if Theme.glass: Rectangle {
+        x: root.width * 0.15 - self.width / 2;
+        y: root.height * 0.2 - self.height / 2;
+        width: root.width * 0.9;
+        height: self.width;
+        background: @radial-gradient(circle, Theme.blob1 0%, transparent 50%);
+    }
+    if Theme.glass: Rectangle {
+        x: root.width * 0.85 - self.width / 2;
+        y: root.height * 0.85 - self.height / 2;
+        width: root.width * 0.9;
+        height: self.width;
+        background: @radial-gradient(circle, Theme.blob2 0%, transparent 50%);
+    }
 
     VerticalLayout {
-        padding: 16px;
+        padding: 14px;
         spacing: 10px;
 
-        HorizontalLayout {
-            spacing: 8px;
-            links-edit := TextEdit {
-                placeholder-text: "Pega aquí uno o varios enlaces (de archivos o de páginas con archivos)";
-                text <=> root.links;
-                wrap: word-wrap;
-                height: 64px;
-            }
-            Button {
-                text: "Analizar enlaces";
-                primary: true;
-                clicked => { root.analyze(root.links); }
+        // ---- Cabecera ----
+        Panel {
+            height: 52px;
+            HorizontalLayout {
+                padding: 7px;
+                padding-left: 12px;
+                spacing: 6px;
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 8px;
+                    background: Theme.accent;
+                    Icon {
+                        size: 15px;
+                        x: 5.5px;
+                        y: 5.5px;
+                        commands: "M12 3v12M7 10l5 5 5-5M5 21h14";
+                        ink: Theme.on-accent;
+                        stroke-width: 2.6px;
+                    }
+                }
+                Text {
+                    text: "OmniLoad";
+                    font-size: 15px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                Rectangle { width: 12px; }
+                TabBtn {
+                    text: "Descargas";
+                    active: root.tab == 0;
+                    clicked => { root.tab = 0; }
+                }
+                TabBtn {
+                    text: "Capturador de enlaces";
+                    active: root.tab == 1;
+                    badge: root.grab-count;
+                    clicked => { root.tab = 1; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Path {
+                    y: (parent.height - self.height) / 2;
+                    width: 140px;
+                    height: 30px;
+                    viewbox-width: 140;
+                    viewbox-height: 30;
+                    commands: root.speed-path;
+                    opacity: root.header-speed == "" ? 0 : 1;
+                    stroke: Theme.accent;
+                    stroke-width: 2px;
+                    fill: transparent;
+                    accessible-role: image;
+                    accessible-label: "Velocidad de los últimos 60 segundos";
+                }
+                Text {
+                    text: root.header-speed;
+                    min-width: 90px;
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                Btn {
+                    y: (parent.height - self.height) / 2;
+                    text: "Ajustes";
+                    icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z";
+                    primary: root.tab == 2;
+                    clicked => { root.tab = root.tab == 2 ? 0 : 2; }
+                }
             }
         }
 
         if root.message != "": Text {
             text: root.message;
             wrap: word-wrap;
-            color: root.message-is-error ? #d13438 : Palette.foreground;
+            font-size: 13px;
+            color: root.message-is-error ? Theme.err : Theme.muted;
         }
 
-        TabWidget {
+        // ---- Descargas ----
+        if root.tab == 0: VerticalLayout {
             vertical-stretch: 1;
-            current-index <=> root.tab;
+            spacing: 10px;
 
-            Tab {
-                title: root.grabbed.length > 0
-                    ? "Capturador de enlaces (\{root.grabbed.length})"
-                    : "Capturador de enlaces";
-                VerticalLayout {
-                    padding-top: 10px;
-                    spacing: 8px;
-
-                    if root.grabbed.length == 0: Rectangle {
-                        vertical-stretch: 1;
-                        Text {
-                            text: "Pega enlaces arriba y pulsa Analizar enlaces.\nAquí verás los archivos encontrados antes de descargarlos.";
-                            horizontal-alignment: center;
-                            opacity: 0.6;
-                        }
+            // Barra de controles, encima de la lista.
+            Panel {
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    Btn {
+                        text: "Añadir enlaces";
+                        icon: "M12 5v14M5 12h14";
+                        primary: true;
+                        clicked => { root.add-dialog-open = true; }
                     }
+                    Sep { y: (parent.height - self.height) / 2; }
+                    Btn {
+                        label: "Iniciar descargas";
+                        icon: "M7 4l13 8-13 8z";
+                        icon-filled: true;
+                        icon-color: Theme.ok;
+                        clicked => { root.start-all(); }
+                    }
+                    Btn {
+                        label: "Pausar descargas";
+                        icon: "M9 5v14M15 5v14";
+                        clicked => { root.pause-all(); }
+                    }
+                    Btn {
+                        label: "Detener descargas";
+                        icon: "M5 5h14v14H5z";
+                        icon-filled: true;
+                        icon-color: Theme.err;
+                        clicked => { root.stop-all(); }
+                    }
+                    Sep { y: (parent.height - self.height) / 2; }
+                    Text { text: "Simultáneas"; color: Theme.text; vertical-alignment: center; }
+                    SpinBox {
+                        width: 90px;
+                        minimum: 1;
+                        maximum: 20;
+                        value <=> root.max-active;
+                    }
+                    Text { text: "Conexiones por archivo"; color: Theme.text; vertical-alignment: center; }
+                    SpinBox {
+                        width: 90px;
+                        minimum: 1;
+                        maximum: 32;
+                        value <=> root.connections;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    LineEdit {
+                        width: 240px;
+                        placeholder-text: "Buscar paquetes o archivos";
+                        edited(t) => { root.dl-search(t); }
+                    }
+                }
+            }
 
-                    if root.grabbed.length > 0: ListView {
-                        vertical-stretch: 1;
-                        for row[i] in root.grabbed: VerticalLayout {
-                            padding-bottom: 6px;
-                            padding-right: 4px;
-                            GrabLine {
+            HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
+                Panel {
+                    horizontal-stretch: 1;
+                    clip: true;
+                    VerticalLayout {
+                        DlHeader { }
+                        if root.downloads.length == 0: Rectangle {
+                            vertical-stretch: 1;
+                            Text {
+                                text: "Aún no hay descargas.\nPulsa «Añadir enlaces» y elige qué bajar en el Capturador de enlaces.";
+                                horizontal-alignment: center;
+                                color: Theme.muted;
+                            }
+                        }
+                        if root.downloads.length > 0: ListView {
+                            vertical-stretch: 1;
+                            for row in root.downloads: DlLine {
                                 item: row;
-                                toggled(on) => { root.grab-toggle(i, on); }
-                                remove => { root.grab-remove(i); }
+                                clicked => { root.dl-click(row.key, row.is-package); }
+                                toggle => { root.dl-toggle(row.key); }
                             }
                         }
                     }
-
-                    if root.grabbed.length > 0: HorizontalLayout {
-                        spacing: 8px;
+                }
+                if root.properties-panel == 1 && root.sel-kind > 0: Panel {
+                    width: 320px;
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 10px;
                         Text {
-                            text: root.grab-summary;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                            overflow: elide;
+                            text: root.sel-title;
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: Theme.text;
+                            wrap: word-wrap;
                         }
-                        Button {
-                            text: "Todos";
-                            clicked => { root.grab-select-all(true); }
+                        for l in root.sel-lines: VerticalLayout {
+                            spacing: 2px;
+                            FieldLabel { text: l.label; }
+                            Text { text: l.value; color: Theme.text; font-size: 13px; wrap: word-wrap; }
                         }
-                        Button {
-                            text: "Ninguno";
-                            clicked => { root.grab-select-all(false); }
+                        FieldLabel { text: "Prioridad"; }
+                        ComboBox {
+                            model: root.priorities;
+                            current-index: root.sel-priority;
+                            selected => { root.change-sel-priority(self.current-index); }
                         }
-                        Button {
-                            text: "Vaciar lista";
-                            clicked => { root.grab-clear(); }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            if root.sel-can-start: Btn {
+                                text: "Iniciar";
+                                icon: "M7 4l13 8-13 8z";
+                                icon-filled: true;
+                                icon-color: Theme.ok;
+                                clicked => { root.sel-start(); }
+                            }
+                            if root.sel-can-stop: Btn {
+                                text: "Detener";
+                                icon: "M5 5h14v14H5z";
+                                icon-filled: true;
+                                icon-color: Theme.err;
+                                clicked => { root.sel-stop(); }
+                            }
                         }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Btn { text: "Abrir carpeta"; clicked => { root.sel-open-folder(); } }
+                            Btn { text: "Quitar"; clicked => { root.sel-remove(); } }
+                        }
+                        Rectangle { vertical-stretch: 1; }
                     }
+                }
+            }
 
-                    if root.grabbed.length > 0: HorizontalLayout {
+            if root.properties-panel == 0 && root.sel-kind > 0: Panel {
+                VerticalLayout {
+                    padding: 12px;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 10px;
+                    HorizontalLayout {
                         spacing: 8px;
                         Text {
-                            text: "Guardar en";
+                            text: (root.sel-kind == 1 ? "Paquete: " : "Archivo: ") + root.sel-title;
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: Theme.text;
+                            overflow: elide;
+                            horizontal-stretch: 1;
                             vertical-alignment: center;
                         }
-                        LineEdit {
-                            text <=> root.folder;
-                            placeholder-text: "Carpeta donde guardar";
+                        if root.sel-can-start: Btn {
+                            text: "Iniciar";
+                            icon: "M7 4l13 8-13 8z";
+                            icon-filled: true;
+                            icon-color: Theme.ok;
+                            clicked => { root.sel-start(); }
                         }
-                        Button {
-                            text: "Elegir…";
-                            clicked => { root.choose-folder(); }
+                        if root.sel-can-stop: Btn {
+                            text: "Detener";
+                            icon: "M5 5h14v14H5z";
+                            icon-filled: true;
+                            icon-color: Theme.err;
+                            clicked => { root.sel-stop(); }
                         }
-                        Text {
-                            text: "Conexiones";
-                            vertical-alignment: center;
+                        ComboBox {
+                            width: 120px;
+                            model: root.priorities;
+                            current-index: root.sel-priority;
+                            selected => { root.change-sel-priority(self.current-index); }
                         }
-                        SpinBox {
-                            minimum: 1;
-                            maximum: 32;
-                            value <=> root.connections;
-                            width: 90px;
-                        }
-                        Button {
-                            text: "Descargar seleccionados (\{root.grab-selected})";
-                            primary: true;
-                            enabled: root.grab-selected > 0;
-                            clicked => { root.grab-download(root.folder, root.connections); }
+                        Btn { text: "Abrir carpeta"; clicked => { root.sel-open-folder(); } }
+                        Btn { text: "Quitar"; clicked => { root.sel-remove(); } }
+                    }
+                    HorizontalLayout {
+                        spacing: 24px;
+                        for l in root.sel-lines: VerticalLayout {
+                            spacing: 2px;
+                            horizontal-stretch: l.label == "Enlace" || l.label == "Carpeta" || l.label == "Detalle" ? 2 : 1;
+                            FieldLabel { text: l.label; }
+                            Text { text: l.value; color: Theme.text; font-size: 13px; overflow: elide; }
                         }
                     }
                 }
             }
 
-            Tab {
-                title: root.downloads.length > 0
-                    ? "Descargas (\{root.downloads.length})"
-                    : "Descargas";
-                VerticalLayout {
-                    padding-top: 10px;
-
-                    if root.downloads.length == 0: Rectangle {
-                        vertical-stretch: 1;
-                        Text {
-                            text: "Aún no hay descargas.";
-                            opacity: 0.6;
-                        }
+            // Resumen.
+            Panel {
+                HorizontalLayout {
+                    padding: 10px;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 24px;
+                    for t in root.totals: VerticalLayout {
+                        spacing: 2px;
+                        Text { text: t.label; font-size: 12px; color: Theme.muted; }
+                        Text { text: t.value; font-size: 14px; font-weight: 700; color: Theme.text; }
                     }
-
-                    if root.downloads.length > 0: ListView {
-                        vertical-stretch: 1;
-                        for row[i] in root.downloads: VerticalLayout {
-                            padding-bottom: 8px;
-                            padding-right: 4px;
-                            Card {
-                                item: row;
-                                pause => { root.pause(i); }
-                                resume => { root.resume(i); }
-                                open-folder => { root.open-folder(i); }
-                                remove => { root.remove(i); }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        min-width: 200px;
+                        spacing: 4px;
+                        Text { text: "Redes en uso"; font-size: 12px; color: Theme.muted; }
+                        Rectangle {
+                            height: 14px;
+                            border-radius: 5px;
+                            background: Theme.track;
+                            clip: true;
+                            Rectangle {
+                                x: 0;
+                                width: root.header-speed == "" ? 0px : parent.width;
+                                background: Theme.accent;
                             }
                         }
+                        Text { text: root.net-text; font-size: 12.5px; color: Theme.text; }
+                    }
+                }
+            }
+        }
+
+        // ---- Capturador de enlaces ----
+        if root.tab == 1: VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 10px;
+
+            HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
+                Panel {
+                    horizontal-stretch: 1;
+                    clip: true;
+                    VerticalLayout {
+                        GrabHeader { }
+                        if root.grabbed.length == 0: Rectangle {
+                            vertical-stretch: 1;
+                            Text {
+                                text: "Pulsa «Añadir enlaces» o copia un enlace.\nAquí verás los archivos que contiene, agrupados en paquetes, antes de descargar nada.";
+                                horizontal-alignment: center;
+                                color: Theme.muted;
+                            }
+                        }
+                        if root.grabbed.length > 0: ListView {
+                            vertical-stretch: 1;
+                            for row in root.grabbed: GrabLine {
+                                item: row;
+                                clicked => { root.grab-click(row.key, row.is-package); }
+                                toggle => { root.grab-toggle(row.key); }
+                                check(v) => { root.grab-check(row.key, row.is-package, v); }
+                            }
+                        }
+                    }
+                }
+                if root.properties-panel == 1 && root.pkg-selected: Panel {
+                    width: 320px;
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 8px;
+                        Text {
+                            text: "Propiedades del paquete";
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
+                        FieldLabel { text: "Nombre del paquete"; }
+                        LineEdit {
+                            text <=> root.pkg-name-text;
+                            edited(t) => { root.pkg-rename(t); }
+                        }
+                        FieldLabel { text: "Guardar en"; }
+                        LineEdit {
+                            text <=> root.pkg-folder-text;
+                            edited(t) => { root.pkg-folder(t); }
+                        }
+                        Btn { text: "Elegir carpeta…"; clicked => { root.pkg-choose-folder(); } }
+                        FieldLabel { text: "Prioridad"; }
+                        ComboBox {
+                            model: root.priorities;
+                            current-index: root.pkg-priority;
+                            selected => { root.change-pkg-priority(self.current-index); }
+                        }
+                        Btn { text: "Quitar paquete"; clicked => { root.pkg-remove(); } }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+            }
+
+            if root.properties-panel == 0 && root.pkg-selected: Panel {
+                VerticalLayout {
+                    padding: 12px;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 10px;
+                    Text {
+                        text: "Propiedades del paquete: " + root.pkg-title;
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: Theme.text;
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 4px;
+                            FieldLabel { text: "Nombre del paquete"; }
+                            LineEdit {
+                                text <=> root.pkg-name-text;
+                                edited(t) => { root.pkg-rename(t); }
+                            }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 2;
+                            spacing: 4px;
+                            FieldLabel { text: "Guardar en"; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                LineEdit {
+                                    text <=> root.pkg-folder-text;
+                                    edited(t) => { root.pkg-folder(t); }
+                                }
+                                Btn { text: "Elegir…"; clicked => { root.pkg-choose-folder(); } }
+                            }
+                        }
+                        VerticalLayout {
+                            width: 140px;
+                            spacing: 4px;
+                            FieldLabel { text: "Prioridad"; }
+                            ComboBox {
+                                model: root.priorities;
+                                current-index: root.pkg-priority;
+                                selected => { root.change-pkg-priority(self.current-index); }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: end;
+                            Btn { text: "Quitar paquete"; clicked => { root.pkg-remove(); } }
+                        }
+                    }
+                }
+            }
+
+            Panel {
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    Btn {
+                        text: "Añadir enlaces";
+                        icon: "M12 5v14M5 12h14";
+                        clicked => { root.add-dialog-open = true; }
+                    }
+                    Btn { text: "Todos"; clicked => { root.grab-select-all(true); } }
+                    Btn { text: "Ninguno"; clicked => { root.grab-select-all(false); } }
+                    Btn { text: "Quitar no disponibles"; clicked => { root.grab-remove-offline(); } }
+                    Btn { text: "Vaciar capturador"; clicked => { root.grab-clear(); } }
+                    LineEdit {
+                        width: 150px;
+                        placeholder-text: "Buscar";
+                        edited(t) => { root.grab-search(t); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.grab-summary;
+                        color: Theme.muted;
+                        vertical-alignment: center;
+                    }
+                    Btn {
+                        text: "Añadir a descargas";
+                        enabled: root.grab-selected-count > 0;
+                        clicked => { root.grab-to-downloads(false); }
+                    }
+                    Btn {
+                        text: "Iniciar descargas";
+                        icon: "M7 4l13 8-13 8z";
+                        icon-filled: true;
+                        primary: true;
+                        enabled: root.grab-selected-count > 0;
+                        clicked => { root.grab-to-downloads(true); }
+                    }
+                }
+            }
+        }
+
+        // ---- Ajustes ----
+        if root.tab == 2: HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 16px;
+            Panel {
+                width: 240px;
+                VerticalLayout {
+                    padding: 16px;
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 2px;
+                    alignment: start;
+                    Text {
+                        text: "Ajustes";
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: Theme.text;
+                    }
+                    Rectangle { height: 12px; }
+                    for s[i] in ["General", "Apariencia"]: Rectangle {
+                        height: 40px;
+                        border-radius: Theme.r2;
+                        background: i == root.settings-section ? Theme.panel2 : transparent;
+                        border-width: i == root.settings-section ? Theme.lw : 0px;
+                        border-color: Theme.rim;
+                        accessible-role: button;
+                        accessible-label: s;
+                        Text {
+                            x: 12px;
+                            text: s;
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                        }
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.settings-section = i; }
+                        }
+                    }
+                }
+            }
+
+            Panel {
+                horizontal-stretch: 1;
+                if root.settings-section == 0: VerticalLayout {
+                    padding: 28px;
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: "General"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                    SettingRow {
+                        title: "Carpeta de descargas";
+                        subtitle: "Donde se guarda todo lo que descargas.";
+                        LineEdit {
+                            width: 360px;
+                            text <=> root.download-dir;
+                            accepted => { root.settings-changed(); }
+                        }
+                        Btn { text: "Elegir…"; clicked => { root.choose-download-dir(); } }
+                    }
+                    SettingRow {
+                        title: "Una carpeta por paquete";
+                        subtitle: "Cada paquete va a una subcarpeta con su nombre (se quitan los caracteres que el sistema no admite). Se puede cambiar en el panel del paquete del Capturador.";
+                        Check {
+                            checked <=> root.package-folders;
+                            label: "Una carpeta por paquete";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "También para un solo archivo";
+                        subtitle: "Si se desactiva, los paquetes de un archivo van directos a la carpeta de descargas.";
+                        opacity: root.package-folders ? 1 : 0.5;
+                        Check {
+                            checked <=> root.single-file-folders;
+                            enabled: root.package-folders;
+                            label: "Carpeta también para paquetes de un solo archivo";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Vigilar portapapeles";
+                        subtitle: "Los enlaces que copies aparecen solos en el Capturador de enlaces.";
+                        Check {
+                            checked <=> root.watch-clipboard;
+                            label: "Vigilar portapapeles";
+                        }
+                    }
+                }
+
+                if root.settings-section == 1: apariencia := ScrollView {
+                    VerticalLayout {
+                        width: apariencia.visible-width;
+                        padding: 28px;
+                        spacing: 18px;
+                        alignment: start;
+                        VerticalLayout {
+                            spacing: 6px;
+                            Text { text: "Apariencia"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                            Text {
+                                text: "Los cambios se aplican al momento.";
+                                font-size: 14px;
+                                color: Theme.muted;
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 12px;
+                            SectionTitle { text: "Tema"; }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                ThemeCard {
+                                    title: "Cristal claro"; subtitle: "Translúcido, por defecto";
+                                    bg: #eef1f6; pan: #ffffff80; bd: #ffffffd9; rad: 7px;
+                                    selected: Theme.kind == 0;
+                                    picked => { Theme.kind = 0; root.settings-changed(); }
+                                }
+                                ThemeCard {
+                                    title: "Cristal oscuro"; subtitle: "Translúcido, de noche";
+                                    bg: #0d1017; pan: #28304a8c; bd: #ffffff33; rad: 7px;
+                                    selected: Theme.kind == 1;
+                                    picked => { Theme.kind = 1; root.settings-changed(); }
+                                }
+                                ThemeCard {
+                                    title: "Claro"; subtitle: "Plano, sin efectos";
+                                    bg: #f4f5f7; pan: #ffffff; bd: #dfe2e8; rad: 4px;
+                                    selected: Theme.kind == 2;
+                                    picked => { Theme.kind = 2; root.settings-changed(); }
+                                }
+                                ThemeCard {
+                                    title: "Grafito"; subtitle: "Oscuro plano";
+                                    bg: #16181d; pan: #23272f; bd: #323844; rad: 4px;
+                                    selected: Theme.kind == 3;
+                                    picked => { Theme.kind = 3; root.settings-changed(); }
+                                }
+                                ThemeCard {
+                                    title: "Alto contraste"; subtitle: "Máxima legibilidad";
+                                    bg: #000000; pan: #000000; bd: #ffffff; rad: 1px;
+                                    selected: Theme.kind == 4;
+                                    picked => { Theme.kind = 4; root.settings-changed(); }
+                                }
+                            }
+                            LabeledCheck {
+                                text: "Cambiar entre claro y oscuro según el sistema";
+                                checked: Theme.follow-system;
+                                toggled(v) => { Theme.follow-system = v; root.settings-changed(); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            SectionTitle { text: "Ventana"; }
+                            SettingRow {
+                                title: "Panel de propiedades";
+                                subtitle: "Dónde se muestran los detalles del paquete o archivo elegido";
+                                Segmented {
+                                    options: ["Abajo", "A la derecha", "Oculto"];
+                                    current <=> root.properties-panel;
+                                    changed-by-user => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Densidad";
+                                subtitle: "Compacta muestra más descargas sin desplazar";
+                                Segmented {
+                                    options: ["Cómoda", "Compacta"];
+                                    current: Theme.compact ? 1 : 0;
+                                    changed-by-user(i) => { Theme.compact = i == 1; root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Color de acento";
+                                subtitle: "Botones, barras de progreso y selección";
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    for a[i] in [
+                                        { name: "Azul", light: #0a5fd0, dark: #6fb1ff },
+                                        { name: "Violeta", light: #6a3fd6, dark: #b39bff },
+                                        { name: "Verde", light: #137a4b, dark: #5fd49a },
+                                        { name: "Naranja", light: #b4500a, dark: #ffab6b },
+                                        { name: "Rosa", light: #b8306a, dark: #ff8fc0 },
+                                        { name: "Grafito", light: #3d4654, dark: #c9d1de },
+                                    ]: Swatch {
+                                        name: a.name;
+                                        c: Theme.dark ? a.dark : a.light;
+                                        selected: i == Theme.accent-index;
+                                        picked => { Theme.accent-index = i; root.settings-changed(); }
+                                    }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            SectionTitle { text: "Cristal"; }
+                            SettingRow {
+                                title: "Reducir transparencia";
+                                subtitle: "Paneles opacos: más rápido en equipos modestos y más legible";
+                                Check {
+                                    checked: Theme.reduce-transparency;
+                                    label: "Reducir transparencia";
+                                    toggled(v) => { Theme.reduce-transparency = v; root.settings-changed(); }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            SectionTitle { text: "Portapapeles"; }
+                            SettingRow {
+                                title: "Aviso al copiar enlaces";
+                                subtitle: "Ventanita abajo a la derecha con los enlaces copiados mientras se comprueban";
+                                Segmented {
+                                    options: ["Completo", "Compacto", "Desactivado"];
+                                    current <=> root.clip-popup;
+                                    changed-by-user => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Cerrar el aviso automáticamente";
+                                subtitle: "1 s después de terminar la comprobación";
+                                Check {
+                                    checked <=> root.clip-autoclose;
+                                    label: "Cerrar el aviso automáticamente";
+                                    toggled => { root.settings-changed(); }
+                                }
+                            }
+                        }
+                
                     }
                 }
             }
         }
     }
 
-    init => { links-edit.focus(); }
+    // ---- Diálogo "Añadir enlaces" ----
+    if root.add-dialog-open: Rectangle {
+        background: #00000066;
+        TouchArea { }
+        Panel {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(620px, parent.width - 40px);
+            height: 320px;
+            background: Theme.glass ? (Theme.dark ? #1c2236f2 : #fffffff2) : Theme.panel;
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text { text: "Añadir enlaces"; font-size: 18px; font-weight: 700; color: Theme.text; }
+                Text {
+                    text: "Pega uno o varios enlaces, sueltos o dentro de un texto. También sirven páginas con enlaces a archivos.";
+                    wrap: word-wrap;
+                    color: Theme.muted;
+                }
+                links := TextEdit {
+                    vertical-stretch: 1;
+                    text <=> root.add-dialog-text;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+                    Btn {
+                        text: "Cancelar";
+                        clicked => { root.add-dialog-open = false; }
+                    }
+                    Btn {
+                        text: "Analizar enlaces";
+                        primary: true;
+                        clicked => { root.add-links(root.add-dialog-text); }
+                    }
+                }
+            }
+            init => { links.focus(); }
+        }
+    }
+}
+
+// ---- Aviso de enlaces copiados (abajo a la derecha) ----
+
+export struct PopRow {
+    key: int,
+    name: string,
+    host: string,
+    size: string,
+    status: string,
+    tone: int,
+    checked: bool,
+    // Disponible: se puede marcar.
+    usable: bool,
+}
+
+// Un botón redondo solo con icono.
+component RoundBtn inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> filled: false;
+    in property <length> size: 28px;
+    in property <bool> enabled: true;
+    callback clicked();
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { if enabled { clicked(); } }
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: primary ? Theme.accent : touch.has-hover ? Theme.head : transparent;
+    opacity: enabled ? 1 : 0.45;
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        size: root.size * 0.5;
+        commands: root.icon;
+        filled: root.filled;
+        ink: root.primary ? Theme.on-accent : Theme.muted;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component ClipPopup inherits Window {
+    title: "OmniLoad · enlaces copiados";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+
+    in property <bool> compact: true;
+    in property <[PopRow]> rows;
+    in property <int> total;
+    in property <int> ok;
+    in property <int> bad;
+    in property <bool> checking;
+    in property <string> time-text;
+    // Rueda: arco verde (aptos) y rojo (caídos), en un cuadro de 44×44.
+    in property <string> ok-arc;
+    in property <string> bad-arc;
+    in property <int> to-download;
+    in-out property <bool> autostart: true;
+    out property <bool> hovered: hover.has-hover;
+
+    callback play();
+    callback download();
+    callback open-grabber();
+    callback discard();
+    callback close();
+    callback minimize();
+    callback check(int, bool);
+    callback autostart-changed();
+    changed autostart => { autostart-changed(); }
+
+    property <int> shown: min(rows.length, 5);
+    // Tamaño que pide el aviso; Rust coloca la ventana con él.
+    out property <length> want-width: compact ? 300px : 440px;
+    out property <length> want-height: compact ? 72px : 56px + max(1, shown) * 44px + 96px;
+    width: want-width;
+    height: want-height;
+
+    hover := TouchArea { }
+
+    Panel {
+        background: Theme.glass ? (Theme.dark ? #1c2236f5 : #fffffff5) : Theme.panel;
+        drop-shadow-blur: 0px;
+        drop-shadow-offset-y: 0px;
+
+        // Compacta: play · texto · rueda · cerrar
+        if root.compact: HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 8px;
+            spacing: 12px;
+            alignment: stretch;
+            RoundBtn {
+                y: (parent.height - self.height) / 2;
+                size: 40px;
+                primary: true;
+                filled: true;
+                icon: "M8 5l12 7-12 7z";
+                label: "Descargar los enlaces aptos";
+                enabled: root.ok > 0;
+                clicked => { root.play(); }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.total == 1 ? "1 enlace copiado" : root.total + " enlaces copiados";
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.time-text;
+                    font-size: 12px;
+                    color: Theme.muted;
+                    overflow: elide;
+                }
+            }
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                width: 44px;
+                height: 44px;
+                accessible-role: progress-indicator;
+                accessible-label: root.ok + " de " + root.total + " enlaces aptos";
+                Path {
+                    width: 44px;
+                    height: 44px;
+                    viewbox-width: 44;
+                    viewbox-height: 44;
+                    commands: "M 22 4 A 18 18 0 1 1 22 40 A 18 18 0 1 1 22 4";
+                    stroke: Theme.track;
+                    stroke-width: 4px;
+                    fill: transparent;
+                }
+                Path {
+                    width: 44px;
+                    height: 44px;
+                    viewbox-width: 44;
+                    viewbox-height: 44;
+                    commands: root.ok-arc;
+                    stroke: Theme.ok;
+                    stroke-width: 4px;
+                    fill: transparent;
+                }
+                Path {
+                    width: 44px;
+                    height: 44px;
+                    viewbox-width: 44;
+                    viewbox-height: 44;
+                    commands: root.bad-arc;
+                    stroke: Theme.err;
+                    stroke-width: 4px;
+                    fill: transparent;
+                }
+                Text {
+                    text: root.ok + "/" + root.total;
+                    font-size: root.total >= 100 ? 9px : 11px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            RoundBtn {
+                y: 8px;
+                size: 24px;
+                icon: "M6 6l12 12M18 6L6 18";
+                label: "Cerrar";
+                clicked => { root.close(); }
+            }
+        }
+
+        // Completa: cabecera, lista y botones
+        if !root.compact: VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 8px;
+                height: 32px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 5px;
+                    Text {
+                        text: (root.total == 1 ? "1 enlace copiado" : root.total + " enlaces copiados")
+                            + " · " + root.ok + " disponibles"
+                            + (root.bad == 1 ? " · 1 caído" : root.bad > 1 ? " · " + root.bad + " caídos" : "");
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text;
+                        overflow: elide;
+                    }
+                    Rectangle {
+                        height: 3px;
+                        border-radius: 1.5px;
+                        background: Theme.track;
+                        clip: true;
+                        Rectangle {
+                            x: 0;
+                            width: root.total == 0 ? 0px : parent.width * root.ok / root.total;
+                            background: Theme.ok;
+                        }
+                        Rectangle {
+                            x: root.total == 0 ? 0px : parent.width * root.ok / root.total;
+                            width: root.total == 0 ? 0px : parent.width * root.bad / root.total;
+                            background: Theme.err;
+                        }
+                    }
+                }
+                RoundBtn {
+                    y: (parent.height - self.height) / 2;
+                    icon: "M6 12h12";
+                    label: "Minimizar";
+                    clicked => { root.minimize(); }
+                }
+                RoundBtn {
+                    y: (parent.height - self.height) / 2;
+                    icon: "M6 6l12 12M18 6L6 18";
+                    label: "Cerrar";
+                    clicked => { root.close(); }
+                }
+            }
+            Rectangle {
+                height: max(1, root.shown) * 44px;
+                border-radius: Theme.r2;
+                background: Theme.panel2;
+                clip: true;
+                ListView {
+                    for row in root.rows: Rectangle {
+                        height: 44px;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            Check {
+                                y: (parent.height - self.height) / 2;
+                                checked: row.checked;
+                                enabled: row.usable;
+                                label: "Incluir " + row.name;
+                                toggled(v) => { root.check(row.key, v); }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 1px;
+                                Text {
+                                    text: row.name;
+                                    font-size: 13px;
+                                    color: Theme.text;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: row.host + (row.size == "" ? "" : " · " + row.size);
+                                    font-size: 11px;
+                                    color: Theme.muted;
+                                    overflow: elide;
+                                }
+                            }
+                            Text {
+                                text: row.status;
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: Theme.tone(row.tone);
+                                vertical-alignment: center;
+                            }
+                        }
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: Theme.line;
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                LabeledCheck {
+                    text: "Iniciar al añadir";
+                    checked <=> root.autostart;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: root.time-text;
+                    font-size: 12px;
+                    color: Theme.muted;
+                    vertical-alignment: center;
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Btn {
+                    text: "Descargar (" + root.to-download + ")";
+                    icon: "M8 5l12 7-12 7z";
+                    icon-filled: true;
+                    primary: true;
+                    enabled: root.to-download > 0;
+                    clicked => { root.download(); }
+                }
+                Btn { text: "Abrir en el capturador"; clicked => { root.open-grabber(); } }
+                Rectangle { horizontal-stretch: 1; }
+                Btn { text: "Descartar"; clicked => { root.discard(); } }
+            }
+        }
+    }
 }
