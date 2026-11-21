@@ -20,7 +20,7 @@ use tracing::{debug, info, warn};
 use url::Url;
 
 use crate::blocks::{BlockQueue, Commit, Lease};
-use crate::limiter::{GROW_AFTER, Limiter};
+use crate::limiter::{Limiter, REGROW_AFTER};
 use crate::probe::{parse_content_range, status_error};
 use crate::retry::{Backoff, retry_after};
 use crate::state::{SavedState, part_path_for, state_path_for};
@@ -244,7 +244,7 @@ impl Download {
                         .set_limit(n.id(), self.opts.connections_per_network);
                     (
                         n.id(),
-                        Limiter::new(self.opts.connections_per_network, GROW_AFTER),
+                        Limiter::new(self.opts.connections_per_network, REGROW_AFTER),
                     )
                 })
                 .collect(),
@@ -686,8 +686,11 @@ async fn fetch_inner(w: &mut Writer<'_>) -> Result<(), FetchError> {
     }
 
     sh.progress.receiving_started(net.id());
+    let limiter = &sh.limits[&net.id()];
+    limiter.receiving_started();
     let _receiving = ReceivingGuard {
         progress: &sh.progress,
+        limiter,
         network: net.id(),
     };
     let mut stream = resp.bytes_stream();
@@ -747,12 +750,14 @@ async fn fetch_inner(w: &mut Writer<'_>) -> Result<(), FetchError> {
 /// Marca una conexión como "recibiendo" mientras viva.
 struct ReceivingGuard<'a> {
     progress: &'a Progress,
+    limiter: &'a Limiter,
     network: crate::NetworkId,
 }
 
 impl Drop for ReceivingGuard<'_> {
     fn drop(&mut self) {
         self.progress.receiving_stopped(self.network);
+        self.limiter.receiving_stopped();
     }
 }
 
