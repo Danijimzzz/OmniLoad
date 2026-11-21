@@ -22,7 +22,10 @@ Copias un enlace y OmniLoad se encarga del resto.
 - ⚡ **Más rápido.** Cada archivo se baja por varios trozos a la vez, así
   aprovechas toda tu conexión aunque el servidor vaya lento.
 - ⏯️ **Nunca empiezas de cero.** Pausa cuando quieras; si se corta internet,
-  se apaga el ordenador o se va la luz, sigue justo donde lo dejó.
+  se apaga el ordenador o se va la luz, sigue justo donde lo dejó. Tu lista de
+  descargas también se guarda: al volver a abrir, todo está como lo dejaste.
+- 🚦 **No te deja sin internet.** Pon un límite de velocidad y sigue viendo
+  vídeos o jugando mientras descarga.
 - 📋 **Copia y listo.** Copia un enlace en cualquier sitio y OmniLoad lo detecta
   solo. No hace falta pegar nada.
 - 🔎 **Mira antes de bajar.** Antes de descargar te enseña qué hay detrás de
@@ -73,7 +76,14 @@ quitarlo. Se cierra solo al terminar de comprobar.
 - Prioridad alta, normal o baja para cada paquete.
 - Velocidad, tiempo restante y progreso de cada archivo y de cada paquete.
 - Iniciar, pausar o detener todo con un clic, y buscar entre tus descargas.
-- Si un servidor limita las conexiones, OmniLoad se adapta solo.
+- **Límite de velocidad** en la barra de arriba (por ejemplo, 2 MB/s), que se
+  aplica al momento, también a lo que ya se está bajando.
+- Al cerrar OmniLoad, lo que se estaba bajando queda en la cola y **sigue solo**
+  la próxima vez que lo abras.
+- Si un servidor limita las conexiones, OmniLoad se adapta solo y **lo
+  recuerda** para la próxima vez. En Ajustes puedes poner cuántas conexiones
+  abrir como mucho a una misma web, y las descargas a la misma web se reparten
+  las conexiones de forma justa.
 - Si un enlace caduca, te lo dice claramente.
 
 ### Apariencia
@@ -105,8 +115,9 @@ En Linux necesitas además `libfontconfig-dev` y `libxkbcommon-dev`
 
 ## Próximamente
 
-- La lista de descargas se guardará entre sesiones.
-- Límite de velocidad.
+- OmniLoad seguirá descargando aunque cierres la ventana (un servicio en
+  segundo plano).
+- Descargar de Mega, Gofile, Google Drive y Mediafire.
 - Descomprimir automáticamente, con contraseñas.
 - Descargar usando varias conexiones a internet a la vez (por ejemplo, wifi y
   cable juntos).

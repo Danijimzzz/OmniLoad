@@ -45,8 +45,18 @@ impl RemoteInfo {
 
 /// Sondea `url` con el cliente dado.
 pub async fn probe(client: &reqwest::Client, url: &Url) -> Result<RemoteInfo> {
+    probe_with(client, url, &HeaderMap::new()).await
+}
+
+/// Como [`probe`], con cabeceras extra (cookies o tokens de un host).
+pub async fn probe_with(
+    client: &reqwest::Client,
+    url: &Url,
+    extra: &HeaderMap,
+) -> Result<RemoteInfo> {
     let resp = client
         .get(url.clone())
+        .headers(extra.clone())
         .header(RANGE, "bytes=0-0")
         .send()
         .await?;

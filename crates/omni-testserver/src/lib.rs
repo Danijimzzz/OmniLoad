@@ -60,6 +60,8 @@ struct Inner {
     served: AtomicU64,
     requests: AtomicU64,
     active: AtomicU32,
+    /// Máximo de respuestas simultáneas que llegó a haber.
+    peak: AtomicU32,
     rejected: AtomicU64,
     ranges: Mutex<Vec<(u64, u64)>>,
 }
@@ -81,6 +83,7 @@ impl TestServer {
             served: AtomicU64::new(0),
             requests: AtomicU64::new(0),
             active: AtomicU32::new(0),
+            peak: AtomicU32::new(0),
             rejected: AtomicU64::new(0),
             ranges: Mutex::new(Vec::new()),
         });
@@ -112,6 +115,11 @@ impl TestServer {
     /// Bytes de cuerpo enviados en total.
     pub fn bytes_served(&self) -> u64 {
         self.inner.served.load(Ordering::SeqCst)
+    }
+
+    /// Máximo de respuestas con datos que llegó a haber a la vez.
+    pub fn peak_concurrent(&self) -> u32 {
+        self.inner.peak.load(Ordering::SeqCst)
     }
 
     /// Respuestas 429 por exceso de conexiones simultáneas.
@@ -204,12 +212,19 @@ async fn handler(State(st): State<Arc<Inner>>, headers: HeaderMap) -> Response {
                     .active
                     .compare_exchange(cur, cur + 1, Ordering::SeqCst, Ordering::SeqCst)
                 {
-                    Ok(_) => break Some(ActiveSlot(st.clone())),
+                    Ok(_) => {
+                        st.peak.fetch_max(cur + 1, Ordering::SeqCst);
+                        break ActiveSlot(st.clone());
+                    }
                     Err(actual) => cur = actual,
                 }
             }
         }
-        None => None,
+        None => {
+            let n = st.active.fetch_add(1, Ordering::SeqCst) + 1;
+            st.peak.fetch_max(n, Ordering::SeqCst);
+            ActiveSlot(st.clone())
+        }
     };
     let (data, etag) = st.content.read().unwrap().clone();
     let len = data.len() as u64;

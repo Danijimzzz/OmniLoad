@@ -1,8 +1,11 @@
 //! `omniload`: interfaz gráfica de OmniLoad, nativa con Slint.
 //!
-//! La ventana corre en el hilo principal y el motor (`omni-core`) en un
-//! runtime de tokio dentro del mismo proceso. Un temporizador de Slint lee el
-//! estado cuatro veces por segundo y actualiza las tablas.
+//! La ventana corre en el hilo principal y la cola (`omni-queue`, con el
+//! motor `omni-core`) en un runtime de tokio dentro del mismo proceso. La
+//! lista de descargas y los ajustes de la cola se guardan en SQLite
+//! (`omni-store`), así que al volver a abrir todo sigue donde estaba. Un
+//! temporizador de Slint lee el estado cuatro veces por segundo y actualiza
+//! las tablas.
 //!
 //! Como en JDownloader, los enlaces no se descargan directamente: primero van
 //! al capturador ([`grabber`]), que los agrupa en paquetes y enseña qué hay
@@ -32,7 +35,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use omni_core::DownloadOptions;
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
@@ -289,6 +291,7 @@ impl App {
                 priority: p.priority,
                 size: p.size,
                 start,
+                speed_limit: None,
             };
             if let Err(msg) = self.manager.add(new) {
                 errors.push(format!("{}: {msg}.", p.name));
@@ -329,6 +332,8 @@ impl App {
         s.properties_panel = ui.get_properties_panel();
         s.max_active = ui.get_max_active();
         s.connections = ui.get_connections();
+        s.speed_limit = ui.get_speed_limit();
+        s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
         s.clip_popup = ui.get_clip_popup();
         s.clip_popup_autoclose = ui.get_clip_autoclose();
@@ -337,8 +342,7 @@ impl App {
         s.package_folders = ui.get_package_folders();
         s.single_file_folders = ui.get_single_file_folders();
         s.save();
-        self.manager.set_max_active(s.max_active as usize);
-        self.manager.set_connections(s.connections as usize);
+        apply_queue_settings(&self.manager, &s);
     }
 }
 
@@ -350,12 +354,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .thread_name("omni-motor")
         .build()?;
     let settings = Settings::load();
-    let manager = Arc::new(Manager::new(
-        rt.handle().clone(),
-        DownloadOptions::default(),
-    ));
-    manager.set_max_active(settings.max_active as usize);
-    manager.set_connections(settings.connections as usize);
+    let manager = Arc::new(manager::open(rt.handle().clone()));
+    apply_queue_settings(&manager, &settings);
     let grabber = Arc::new(Grabber::new(
         rt.handle().clone(),
         omni_core::Network::system_default()?.client().clone(),
@@ -429,9 +429,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(timer);
     drop(clip_timer);
     app.save_settings();
-    if manager.any_active() {
-        manager.shutdown(Duration::from_secs(5));
-    }
+    rt.block_on(manager.shutdown(Duration::from_secs(5)));
     rt.shutdown_timeout(Duration::from_secs(1));
     Ok(())
 }
@@ -521,6 +519,16 @@ fn connect_popup(ui: &AppWindow, app: &Rc<App>) {
     });
 }
 
+/// Pasa a la cola lo que se elige en la ventana.
+fn apply_queue_settings(manager: &Manager, s: &Settings) {
+    manager.update_settings(|q| {
+        q.max_active = s.max_active.max(1) as usize;
+        q.connections = s.connections.max(1) as usize;
+        q.speed_limit = settings::speed_limit_bytes(s.speed_limit);
+        q.max_per_server = s.max_per_server.max(0) as usize;
+    });
+}
+
 fn apply_settings(ui: &AppWindow, s: &Settings) {
     let theme = ui.global::<Theme>();
     theme.set_kind(s.theme);
@@ -531,6 +539,8 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_properties_panel(s.properties_panel);
     ui.set_max_active(s.max_active);
     ui.set_connections(s.connections);
+    ui.set_speed_limit(s.speed_limit);
+    ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
     ui.set_clip_popup(s.clip_popup);
     ui.set_clip_autoclose(s.clip_popup_autoclose);

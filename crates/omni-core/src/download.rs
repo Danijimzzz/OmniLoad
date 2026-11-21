@@ -5,12 +5,13 @@ use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use reqwest::StatusCode;
-use reqwest::header::{CONTENT_RANGE, IF_RANGE, RANGE};
+use reqwest::header::{CONTENT_RANGE, HeaderMap, IF_RANGE, RANGE};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinSet;
@@ -21,17 +22,20 @@ use url::Url;
 
 use crate::blocks::{BlockQueue, Commit, Lease};
 use crate::limiter::{Limiter, REGROW_AFTER};
-use crate::probe::{parse_content_range, status_error};
+use crate::probe::{parse_content_range, probe_with, status_error};
 use crate::retry::{Backoff, retry_after};
 use crate::state::{SavedState, part_path_for, state_path_for};
 use crate::{
     DEFAULT_BLOCK_SIZE, DEFAULT_CONNECTIONS_PER_NETWORK, DEFAULT_MIN_BLOCK_SIZE, Error, Network,
-    NetworkId, Progress, RemoteInfo, Result, platform, probe,
+    NetworkId, Progress, RateLimit, RemoteInfo, Result, ServerLimits, platform,
 };
 
 /// Cada cuánto vuelca una conexión su búfer a disco aunque no esté lleno.
 /// Junto con `save_interval` acota el progreso que se pierde en un corte.
 const FLUSH_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Número de cada descarga en marcha, para repartir los límites compartidos.
+static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
 
 /// Dónde guardar la descarga.
 #[derive(Clone, Debug)]
@@ -67,6 +71,15 @@ pub struct DownloadOptions {
     pub expected_sha256: Option<String>,
     /// Sobrescribir el destino si ya existe.
     pub overwrite: bool,
+    /// Límites de velocidad que respeta esta descarga (por ejemplo, uno
+    /// global compartido y otro propio). Vacío = sin límite.
+    pub rate_limits: Vec<Arc<RateLimit>>,
+    /// Límites de conexiones por servidor compartidos con otras descargas.
+    /// `None` = esta descarga lleva su propio límite adaptativo.
+    pub server_limits: Option<Arc<ServerLimits>>,
+    /// Cabeceras extra en todas las peticiones (cookies o tokens que pida un
+    /// host; lo usarán los plugins de hosts).
+    pub headers: HeaderMap,
 }
 
 impl Default for DownloadOptions {
@@ -83,6 +96,9 @@ impl Default for DownloadOptions {
             save_interval: Duration::from_millis(500),
             expected_sha256: None,
             overwrite: false,
+            rate_limits: Vec::new(),
+            server_limits: None,
+            headers: HeaderMap::new(),
         }
     }
 }
@@ -93,6 +109,17 @@ impl DownloadOptions {
             base: self.retry_base,
             max: self.retry_max,
         }
+    }
+
+    /// Espera lo que pidan los límites de velocidad por `bytes` recibidos.
+    /// `false` si se canceló.
+    async fn throttle(&self, bytes: u64, cancel: &CancellationToken) -> bool {
+        for limit in &self.rate_limits {
+            if !limit.consume(bytes, cancel).await {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -183,7 +210,7 @@ impl Download {
         loop {
             let res = tokio::select! {
                 _ = cancel.cancelled() => return Err(Error::Cancelled),
-                r = probe(client, &self.url) => r,
+                r = probe_with(client, &self.url, &self.opts.headers) => r,
             };
             match res {
                 Ok(info) => return Ok(info),
@@ -226,7 +253,9 @@ impl Download {
         };
         self.progress.reset(queue.written());
 
+        let owner = NEXT_OWNER.fetch_add(1, Ordering::Relaxed);
         let shared = Arc::new(Shared {
+            owner,
             queue: Mutex::new(queue),
             file: Arc::new(file),
             info: info.clone(),
@@ -240,12 +269,16 @@ impl Download {
                 .networks
                 .iter()
                 .map(|n| {
-                    self.progress
-                        .set_limit(n.id(), self.opts.connections_per_network);
-                    (
-                        n.id(),
-                        Limiter::new(self.opts.connections_per_network, REGROW_AFTER),
-                    )
+                    let limiter = match (&self.opts.server_limits, info.url.host_str()) {
+                        (Some(servers), Some(host)) => servers.limiter(host, n.name()),
+                        _ => Arc::new(Limiter::new(
+                            self.opts.connections_per_network,
+                            REGROW_AFTER,
+                        )),
+                    };
+                    limiter.register(owner);
+                    self.progress.set_limit(n.id(), limiter.allowed());
+                    (n.id(), limiter)
                 })
                 .collect(),
         });
@@ -271,6 +304,9 @@ impl Download {
         }
         stop_saver.cancel();
         let _ = saver.await;
+        for limiter in shared.limits.values() {
+            limiter.unregister(owner);
+        }
 
         let complete = shared.queue().is_complete();
         if !complete {
@@ -371,7 +407,7 @@ impl Download {
     ) -> Result<()> {
         let resp = tokio::select! {
             _ = cancel.cancelled() => return Err(Error::Cancelled),
-            r = net.client().get(info.url.clone()).send() => r?,
+            r = net.client().get(info.url.clone()).headers(self.opts.headers.clone()).send() => r?,
         };
         if resp.status() != StatusCode::OK {
             return Err(status_error(resp.status()));
@@ -389,6 +425,9 @@ impl Download {
                     file.write_all(&bytes).await?;
                     received += bytes.len() as u64;
                     self.progress.add(net.id(), bytes.len() as u64);
+                    if !self.opts.throttle(bytes.len() as u64, cancel).await {
+                        return Err(Error::Cancelled);
+                    }
                 }
                 Some(Err(e)) => return Err(e.into()),
                 None => break,
@@ -467,6 +506,8 @@ pub fn sha256_file(path: &Path) -> io::Result<String> {
 
 /// Estado compartido por las conexiones de una descarga por bloques.
 struct Shared {
+    /// Número de esta descarga en los límites compartidos.
+    owner: u64,
     queue: Mutex<BlockQueue>,
     file: Arc<File>,
     info: RemoteInfo,
@@ -476,8 +517,9 @@ struct Shared {
     abort: CancellationToken,
     fatal: Mutex<Option<Error>>,
     state_path: PathBuf,
-    /// Límite adaptativo de conexiones de cada red.
-    limits: HashMap<NetworkId, Limiter>,
+    /// Límite adaptativo de conexiones de cada red (compartido con otras
+    /// descargas al mismo servidor si hay [`ServerLimits`]).
+    limits: HashMap<NetworkId, Arc<Limiter>>,
 }
 
 impl Shared {
@@ -543,19 +585,19 @@ async fn worker(sh: Arc<Shared>, net: Network) {
     loop {
         // Esperar hueco: si el servidor limita las conexiones, las de más
         // esperan aquí en lugar de insistir.
-        if !limiter.acquire(&sh.abort).await {
+        if !limiter.acquire(sh.owner, &sh.abort).await {
             break;
         }
         sh.progress.set_limit(net.id(), limiter.allowed());
         let Some(lease) = sh.queue().next(net.id()) else {
             // Lo que falta ya tiene conexiones vivas; si alguna falla, ella
             // misma reintentará su bloque.
-            limiter.release();
+            limiter.release(sh.owner);
             break;
         };
         let (lease, res) = fetch(&sh, &net, lease).await;
         sh.queue().release(&lease);
-        limiter.release();
+        limiter.release(sh.owner);
         let Err(f) = res else {
             failures = 0;
             continue;
@@ -643,10 +685,14 @@ async fn fetch(sh: &Shared, net: &Network, lease: Lease) -> (Lease, Result<(), F
 
 async fn fetch_inner(w: &mut Writer<'_>) -> Result<(), FetchError> {
     let (sh, net, lease) = (w.sh, w.net, w.lease);
-    let mut req = net.client().get(sh.info.url.clone()).header(
-        RANGE,
-        format!("bytes={}-{}", lease.start, lease.request_end - 1),
-    );
+    let mut req = net
+        .client()
+        .get(sh.info.url.clone())
+        .headers(sh.opts.headers.clone())
+        .header(
+            RANGE,
+            format!("bytes={}-{}", lease.start, lease.request_end - 1),
+        );
     let if_range = sh.info.if_range();
     if let Some(v) = if_range {
         req = req.header(IF_RANGE, v);
@@ -686,7 +732,7 @@ async fn fetch_inner(w: &mut Writer<'_>) -> Result<(), FetchError> {
     }
 
     sh.progress.receiving_started(net.id());
-    let limiter = &sh.limits[&net.id()];
+    let limiter = &*sh.limits[&net.id()];
     limiter.receiving_started();
     let _receiving = ReceivingGuard {
         progress: &sh.progress,
@@ -716,6 +762,10 @@ async fn fetch_inner(w: &mut Writer<'_>) -> Result<(), FetchError> {
         match chunk {
             Some(Ok(bytes)) => {
                 w.buf.extend_from_slice(&bytes);
+                if !sh.opts.throttle(bytes.len() as u64, &sh.abort).await {
+                    w.flush().await?;
+                    return Err(FetchError::new(Error::Cancelled, w.progressed));
+                }
                 if w.buf.len() >= sh.opts.write_buffer || last_flush.elapsed() >= FLUSH_INTERVAL {
                     last_flush = Instant::now();
                     if w.flush().await? == Commit::Stop {
@@ -803,15 +853,18 @@ impl Writer<'_> {
             let mut queue = self.sh.queue();
             let (gained, commit) = queue.commit(&self.lease, self.pos);
             self.sh.progress.add(self.net.id(), gained);
-            if commit == Commit::Stop && self.pos == end {
-                // Bloque terminado: seguir con el siguiente con esta misma
-                // petición si está libre.
-                if let Some(next) = queue.extend(&self.lease, self.net.id()) {
-                    self.lease = next;
-                    drop(queue);
-                    self.buf = rest;
-                    continue;
-                }
+            // Bloque terminado: seguir con el siguiente con esta misma
+            // petición si está libre (y si no hay que dejar sitio a otra
+            // descarga al mismo servidor).
+            if commit == Commit::Stop
+                && self.pos == end
+                && !self.sh.limits[&self.net.id()].should_yield(self.sh.owner)
+                && let Some(next) = queue.extend(&self.lease, self.net.id())
+            {
+                self.lease = next;
+                drop(queue);
+                self.buf = rest;
+                continue;
             }
             drop(queue);
             // Reutilizar la memoria del búfer.
@@ -820,6 +873,11 @@ impl Writer<'_> {
             self.buf = data;
             if commit == Commit::Stop {
                 self.buf.clear();
+            } else if self.sh.limits[&self.net.id()].should_yield(self.sh.owner) {
+                // Otra descarga al mismo servidor espera hueco: se suelta
+                // esta conexión y lo que falta del bloque queda libre.
+                self.buf.clear();
+                return Ok(Commit::Stop);
             }
             return Ok(commit);
         }

@@ -30,6 +30,10 @@ pub struct Settings {
     pub single_file_folders: bool,
     pub max_active: i32,
     pub connections: i32,
+    /// Límite de velocidad global: posición en [`SPEED_LIMITS`].
+    pub speed_limit: i32,
+    /// Conexiones como mucho a un mismo servidor (0 = sin tope).
+    pub max_per_server: i32,
     pub watch_clipboard: bool,
     /// Aviso al copiar enlaces: 0 completo, 1 compacto, 2 desactivado.
     pub clip_popup: i32,
@@ -53,12 +57,24 @@ impl Default for Settings {
             single_file_folders: true,
             max_active: 3,
             connections: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
+            speed_limit: 0,
+            max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
             clip_popup: 1,
             clip_popup_autoclose: true,
             clip_popup_autostart: true,
         }
     }
+}
+
+/// Opciones del límite de velocidad global (KiB/s; 0 = sin límite). El
+/// orden coincide con el desplegable "Límite" de la ventana.
+pub const SPEED_LIMITS: [u64; 10] = [0, 256, 512, 1024, 2048, 5120, 10240, 20480, 51200, 102400];
+
+/// Límite en bytes por segundo de una posición del desplegable.
+pub fn speed_limit_bytes(index: i32) -> Option<u64> {
+    let kib = SPEED_LIMITS.get(usize::try_from(index).ok()?).copied()?;
+    (kib > 0).then_some(kib * 1024)
 }
 
 impl Settings {
@@ -129,5 +145,15 @@ mod tests {
         assert!(s.package_folders);
         assert_eq!(s.clip_popup, 1);
         assert!(s.clip_popup_autoclose);
+        assert_eq!(s.speed_limit, 0);
+        assert_eq!(s.max_per_server, 8);
+    }
+
+    #[test]
+    fn speed_limit_options() {
+        assert_eq!(speed_limit_bytes(0), None);
+        assert_eq!(speed_limit_bytes(3), Some(1024 * 1024));
+        assert_eq!(speed_limit_bytes(99), None);
+        assert_eq!(speed_limit_bytes(-1), None);
     }
 }

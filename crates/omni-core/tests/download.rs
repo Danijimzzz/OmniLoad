@@ -3,8 +3,11 @@
 use std::path::Path;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use omni_core::{
-    Destination, Download, DownloadOptions, Error, Network, NetworkId, state_path_for,
+    Destination, Download, DownloadOptions, Error, Network, NetworkId, RateLimit, ServerLimits,
+    state_path_for,
 };
 use omni_testserver::{ServerConfig, TestServer, pseudo_random_bytes};
 use tokio_util::sync::CancellationToken;
@@ -526,4 +529,145 @@ async fn rejects_non_http_urls() {
         .err()
         .unwrap();
     assert!(matches!(err, Error::InvalidUrl(_)));
+}
+
+#[tokio::test]
+async fn respects_speed_limit() {
+    let data = pseudo_random_bytes((MIB) as usize, 21);
+    let server = TestServer::start(data.clone(), ServerConfig::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    // 1 MiB a 2 MiB/s: al menos ~0,4 s (descontando la ráfaga inicial).
+    let limit = Arc::new(RateLimit::new(Some(2 * MIB)));
+    let opts = DownloadOptions {
+        rate_limits: vec![limit.clone()],
+        ..fast_opts()
+    };
+    let started = std::time::Instant::now();
+    let out = Download::new(
+        &server.url("lento.bin"),
+        Destination::Dir(dir.path().into()),
+        opts,
+    )
+    .unwrap()
+    .run(CancellationToken::new())
+    .await
+    .unwrap();
+    let took = started.elapsed();
+    assert_eq!(read(&out.path), data);
+    assert!(took >= Duration::from_millis(350), "tardó {took:?}");
+}
+
+#[tokio::test]
+async fn speed_limit_can_be_lifted_mid_download() {
+    let data = pseudo_random_bytes((2 * MIB) as usize, 22);
+    let server = TestServer::start(data.clone(), ServerConfig::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    // A 64 KiB/s tardaría medio minuto; al quitar el límite acaba enseguida.
+    let limit = Arc::new(RateLimit::new(Some(64 * KIB)));
+    let opts = DownloadOptions {
+        rate_limits: vec![limit.clone()],
+        ..fast_opts()
+    };
+    let dl = Download::new(
+        &server.url("a.bin"),
+        Destination::Dir(dir.path().into()),
+        opts,
+    )
+    .unwrap();
+    let task = tokio::spawn(dl.run(CancellationToken::new()));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!task.is_finished());
+    limit.set(None);
+    let out = tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("debería acabar al quitar el límite")
+        .unwrap()
+        .unwrap();
+    assert_eq!(read(&out.path), data);
+}
+
+#[tokio::test]
+async fn downloads_to_the_same_server_share_the_connection_cap() {
+    let data = pseudo_random_bytes((2 * MIB) as usize, 23);
+    let cfg = ServerConfig {
+        chunk_delay: Some(Duration::from_millis(1)),
+        ..ServerConfig::default()
+    };
+    let server = TestServer::start(data.clone(), cfg).await;
+    let dir = tempfile::tempdir().unwrap();
+    let servers = Arc::new(ServerLimits::new(3));
+    let opts = DownloadOptions {
+        connections_per_network: 4,
+        server_limits: Some(servers.clone()),
+        ..fast_opts()
+    };
+    let mut tasks = Vec::new();
+    for name in ["uno.bin", "dos.bin"] {
+        let dl = Download::new(
+            &server.url(name),
+            Destination::Dir(dir.path().into()),
+            opts.clone(),
+        )
+        .unwrap();
+        tasks.push(tokio::spawn(dl.run(CancellationToken::new())));
+    }
+    for t in tasks {
+        let out = t.await.unwrap().unwrap();
+        assert_eq!(read(&out.path), data);
+    }
+    // Dos descargas de 4 conexiones, pero como mucho 3 a la vez al servidor
+    // (más el sondeo de la segunda, que no ocupa hueco).
+    let peak = server.peak_concurrent();
+    assert!(peak <= 4, "llegó a haber {peak} conexiones a la vez");
+    assert_eq!(server.rejected(), 0);
+}
+
+#[tokio::test]
+async fn server_limit_is_learned_and_shared() {
+    let data = pseudo_random_bytes((3 * MIB) as usize, 24);
+    let cfg = ServerConfig {
+        max_concurrent: Some(2),
+        chunk_delay: Some(Duration::from_millis(1)),
+        ..ServerConfig::default()
+    };
+    let server = TestServer::start(data.clone(), cfg).await;
+    let dir = tempfile::tempdir().unwrap();
+    let servers = Arc::new(ServerLimits::new(8));
+    let opts = DownloadOptions {
+        connections_per_network: 8,
+        server_limits: Some(servers.clone()),
+        max_retries: 3,
+        ..fast_opts()
+    };
+    let out = Download::new(
+        &server.url("a.bin"),
+        Destination::Dir(dir.path().into()),
+        opts.clone(),
+    )
+    .unwrap()
+    .run(CancellationToken::new())
+    .await
+    .unwrap();
+    assert_eq!(read(&out.path), data);
+    let learned = servers.learned();
+    assert_eq!(learned.len(), 1, "{learned:?}");
+    assert!(learned[0].max <= 2, "{learned:?}");
+
+    // La segunda descarga ya sabe el máximo: casi sin rechazos.
+    let before = server.rejected();
+    let out = Download::new(
+        &server.url("b.bin"),
+        Destination::Dir(dir.path().into()),
+        opts,
+    )
+    .unwrap()
+    .run(CancellationToken::new())
+    .await
+    .unwrap();
+    assert_eq!(read(&out.path), data);
+    assert!(
+        server.rejected() - before <= 2,
+        "rechazos en la segunda: {}",
+        server.rejected() - before
+    );
 }

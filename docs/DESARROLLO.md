@@ -18,10 +18,17 @@ En Linux hacen falta `libfontconfig` y `libxkbcommon-x11` para ejecutar (vienen
 en cualquier escritorio) y, para compilar, `sudo apt install libfontconfig-dev
 libxkbcommon-dev` en Debian/Ubuntu.
 
-Los ajustes se guardan en `ajustes.json` dentro de la carpeta de configuración
-del sistema (`%APPDATA%\OmniLoad`, `~/.config/omniload` o `~/Library/Application
-Support/OmniLoad`). La variable `OMNILOAD_AJUSTES` usa otro archivo, útil para
-pruebas.
+Los ajustes de la ventana se guardan en `ajustes.json` dentro de la carpeta de
+configuración del sistema (`%APPDATA%\OmniLoad`, `~/.config/omniload` o
+`~/Library/Application Support/OmniLoad`). La variable `OMNILOAD_AJUSTES` usa
+otro archivo, útil para pruebas.
+
+La lista de descargas, los ajustes de la cola y lo aprendido de cada servidor
+van en una base de datos SQLite, `omniload.db`, en la carpeta de datos
+(`%APPDATA%\OmniLoad`, `~/.local/share/omniload` o `~/Library/Application
+Support/OmniLoad`). La variable `OMNILOAD_DB` usa otro archivo. SQLite va
+compilado dentro del programa (`rusqlite` con `bundled`): no hay que instalar
+nada.
 
 ## Línea de comandos (`omni`)
 
@@ -73,6 +80,37 @@ se quedó, también tras un cierre forzado o un corte de luz.
 
 Si el servidor no acepta rangos, se descarga en un solo flujo sin reanudación.
 
+### Límites compartidos entre descargas
+
+- **Velocidad** (`RateLimit`): un cubo de fichas. Cada conexión descuenta lo
+  que recibe y, si se pasa, espera; al no leer del socket, TCP frena al
+  servidor solo. `DownloadOptions::rate_limits` admite varios a la vez (la
+  cola usa uno global y otro por descarga) y se cambian en caliente.
+- **Conexiones por servidor** (`ServerLimits`): el límite adaptativo ante
+  429/503 es por servidor y red, compartido por todas las descargas, porque
+  el servidor cuenta conexiones por IP. Encima va el tope del usuario. Lo
+  aprendido se guarda en SQLite y vale un mes.
+- **Reparto justo**: si una descarga espera hueco con menos de su parte
+  (límite / descargas), las que tienen más que su parte no cogen huecos
+  nuevos y sueltan una conexión en cuanto vuelcan a disco. Así una descarga
+  lenta no deja sin conexiones a las demás.
+
+## La cola (`omni-queue`)
+
+Prioridades, descargas a la vez, pausa global, límites y persistencia. La usa
+la ventana y la usará el servicio `omnid`. Detalles:
+
+- Se guarda en SQLite (`omni-store`) cada cambio de estado y, cada 2 s, el
+  progreso. El progreso fino (qué bloques faltan) sigue en el `.part.omni`:
+  una descarga se reanuda aunque se borre la base de datos.
+- Al cerrar, lo que corre se pausa guardando el progreso y queda "en espera";
+  al abrir, arranca solo.
+- Se guarda siempre el enlace original. Antes de cada arranque, un
+  `Resolver` lo convierte en enlace directo (con cabeceras y nombre si hace
+  falta). Hoy solo existe `DirectLinks`; los plugins de Mega, Gofile, Google
+  Drive y Mediafire serán resolutores, porque sus enlaces directos caducan.
+- Cada descarga guarda sus redes (vacío = la del sistema) para la multi-red.
+
 ### Preparado para varias redes
 
 La descarga multi-red irá al final del plan, pero el motor ya trabaja con
@@ -94,8 +132,10 @@ cola ni el motor.
 ```
 crates/
   omni-core/        motor de descarga (biblioteca)
-  omni-grab/        capturador de enlaces: archivo o página con archivos
     src/platform/   todo el código propio de cada sistema operativo
+  omni-grab/        capturador de enlaces: archivo o página con archivos
+  omni-store/       base de datos SQLite (lista, ajustes, servidores)
+  omni-queue/       cola de descargas con límites y persistencia
   omni-testserver/  servidor HTTP falso para las pruebas (cortes, 503, ETag)
 apps/
   omni-cli/         binario `omni`
@@ -111,18 +151,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo build --release -p omni-cli   # target/release/omni(.exe)
 cargo build --release -p omni-gui   # target/release/omniload(.exe)
 ```
-
-Antes de subir cambios, pasa estas tres comprobaciones en tu equipo (son las
-mismas que haría el CI):
-
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
-
-Además, GitHub Actions compila y prueba en Windows, Linux y macOS en cada
-cambio.
 
 ## Comprobaciones
 
