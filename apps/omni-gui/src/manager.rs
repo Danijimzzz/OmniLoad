@@ -134,8 +134,16 @@ impl Manager {
     }
 
     /// Añade una descarga y la lanza. Si ya está en la lista (misma URL y
-    /// carpeta) y estaba parada, la reanuda en vez de duplicarla.
-    pub fn add(&self, url: &str, dir: PathBuf, connections: usize) -> Result<(), String> {
+    /// carpeta) y estaba parada, la reanuda en vez de duplicarla. `name` es el
+    /// nombre que mostrar mientras el motor no confirme el real (el que
+    /// encontró el capturador, por ejemplo).
+    pub fn add(
+        &self,
+        url: &str,
+        dir: PathBuf,
+        connections: usize,
+        name: Option<String>,
+    ) -> Result<(), String> {
         let url = url.trim();
         if url.is_empty() {
             return Err("Pega un enlace primero.".into());
@@ -164,10 +172,12 @@ impl Manager {
             };
         }
 
-        let name = url::Url::parse(url)
-            .ok()
-            .and_then(|u| omni_core::filename::from_url(&u))
-            .unwrap_or_else(|| url.to_owned());
+        let name = name.unwrap_or_else(|| {
+            url::Url::parse(url)
+                .ok()
+                .and_then(|u| omni_core::filename::from_url(&u))
+                .unwrap_or_else(|| url.to_owned())
+        });
         let i = {
             let mut entries = self.entries();
             entries.push(Entry {
@@ -486,7 +496,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let m = Manager::new(Handle::current(), fast_opts());
 
-        m.add(&server.url("video.bin"), dir.path().into(), 4)
+        m.add(&server.url("video.bin"), dir.path().into(), 4, None)
             .unwrap();
         assert_eq!(m.snapshot()[0].name, "video.bin");
         let row = wait_for(&m, 0, State::Running).await;
@@ -503,14 +513,14 @@ mod tests {
 
         // Añadir el mismo enlace otra vez reanuda en lugar de duplicar.
         server.set_chunk_delay(None);
-        m.add(&server.url("video.bin"), dir.path().into(), 4)
+        m.add(&server.url("video.bin"), dir.path().into(), 4, None)
             .unwrap();
         assert_eq!(m.snapshot().len(), 1);
         let done = wait_for(&m, 0, State::Done).await;
         assert_eq!(done.fraction, Some(1.0));
         assert_eq!(std::fs::read(dir.path().join("video.bin")).unwrap(), data);
         assert!(
-            m.add(&server.url("video.bin"), dir.path().into(), 4)
+            m.add(&server.url("video.bin"), dir.path().into(), 4, None)
                 .is_err()
         );
     }
@@ -518,8 +528,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn invalid_url_is_rejected_without_row() {
         let m = Manager::new(Handle::current(), fast_opts());
-        assert!(m.add("ftp://ejemplo.com/a", PathBuf::from("."), 4).is_err());
-        assert!(m.add("   ", PathBuf::from("."), 4).is_err());
+        assert!(
+            m.add("ftp://ejemplo.com/a", PathBuf::from("."), 4, None)
+                .is_err()
+        );
+        assert!(m.add("   ", PathBuf::from("."), 4, None).is_err());
         assert!(m.snapshot().is_empty());
     }
 

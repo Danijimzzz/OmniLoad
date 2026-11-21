@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/omni-core",
+    "crates/omni-grab",
     "crates/omni-testserver",
     "apps/omni-cli",
     "apps/omni-gui",
@@ -16,6 +17,7 @@ repository = "https://github.com/Danijimzzz/OmniLoad"
 
 [workspace.dependencies]
 omni-core = { path = "crates/omni-core" }
+omni-grab = { path = "crates/omni-grab" }
 omni-testserver = { path = "crates/omni-testserver" }
 
 anyhow = "1"

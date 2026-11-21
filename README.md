@@ -10,13 +10,24 @@ rápida y ligera a JDownloader. Funciona en Windows, Linux y macOS.
 
 ```sh
 cargo run --release -p omni-gui            # abre la ventana
-cargo run --release -p omni-gui -- <url>   # y empieza a descargar ese enlace
+cargo run --release -p omni-gui -- <url>   # y analiza ese enlace
 ```
 
-El ejecutable queda en `target/release/omniload(.exe)`. Pega un enlace, elige
-carpeta y número de conexiones y pulsa **Descargar**. Cada descarga muestra
-progreso, velocidad, tiempo restante, conexiones activas (y el límite si el
-servidor rechaza conexiones de más) y los botones de pausar y reanudar.
+El ejecutable queda en `target/release/omniload(.exe)`. Funciona como el
+capturador de enlaces de JDownloader:
+
+1. Pega uno o varios enlaces (sueltos o dentro de un texto) y pulsa
+   **Analizar enlaces**.
+2. La pestaña **Capturador de enlaces** enseña los archivos encontrados, con
+   nombre, tamaño y si están disponibles, antes de descargar nada. Si el enlace
+   es una página web, aparecen los archivos enlazados desde ella (un nivel, sin
+   seguir otras páginas).
+3. Marca los que quieras, elige carpeta y conexiones y pulsa **Descargar
+   seleccionados**.
+
+La pestaña **Descargas** muestra progreso, velocidad, tiempo restante,
+conexiones activas (y el límite si el servidor rechaza conexiones de más) y
+los botones de pausar y reanudar.
 
 Pausar guarda el progreso; reanudar sigue donde se quedó. Al cerrar la ventana
 se pausa todo. La lista aún no se guarda entre sesiones (llegará con
@@ -88,6 +99,7 @@ multi-red (fase 2b) solo tendrá que añadir redes atadas a una interfaz.
 ```
 crates/
   omni-core/        motor de descarga (biblioteca)
+  omni-grab/        capturador de enlaces: archivo o página con archivos
     src/platform/   todo el código propio de cada sistema operativo
   omni-testserver/  servidor HTTP falso para las pruebas (cortes, 503, ETag)
 apps/

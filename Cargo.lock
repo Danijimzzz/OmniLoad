@@ -3912,12 +3912,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-grab"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "omni-core",
+ "reqwest",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "omni-gui"
 version = "0.1.0"
 dependencies = [
  "dirs",
  "omni-core",
+ "omni-grab",
  "omni-testserver",
+ "reqwest",
  "rfd",
  "slint",
  "slint-build",

@@ -4,7 +4,7 @@
 // fila de la lista es un `DownloadRow` que Rust rellena cuatro veces por
 // segundo a partir del `Progress` del motor.
 
-import { Button, LineEdit, SpinBox, ProgressIndicator, ListView, Palette } from "std-widgets.slint";
+import { Button, CheckBox, LineEdit, ListView, Palette, ProgressIndicator, SpinBox, TabWidget, TextEdit } from "std-widgets.slint";
 
 // Estado de una descarga, tal como lo pinta la interfaz.
 export enum RowState { starting, running, pausing, paused, done, failed }
@@ -21,6 +21,74 @@ export struct DownloadRow {
     eta: string,
     connections: string,
     detail: string,
+}
+
+// Estado de un enlace del capturador.
+export enum GrabState { checking, online, offline }
+
+export struct GrabRow {
+    name: string,
+    size: string,
+    source: string,
+    status: string,
+    state: GrabState,
+    selected: bool,
+}
+
+// Una fila del capturador: casilla, nombre, tamaño, estado y origen.
+component GrabLine inherits Rectangle {
+    in property <GrabRow> item;
+    callback toggled(bool);
+    callback remove();
+
+    background: Palette.alternate-background;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Palette.border;
+
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 10px;
+        CheckBox {
+            checked: item.selected;
+            enabled: item.state != GrabState.offline;
+            toggled => { root.toggled(self.checked); }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                text: item.name;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: item.source;
+                opacity: 0.6;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+        Text {
+            text: item.size;
+            vertical-alignment: center;
+            min-width: 80px;
+            horizontal-alignment: right;
+        }
+        Text {
+            text: item.status;
+            vertical-alignment: center;
+            width: 230px;
+            overflow: elide;
+            color: item.state == GrabState.offline ? #d13438
+                : item.state == GrabState.online ? #2e9d4e
+                : Palette.foreground;
+        }
+        Button {
+            text: "Quitar";
+            clicked => { root.remove(); }
+        }
+    }
 }
 
 component Card inherits Rectangle {
@@ -115,20 +183,32 @@ component Card inherits Rectangle {
 export component AppWindow inherits Window {
     title: "OmniLoad";
     icon: @image-url("icon.png");
-    preferred-width: 820px;
-    preferred-height: 560px;
-    min-width: 560px;
-    min-height: 360px;
+    preferred-width: 900px;
+    preferred-height: 620px;
+    min-width: 640px;
+    min-height: 420px;
 
-    in-out property <string> url;
+    in-out property <string> links;
     in-out property <string> folder;
     in-out property <int> connections: 8;
+    // 0 = capturador de enlaces, 1 = descargas.
+    in-out property <int> tab: 0;
+    in property <[GrabRow]> grabbed;
+    in property <string> grab-summary;
+    in property <int> grab-selected;
     in property <[DownloadRow]> downloads;
     in property <string> message;
     in property <bool> message-is-error;
 
-    callback add-download(/* url */ string, /* carpeta */ string, /* conexiones */ int);
+    callback analyze(/* texto pegado */ string);
     callback choose-folder();
+    // Capturador.
+    callback grab-toggle(int, bool);
+    callback grab-select-all(bool);
+    callback grab-remove(int);
+    callback grab-clear();
+    callback grab-download(/* carpeta */ string, /* conexiones */ int);
+    // Descargas.
     callback pause(int);
     callback resume(int);
     callback open-folder(int);
@@ -140,47 +220,16 @@ export component AppWindow inherits Window {
 
         HorizontalLayout {
             spacing: 8px;
-            Text {
-                text: "Enlace";
-                vertical-alignment: center;
-                min-width: 70px;
-            }
-            url-edit := LineEdit {
-                placeholder-text: "Pega aquí el enlace (http o https) y pulsa Intro";
-                text <=> root.url;
-                accepted => { root.add-download(root.url, root.folder, root.connections); }
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 8px;
-            Text {
-                text: "Carpeta";
-                vertical-alignment: center;
-                min-width: 70px;
-            }
-            LineEdit {
-                text <=> root.folder;
-                placeholder-text: "Carpeta donde guardar";
+            links-edit := TextEdit {
+                placeholder-text: "Pega aquí uno o varios enlaces (de archivos o de páginas con archivos)";
+                text <=> root.links;
+                wrap: word-wrap;
+                height: 64px;
             }
             Button {
-                text: "Elegir…";
-                clicked => { root.choose-folder(); }
-            }
-            Text {
-                text: "Conexiones";
-                vertical-alignment: center;
-            }
-            SpinBox {
-                minimum: 1;
-                maximum: 32;
-                value <=> root.connections;
-                width: 90px;
-            }
-            Button {
-                text: "Descargar";
+                text: "Analizar enlaces";
                 primary: true;
-                clicked => { root.add-download(root.url, root.folder, root.connections); }
+                clicked => { root.analyze(root.links); }
             }
         }
 
@@ -190,29 +239,129 @@ export component AppWindow inherits Window {
             color: root.message-is-error ? #d13438 : Palette.foreground;
         }
 
-        if root.downloads.length == 0: Rectangle {
+        TabWidget {
             vertical-stretch: 1;
-            Text {
-                text: "Aún no hay descargas. Pega un enlace arriba para empezar.";
-                opacity: 0.6;
-            }
-        }
+            current-index <=> root.tab;
 
-        if root.downloads.length > 0: ListView {
-            vertical-stretch: 1;
-            for row[i] in root.downloads: VerticalLayout {
-                padding-bottom: 8px;
-                padding-right: 4px;
-                Card {
-                    item: row;
-                    pause => { root.pause(i); }
-                    resume => { root.resume(i); }
-                    open-folder => { root.open-folder(i); }
-                    remove => { root.remove(i); }
+            Tab {
+                title: root.grabbed.length > 0
+                    ? "Capturador de enlaces (\{root.grabbed.length})"
+                    : "Capturador de enlaces";
+                VerticalLayout {
+                    padding-top: 10px;
+                    spacing: 8px;
+
+                    if root.grabbed.length == 0: Rectangle {
+                        vertical-stretch: 1;
+                        Text {
+                            text: "Pega enlaces arriba y pulsa Analizar enlaces.\nAquí verás los archivos encontrados antes de descargarlos.";
+                            horizontal-alignment: center;
+                            opacity: 0.6;
+                        }
+                    }
+
+                    if root.grabbed.length > 0: ListView {
+                        vertical-stretch: 1;
+                        for row[i] in root.grabbed: VerticalLayout {
+                            padding-bottom: 6px;
+                            padding-right: 4px;
+                            GrabLine {
+                                item: row;
+                                toggled(on) => { root.grab-toggle(i, on); }
+                                remove => { root.grab-remove(i); }
+                            }
+                        }
+                    }
+
+                    if root.grabbed.length > 0: HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: root.grab-summary;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Button {
+                            text: "Todos";
+                            clicked => { root.grab-select-all(true); }
+                        }
+                        Button {
+                            text: "Ninguno";
+                            clicked => { root.grab-select-all(false); }
+                        }
+                        Button {
+                            text: "Vaciar lista";
+                            clicked => { root.grab-clear(); }
+                        }
+                    }
+
+                    if root.grabbed.length > 0: HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Guardar en";
+                            vertical-alignment: center;
+                        }
+                        LineEdit {
+                            text <=> root.folder;
+                            placeholder-text: "Carpeta donde guardar";
+                        }
+                        Button {
+                            text: "Elegir…";
+                            clicked => { root.choose-folder(); }
+                        }
+                        Text {
+                            text: "Conexiones";
+                            vertical-alignment: center;
+                        }
+                        SpinBox {
+                            minimum: 1;
+                            maximum: 32;
+                            value <=> root.connections;
+                            width: 90px;
+                        }
+                        Button {
+                            text: "Descargar seleccionados (\{root.grab-selected})";
+                            primary: true;
+                            enabled: root.grab-selected > 0;
+                            clicked => { root.grab-download(root.folder, root.connections); }
+                        }
+                    }
+                }
+            }
+
+            Tab {
+                title: root.downloads.length > 0
+                    ? "Descargas (\{root.downloads.length})"
+                    : "Descargas";
+                VerticalLayout {
+                    padding-top: 10px;
+
+                    if root.downloads.length == 0: Rectangle {
+                        vertical-stretch: 1;
+                        Text {
+                            text: "Aún no hay descargas.";
+                            opacity: 0.6;
+                        }
+                    }
+
+                    if root.downloads.length > 0: ListView {
+                        vertical-stretch: 1;
+                        for row[i] in root.downloads: VerticalLayout {
+                            padding-bottom: 8px;
+                            padding-right: 4px;
+                            Card {
+                                item: row;
+                                pause => { root.pause(i); }
+                                resume => { root.resume(i); }
+                                open-folder => { root.open-folder(i); }
+                                remove => { root.remove(i); }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    init => { url-edit.focus(); }
+    init => { links-edit.focus(); }
 }

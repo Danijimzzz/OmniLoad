@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 dirs.workspace = true
 omni-core.workspace = true
+omni-grab.workspace = true
+reqwest.workspace = true
 rfd.workspace = true
 slint.workspace = true
 tokio.workspace = true
