@@ -574,8 +574,8 @@ async fn worker(sh: Arc<Shared>, net: Network) {
 
         // 429/503 con varias conexiones abiertas: el servidor limita cuántas
         // acepta. Se baja el límite y no cuenta como fallo.
-        let too_many = matches!(f.error, Error::HttpStatus { status: 429 | 503 })
-            && limiter.reject(sh.progress.receiving(net.id()));
+        let too_many =
+            matches!(f.error, Error::HttpStatus { status: 429 | 503 }) && limiter.reject();
         let delay = if too_many {
             sh.progress.set_limit(net.id(), limiter.allowed());
             info!(

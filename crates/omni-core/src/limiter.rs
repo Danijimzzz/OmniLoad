@@ -63,27 +63,28 @@ impl LimitState {
         self.active = self.active.saturating_sub(1);
     }
 
-    /// El servidor rechazó una conexión mientras `receiving` recibían datos.
-    /// Devuelve `true` si el límite bajó (el rechazo se debía a que había
-    /// demasiadas conexiones) y `false` si ya estaba en 1 (el servidor
-    /// rechaza incluso una sola: es un error de verdad).
-    pub fn reject(&mut self, receiving: usize, now: Instant) -> bool {
+    /// El servidor rechazó una conexión (que ya soltó su hueco). Las que
+    /// siguen ocupando hueco son las que el servidor aceptó o aún no ha
+    /// contestado, así que el límite baja a ese número. Devuelve `true` si el
+    /// rechazo se debía a un exceso de conexiones y `false` si el límite ya
+    /// era 1 y no quedaba ninguna otra (el servidor rechaza incluso una
+    /// sola: es un error de verdad).
+    pub fn reject(&mut self, now: Instant) -> bool {
         let burst = self
             .last_reject
             .is_some_and(|t| now.duration_since(t) < REJECT_WINDOW);
+        self.last_reject = Some(now);
+        self.last_change = now;
         if burst {
-            // Ya se bajó por este mismo golpe de rechazos.
-            self.last_change = now;
+            // Mismo golpe de rechazos: bajar hasta las que siguen dentro, sin
+            // restar una más por cada rechazo.
+            self.allowed = self.active.clamp(1, self.allowed);
             return true;
         }
-        self.last_reject = Some(now);
-        if self.allowed <= 1 {
-            self.last_change = now;
+        if self.allowed <= 1 && self.active == 0 {
             return false;
         }
-        let target = receiving.clamp(1, self.allowed - 1);
-        self.allowed = target;
-        self.last_change = now;
+        self.allowed = self.active.clamp(1, self.allowed.saturating_sub(1).max(1));
         true
     }
 
@@ -140,8 +141,8 @@ impl Limiter {
         self.notify.notify_waiters();
     }
 
-    pub fn reject(&self, receiving: usize) -> bool {
-        self.lock().reject(receiving, Instant::now())
+    pub fn reject(&self) -> bool {
+        self.lock().reject(Instant::now())
     }
 }
 
@@ -149,24 +150,33 @@ impl Limiter {
 mod tests {
     use super::*;
 
+    /// 8 conexiones contra un servidor que acepta `accepts`: las de más
+    /// reciben el rechazo una tras otra y sueltan su hueco.
+    fn burst(s: &mut LimitState, now: Instant, conns: usize, accepts: usize) {
+        for _ in 0..conns {
+            assert!(s.try_acquire(now));
+        }
+        for _ in accepts..conns {
+            s.release();
+            assert!(s.reject(now));
+        }
+    }
+
     #[test]
-    fn lowers_to_receiving_and_grows_back() {
+    fn settles_on_what_the_server_accepts() {
         let t0 = Instant::now();
         let mut s = LimitState::new(8, t0, GROW_AFTER);
-        for _ in 0..8 {
-            assert!(s.try_acquire(t0));
-        }
-        assert!(!s.try_acquire(t0));
-        // 6 conexiones rechazadas mientras 2 reciben datos.
-        assert!(s.reject(2, t0));
+        burst(&mut s, t0, 8, 5);
+        assert_eq!(s.allowed(), 5);
+    }
+
+    #[test]
+    fn grows_back_after_a_quiet_minute() {
+        let t0 = Instant::now();
+        let mut s = LimitState::new(8, t0, GROW_AFTER);
+        burst(&mut s, t0, 8, 2);
         assert_eq!(s.allowed(), 2);
-        for _ in 0..8 {
-            s.release();
-        }
-        assert!(s.try_acquire(t0));
-        assert!(s.try_acquire(t0));
         assert!(!s.try_acquire(t0));
-        // A los 60 s sin rechazos se prueba con una más.
         let t1 = t0 + GROW_AFTER;
         assert!(s.try_acquire(t1));
         assert_eq!(s.allowed(), 3);
@@ -174,32 +184,27 @@ mod tests {
     }
 
     #[test]
-    fn never_below_one() {
+    fn a_later_rejection_lowers_by_at_least_one() {
+        let t0 = Instant::now();
+        let mut s = LimitState::new(8, t0, GROW_AFTER);
+        for _ in 0..8 {
+            assert!(s.try_acquire(t0));
+        }
+        s.release();
+        assert!(s.reject(t0));
+        assert_eq!(s.allowed(), 7);
+    }
+
+    #[test]
+    fn single_connection_rejected_is_a_real_error() {
         let t0 = Instant::now();
         let mut s = LimitState::new(4, t0, GROW_AFTER);
-        assert!(s.reject(0, t0));
+        burst(&mut s, t0, 4, 0);
         assert_eq!(s.allowed(), 1);
-        // Con una sola conexión, un rechazo ya no baja nada: es un fallo real.
         let t1 = t0 + Duration::from_secs(5);
-        assert!(!s.reject(0, t1));
+        assert!(s.try_acquire(t1));
+        s.release();
+        assert!(!s.reject(t1));
         assert_eq!(s.allowed(), 1);
-    }
-
-    #[test]
-    fn simultaneous_rejections_count_once() {
-        let t0 = Instant::now();
-        let mut s = LimitState::new(8, t0, GROW_AFTER);
-        for _ in 0..6 {
-            assert!(s.reject(2, t0));
-        }
-        assert_eq!(s.allowed(), 2);
-    }
-
-    #[test]
-    fn each_rejection_lowers_at_least_one() {
-        let t0 = Instant::now();
-        let mut s = LimitState::new(8, t0, GROW_AFTER);
-        assert!(s.reject(8, t0));
-        assert_eq!(s.allowed(), 7);
     }
 }

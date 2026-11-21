@@ -243,6 +243,48 @@ async fn adapts_to_server_connection_limit() {
 }
 
 #[tokio::test]
+async fn connection_limit_settles_on_what_server_accepts() {
+    // Con un servidor que acepta 5, el límite no debe hundirse a 1 por
+    // recibir varios 429 a la vez.
+    let data = pseudo_random_bytes((6 * MIB) as usize, 12);
+    let cfg = ServerConfig {
+        max_concurrent: Some(5),
+        chunk_delay: Some(Duration::from_millis(2)),
+        ..ServerConfig::default()
+    };
+    let server = TestServer::start(data.clone(), cfg).await;
+    let dir = tempfile::tempdir().unwrap();
+    let opts = DownloadOptions {
+        connections_per_network: 8,
+        ..fast_opts()
+    };
+    let dl = Download::new(
+        &server.url("a.bin"),
+        Destination::Dir(dir.path().into()),
+        opts,
+    )
+    .unwrap();
+    let progress = dl.progress();
+    let task = tokio::spawn(dl.run(CancellationToken::new()));
+    // A mitad de descarga, mirar cuántas conexiones reciben datos.
+    let mut best = 0;
+    while !task.is_finished() {
+        let stats = progress.per_network();
+        let s = stats.values().next().copied().unwrap_or_default();
+        best = best.max(s.receiving);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let out = task.await.unwrap().unwrap();
+    assert_eq!(read(&out.path), data);
+    let limit = progress.per_network().values().next().unwrap().limit;
+    assert!(limit >= 4, "límite final {limit}, el servidor acepta 5");
+    assert!(
+        best >= 4,
+        "como mucho {best} conexiones recibiendo a la vez"
+    );
+}
+
+#[tokio::test]
 async fn gives_up_after_max_retries() {
     let cfg = ServerConfig {
         fail_first: 1000,
