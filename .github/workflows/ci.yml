@@ -1,9 +1,10 @@
 name: CI
 
+# Desactivado en cada cambio: la cuenta no tiene minutos de GitHub Actions.
+# Solo se lanza a mano desde la pestaña Actions ("Run workflow"). Para
+# reactivarlo, volver a añadir `push` y `pull_request` aquí.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

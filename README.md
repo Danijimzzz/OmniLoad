@@ -72,8 +72,17 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo build --release -p omni-cli   # target/release/omni(.exe)
 ```
 
-La integración continua compila y prueba en Windows, Linux y macOS en cada
-cambio.
+Antes de subir cambios, pasa estas tres comprobaciones en tu equipo (son las
+mismas que haría el CI):
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+El workflow de GitHub Actions (Windows, Linux y macOS) está desactivado en cada
+cambio y solo se lanza a mano desde la pestaña Actions.
 
 ## Licencia
 
