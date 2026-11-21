@@ -73,8 +73,14 @@ impl fmt::Debug for Network {
 
 /// Configuración común de los clientes HTTP del motor. Sin descompresión
 /// automática: necesitamos los bytes tal cual para que los rangos cuadren.
+///
+/// Solo HTTP/1.1: con HTTP/2 el cliente mete todas las peticiones de bloques
+/// en una única conexión TCP (varios flujos multiplexados), así que no hay
+/// paralelismo real, y muchos servidores cortan los flujos de más. Cada
+/// conexión del motor tiene que ser una conexión TCP propia.
 pub fn default_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
+        .http1_only()
         .user_agent(concat!("OmniLoad/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(30))
