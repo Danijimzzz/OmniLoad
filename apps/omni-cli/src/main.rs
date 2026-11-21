@@ -6,11 +6,14 @@
 //! omni list
 //! omni pause [id...] | omni resume [id...] | omni remove <id...>
 //! omni limit <8M | off> [--id ID...]
+//! omni check <url o archivo>...
+//! omni grab <url o archivo>...
 //! omni service status | stop
 //! ```
 //!
 //! `get` descarga directamente en la terminal (sin servicio): Ctrl+C pausa la
 //! descarga guardando el progreso y ejecutar el mismo comando la reanuda.
+//! `check` comprueba enlaces sin descargar nada (también sin servicio).
 //!
 //! El resto habla con el servicio `omnid` (el mismo que usa la ventana), y lo
 //! lanza si no está en marcha: las descargas siguen aunque se cierre la
@@ -25,6 +28,7 @@ use clap::{Args, Parser, Subcommand};
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
 use omni_api::{Client, Paths, connect_or_launch, omnid_exe};
 use omni_core::{Destination, Download, DownloadOptions, Error};
+use omni_grab::{Check, Checkers, Grabber};
 use omni_queue::{JobInfo, NewJob};
 use tokio_util::sync::CancellationToken;
 
@@ -59,6 +63,18 @@ enum Command {
     },
     /// Límite de velocidad: global, o de unas descargas con --id.
     Limit(LimitArgs),
+    /// Comprueba enlaces sin descargarlos: nombre, tamaño y si están
+    /// disponibles. Acepta también archivos .txt o .html con enlaces.
+    Check {
+        #[arg(required = true, value_name = "URL_O_ARCHIVO")]
+        links: Vec<String>,
+    },
+    /// Manda enlaces al capturador del servicio (aparecen en la ventana para
+    /// elegir qué descargar).
+    Grab {
+        #[arg(required = true, value_name = "URL_O_ARCHIVO")]
+        links: Vec<String>,
+    },
     /// El servicio en segundo plano.
     Service {
         #[command(subcommand)]
@@ -180,6 +196,7 @@ async fn run(cli: Cli) -> Result<ExitCode> {
     match cli.command {
         Command::Get(args) => get(args).await,
         Command::Service { action } => service(action).await,
+        Command::Check { links } => check(&links).await,
         cmd => {
             let c = connect().await?;
             remote(&c, cmd).await?;
@@ -261,9 +278,91 @@ async fn remote(c: &Client, cmd: Command) -> Result<()> {
                 c.set_job_speed_limit(&l.ids, speed).await?;
             }
         }
-        Command::Get(_) | Command::Service { .. } => unreachable!(),
+        Command::Grab { links } => {
+            let req = omni_api::AddLinksRequest {
+                text: links_text(&links)?,
+                ..Default::default()
+            };
+            let added = c.add_links(&req).await?;
+            println!(
+                "{} enlaces al capturador: ábrelo en la ventana para elegir qué descargar",
+                added.added
+            );
+        }
+        Command::Get(_) | Command::Service { .. } | Command::Check { .. } => unreachable!(),
     }
     Ok(())
+}
+
+/// Los enlaces de los argumentos: URLs sueltas o archivos con enlaces.
+fn links_text(args: &[String]) -> Result<String> {
+    let mut out = String::new();
+    for a in args {
+        let path = std::path::Path::new(a);
+        if path.is_file() {
+            let bytes = std::fs::read(path).with_context(|| format!("no se pudo leer {a}"))?;
+            let urls = omni_grab::links_from_file(a, &bytes).map_err(anyhow::Error::msg)?;
+            for u in urls {
+                out.push_str(u.as_str());
+                out.push('\n');
+            }
+        } else {
+            out.push_str(a);
+            out.push('\n');
+        }
+    }
+    Ok(out)
+}
+
+/// `omni check`: comprueba enlaces aquí mismo, sin servicio.
+async fn check(links: &[String]) -> Result<ExitCode> {
+    let text = links_text(links)?;
+    let net = omni_core::Network::system_default()?;
+    let g = Grabber::new(
+        tokio::runtime::Handle::current(),
+        net.client().clone(),
+        Checkers::new(),
+    );
+    g.add_to_batch(&text, 0).map_err(anyhow::Error::msg)?;
+    loop {
+        let pending = g
+            .snapshot()
+            .iter()
+            .flat_map(|p| &p.items)
+            .any(|i| i.check == Check::Checking);
+        if !pending {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    for note in g.take_notes() {
+        eprintln!("{note}");
+    }
+    let mut offline = 0;
+    for p in g.snapshot() {
+        println!("{}", p.name);
+        for i in &p.items {
+            let size = i
+                .size
+                .map(|s| HumanBytes(s).to_string())
+                .unwrap_or_else(|| "?".into());
+            let state = match &i.check {
+                Check::Online { resumable: true } => "disponible".to_owned(),
+                Check::Online { resumable: false } => "disponible (una conexión)".to_owned(),
+                Check::Offline(e) => {
+                    offline += 1;
+                    format!("no disponible: {e}")
+                }
+                Check::Checking => unreachable!(),
+            };
+            println!("  {}\t{size}\t{state}\t{}", i.name, i.url);
+        }
+    }
+    Ok(if offline > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 fn print_jobs(jobs: &[JobInfo]) {

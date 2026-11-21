@@ -59,7 +59,15 @@ omni pause [id...]     omni resume [id...]       # sin ids: todas
 omni remove <id...>                              # quita de la lista (no borra archivos)
 omni limit 2M          omni limit off            # límite global
 omni limit 500K --id 3                           # límite de una descarga
+omni grab <url o archivo.txt>...                 # al capturador de la ventana
 omni service status    omni service stop
+```
+
+Sin servicio, para comprobar enlaces sin descargar (nombre, tamaño, si están
+disponibles; sale con error si alguno está caído):
+
+```sh
+omni check https://ejemplo.com/a.zip lista.txt
 ```
 
 Sin servicio, descargando directamente en la terminal (lo mejor para depurar,
@@ -163,10 +171,53 @@ en el servicio `omnid`. Detalles:
 | POST | `/queue/start-all`, `/queue/pause-all`, `/queue/stop-all` | botones de la barra |
 | GET/PUT | `/settings` | ajustes de la cola |
 | GET | `/servers` | conexiones por servidor |
+| GET | `/grabber` | el capturador: paquetes, archivos y avisos |
+| POST | `/grabber/links` | `{"text": "...", "new_batch": true}` → `{"added", "batch"}` |
+| POST | `/grabber/command` | `{"op": "select_item", "id": 3, "selected": false}`, `rename_package`, `recheck`… (`GrabCommand`) |
+| POST | `/grabber/take` | `{"pick": "selected", "dest": {..}, "start": true}`: a la cola |
 | POST | `/shutdown` | parar el servicio |
 
-- La ventana usa `RemoteQueue`: pregunta cuatro veces por segundo en segundo
-  plano y manda las órdenes sin bloquear su hilo.
+- La ventana usa `RemoteQueue` y `RemoteGrabber`: preguntan cuatro veces por
+  segundo en segundo plano y mandan las órdenes sin bloquear su hilo.
+
+## El capturador (`omni-grab`)
+
+- Vive en `omnid`, junto a la cola: lo que llega desde la ventana, la
+  terminal (`omni grab`) o, más adelante, el navegador va a la misma lista. Se
+  guarda en la base de datos cada vez que cambia (como mucho cada 2 s) y al
+  parar.
+- Comprobar un enlace cuesta una petición: `GET` con `Range: bytes=0-0`; la
+  respuesta dice si es página (`text/html`) o archivo, y de un archivo su
+  tamaño, nombre y si acepta rangos (`omni_core::info_from_response`, lo mismo
+  que usa el motor). De una página se sacan los enlaces a archivos, un nivel.
+- Hasta 24 comprobaciones a la vez, y 8 como mucho por servidor (o lo que
+  diga su plugin) para no provocar bloqueos. Cien enlaces a un servidor que
+  tarda 100 ms en contestar: ~1,3 s (`hundred_links_quickly`).
+- Los enlaces que ya están en la lista de descargas (mismo enlace) salen
+  desmarcados y con el aviso "Ya está en Descargas".
+- Al copiar, además del texto se lee el HTML del portapapeles: los enlaces
+  escondidos detrás de palabras se añaden si parecen archivos o son de hosts
+  conocidos (`FILE_HOSTS`), para no traer los menús de una web al copiar un
+  párrafo. El `#fragmento` se conserva (en Mega es la clave).
+- Archivos de enlaces: `.txt`, `.html`, `.crawljob`. Los `.dlc` de JDownloader
+  van cifrados con una clave que solo da su servidor: se explica y no se
+  abren.
+
+### Preparado para los plugins de hosts (fase 5)
+
+Cada host (Mega, Gofile, Google Drive, Mediafire…) tendrá un plugin con dos
+caras:
+
+- `omni_grab::HostChecker` para el capturador: reconoce sus enlaces, los
+  comprueba (nombre, tamaño, caído) y puede devolver una carpeta entera ya
+  comprobada (`Found::Folder`). Se registra en `Checkers` en
+  `omni-api/src/server.rs` (`open_grabber`). La prueba `host_plugins_check_their_links`
+  usa uno de mentira.
+- `omni_queue::Resolver` para la descarga: el enlace directo, justo antes de
+  bajar.
+
+El cliente HTTP con el que se comprueba es el de una `Network`, igual que en
+el motor, así que la multi-red no cambia nada aquí.
 
 ### Preparado para varias redes
 
@@ -190,7 +241,7 @@ cola ni el motor.
 crates/
   omni-core/        motor de descarga (biblioteca)
     src/platform/   todo el código propio de cada sistema operativo
-  omni-grab/        capturador de enlaces: archivo o página con archivos
+  omni-grab/        capturador de enlaces: comprobación, paquetes, plugins de hosts
   omni-store/       base de datos SQLite (lista, ajustes, servidores)
   omni-queue/       cola de descargas con límites y persistencia
   omni-api/         servicio (API local) y sus clientes

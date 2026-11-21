@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use slint::winit_030::winit;
 
-use crate::grabber::{Check, GrabItem};
+use omni_grab::{Check, GrabItem};
 
 /// Lo que pasa con la tanda de enlaces que enseña el aviso.
 #[derive(Debug, Default)]
@@ -141,9 +141,12 @@ fn arc(from: f64, to: f64) -> String {
 }
 
 /// Texto y tono del estado de un enlace en el aviso.
-pub fn status(check: &Check) -> (&'static str, bool, i32) {
-    // (texto, disponible, tono: 1 bien, 3 error, 4 apagado)
-    match check {
+pub fn status(item: &GrabItem) -> (&'static str, bool, i32) {
+    // (texto, disponible, tono: 1 bien, 2 aviso, 3 error, 4 apagado)
+    if item.duplicate && matches!(item.check, Check::Online { .. }) {
+        return ("Ya en Descargas", true, 2);
+    }
+    match &item.check {
         Check::Checking => ("Comprobando…", false, 4),
         Check::Online { .. } => ("Disponible", true, 1),
         Check::Offline(_) => ("Caído", false, 3),
@@ -233,9 +236,12 @@ mod tests {
             id,
             name: format!("{id}.zip"),
             host: "a.com".into(),
+            url: format!("https://a.com/{id}.zip"),
             size: None,
             check,
             selected,
+            duplicate: false,
+            batch: 1,
         }
     }
 

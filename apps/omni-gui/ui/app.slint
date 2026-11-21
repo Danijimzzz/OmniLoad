@@ -750,6 +750,7 @@ export component AppWindow inherits Window {
     in property <[GrabTreeRow]> grabbed;
     in property <int> grab-count;
     in property <int> grab-selected-count;
+    in property <int> grab-offline-count;
     in property <string> grab-summary;
     in property <bool> pkg-selected;
     in property <string> pkg-title;
@@ -762,6 +763,7 @@ export component AppWindow inherits Window {
     in-out property <string> add-dialog-text;
 
     callback add-links(string);
+    callback add-links-file();
     callback dl-click(int, bool);
     callback dl-toggle(int);
     callback dl-search(string);
@@ -780,6 +782,7 @@ export component AppWindow inherits Window {
     callback grab-check(int, bool, bool);
     callback grab-select-all(bool);
     callback grab-remove-offline();
+    callback grab-recheck();
     callback grab-clear();
     callback grab-search(string);
     // true = "Iniciar descargas"; false = "Añadir a descargas".
@@ -1269,10 +1272,14 @@ export component AppWindow inherits Window {
                     }
                     Btn { text: "Todos"; clicked => { root.grab-select-all(true); } }
                     Btn { text: "Ninguno"; clicked => { root.grab-select-all(false); } }
-                    Btn { text: "Quitar no disponibles"; clicked => { root.grab-remove-offline(); } }
-                    Btn { text: "Vaciar capturador"; clicked => { root.grab-clear(); } }
+                    if root.grab-offline-count > 0: Btn {
+                        text: "Reintentar caídos";
+                        clicked => { root.grab-recheck(); }
+                    }
+                    Btn { text: "Quitar caídos"; clicked => { root.grab-remove-offline(); } }
+                    Btn { text: "Vaciar"; clicked => { root.grab-clear(); } }
                     LineEdit {
-                        width: 150px;
+                        width: 120px;
                         placeholder-text: "Buscar";
                         edited(t) => { root.grab-search(t); }
                     }
@@ -1565,7 +1572,7 @@ export component AppWindow inherits Window {
                 spacing: 12px;
                 Text { text: "Añadir enlaces"; font-size: 18px; font-weight: 700; color: Theme.text; }
                 Text {
-                    text: "Pega uno o varios enlaces, sueltos o dentro de un texto. También sirven páginas con enlaces a archivos.";
+                    text: "Pega uno o varios enlaces, sueltos o dentro de un texto. También sirven páginas con enlaces a archivos, o una lista guardada en un archivo .txt o .html.";
                     wrap: word-wrap;
                     color: Theme.muted;
                 }
@@ -1576,7 +1583,12 @@ export component AppWindow inherits Window {
                 }
                 HorizontalLayout {
                     spacing: 8px;
-                    alignment: end;
+                    Btn {
+                        text: "Abrir archivo…";
+                        icon: "M4 6h6l2 2h8v10H4z";
+                        clicked => { root.add-links-file(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                     Btn {
                         text: "Cancelar";
                         clicked => { root.add-dialog-open = false; }

@@ -10,7 +10,8 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use omni_core::{DownloadOptions, ServerStatus};
+use omni_core::{DownloadOptions, Network, ServerStatus};
+use omni_grab::{Added, Checkers, GrabCommand, Grabber};
 use omni_queue::{JobInfo, NewJob, Queue, QueueConfig, QueueSettings};
 use omni_store::Store;
 use tokio::net::TcpListener;
@@ -20,7 +21,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::paths::{Endpoint, Paths};
-use crate::types::{AddResponse, ErrorResponse, Ids, PriorityRequest, SpeedLimitRequest, Status};
+use crate::types::{
+    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest,
+    SpeedLimitRequest, Status, TakeRequest, TakeResponse,
+};
 
 /// Errores al arrancar el servicio.
 #[derive(Debug, thiserror::Error)]
@@ -31,14 +35,21 @@ pub enum ServiceError {
     Store(#[from] omni_store::Error),
     #[error("error de E/S: {0}")]
     Io(#[from] std::io::Error),
+    #[error("{0}")]
+    Network(#[from] omni_core::Error),
 }
 
 /// Tiempo máximo para que las descargas guarden su progreso al parar.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+/// Cada cuánto se guarda el capturador, si cambió.
+const GRABBER_SAVE_EVERY: Duration = Duration::from_secs(2);
+/// Clave del capturador en la base de datos.
+const GRABBER_KEY: &str = "capturador";
 
 #[derive(Clone)]
 struct App {
     queue: Queue,
+    grabber: Grabber,
     token: Arc<str>,
     stop: CancellationToken,
 }
@@ -46,6 +57,9 @@ struct App {
 /// El servicio en marcha.
 pub struct Service {
     queue: Queue,
+    grabber: Grabber,
+    store: Arc<Store>,
+    saver: JoinHandle<()>,
     stop: CancellationToken,
     server: JoinHandle<()>,
     paths: Paths,
@@ -71,9 +85,10 @@ impl Service {
         }
 
         let store = Arc::new(Store::open(&paths.db)?);
-        let mut cfg = QueueConfig::new(store);
+        let mut cfg = QueueConfig::new(store.clone());
         cfg.base = base;
         let queue = Queue::open(Handle::current(), cfg)?;
+        let grabber = open_grabber(&queue, &store)?;
 
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let port = listener.local_addr()?.port();
@@ -81,6 +96,7 @@ impl Service {
         let stop = CancellationToken::new();
         let app = App {
             queue: queue.clone(),
+            grabber: grabber.clone(),
             token: token.clone().into(),
             stop: stop.clone(),
         };
@@ -103,8 +119,16 @@ impl Service {
         }
         .write(&paths.endpoint)?;
         info!("servicio en marcha en 127.0.0.1:{port}");
+        let saver = tokio::spawn(save_grabber_loop(
+            grabber.clone(),
+            store.clone(),
+            stop.clone(),
+        ));
         Ok(Self {
             queue,
+            grabber,
+            store,
+            saver,
             stop,
             server,
             paths: paths.clone(),
@@ -121,6 +145,10 @@ impl Service {
         &self.queue
     }
 
+    pub fn grabber(&self) -> &Grabber {
+        &self.grabber
+    }
+
     /// Se cancela cuando alguien pide parar el servicio por la API.
     pub fn stop_requested(&self) -> CancellationToken {
         self.stop.clone()
@@ -130,9 +158,50 @@ impl Service {
     pub async fn stop(self) {
         self.stop.cancel();
         let _ = self.server.await;
+        let _ = self.saver.await;
+        save_grabber(&self.grabber, &self.store);
         self.queue.shutdown(SHUTDOWN_GRACE).await;
         let _ = std::fs::remove_file(&self.paths.endpoint);
         info!("servicio parado");
+    }
+}
+
+/// El capturador, con lo que quedó la última vez. Avisa de los enlaces que
+/// ya están en la lista de descargas.
+fn open_grabber(queue: &Queue, store: &Store) -> Result<Grabber, ServiceError> {
+    let net = Network::system_default()?;
+    let known = queue.clone();
+    // Los plugins de hosts (fase 5) se añadirán aquí con `Checkers::with`.
+    let grabber = Grabber::new(Handle::current(), net.client().clone(), Checkers::new())
+        .with_known_links(Arc::new(move |url| known.contains_url(url)));
+    match store.setting(GRABBER_KEY) {
+        Ok(Some(saved)) => grabber.restore(saved),
+        Ok(None) => {}
+        Err(e) => warn!("no se pudo leer el capturador guardado: {e}"),
+    }
+    Ok(grabber)
+}
+
+fn save_grabber(grabber: &Grabber, store: &Store) {
+    if let Err(e) = store.set_setting(GRABBER_KEY, &grabber.save()) {
+        warn!("no se pudo guardar el capturador: {e}");
+    }
+}
+
+/// Guarda el capturador cuando cambia (como mucho cada dos segundos).
+async fn save_grabber_loop(grabber: Grabber, store: Arc<Store>, stop: CancellationToken) {
+    let mut saved = grabber.generation();
+    loop {
+        tokio::select! {
+            _ = stop.cancelled() => return,
+            _ = tokio::time::sleep(GRABBER_SAVE_EVERY) => {}
+        }
+        let now = grabber.generation();
+        if now != saved {
+            saved = now;
+            let (g, s) = (grabber.clone(), store.clone());
+            let _ = tokio::task::spawn_blocking(move || save_grabber(&g, &s)).await;
+        }
     }
 }
 
@@ -157,6 +226,10 @@ fn router(app: App) -> Router {
         .route("/api/v1/queue/stop-all", post(stop_all))
         .route("/api/v1/settings", get(settings).put(set_settings))
         .route("/api/v1/servers", get(servers))
+        .route("/api/v1/grabber", get(grabber))
+        .route("/api/v1/grabber/links", post(grabber_links))
+        .route("/api/v1/grabber/command", post(grabber_command))
+        .route("/api/v1/grabber/take", post(grabber_take))
         .route("/api/v1/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(app.clone(), auth))
         .with_state(app)
@@ -263,4 +336,50 @@ async fn shutdown(State(app): State<App>) -> StatusCode {
     info!("se pidió parar el servicio");
     app.stop.cancel();
     StatusCode::NO_CONTENT
+}
+
+async fn grabber(State(app): State<App>) -> Json<GrabberView> {
+    Json(GrabberView {
+        packages: app.grabber.snapshot(),
+        notes: app.grabber.take_notes(),
+        hosts: app.grabber.hosts(),
+    })
+}
+
+async fn grabber_links(State(app): State<App>, Json(r): Json<AddLinksRequest>) -> Response {
+    let res = if r.new_batch {
+        app.grabber.add_links(&r.text, true)
+    } else {
+        app.grabber
+            .add_to_batch(&r.text, r.batch)
+            .map(|added| Added {
+                added,
+                batch: r.batch,
+            })
+    };
+    match res {
+        Ok(added) => Json(added).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+async fn grabber_command(State(app): State<App>, Json(cmd): Json<GrabCommand>) -> StatusCode {
+    app.grabber.apply(cmd);
+    StatusCode::NO_CONTENT
+}
+
+/// Pasa archivos del capturador a la lista de descargas.
+async fn grabber_take(State(app): State<App>, Json(r): Json<TakeRequest>) -> Json<TakeResponse> {
+    let mut out = TakeResponse::default();
+    for picked in app.grabber.take(r.pick, &r.dest) {
+        let name = picked.name.clone();
+        match app.queue.add(picked.into_job(r.start)) {
+            Ok(id) => out.ids.push(id),
+            Err(e) => out.errors.push(format!("{name}: {e}.")),
+        }
+    }
+    if r.start && !out.ids.is_empty() {
+        app.queue.start_all();
+    }
+    Json(out)
 }

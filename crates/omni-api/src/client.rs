@@ -9,7 +9,11 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::paths::{Endpoint, Paths};
-use crate::types::{AddResponse, ErrorResponse, Ids, PriorityRequest, SpeedLimitRequest, Status};
+use crate::types::{
+    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest,
+    SpeedLimitRequest, Status, TakeRequest, TakeResponse,
+};
+use omni_grab::{Added, GrabCommand};
 
 /// Errores del cliente.
 #[derive(Debug, thiserror::Error)]
@@ -163,6 +167,27 @@ impl Client {
 
     pub async fn servers(&self) -> Result<Vec<ServerStatus>, ClientError> {
         self.get("/servers").await
+    }
+
+    /// La lista del capturador (y sus avisos pendientes).
+    pub async fn grabber(&self) -> Result<GrabberView, ClientError> {
+        self.get("/grabber").await
+    }
+
+    /// Manda enlaces al capturador.
+    pub async fn add_links(&self, req: &AddLinksRequest) -> Result<Added, ClientError> {
+        let resp = self.send(Method::POST, "/grabber/links", Some(req)).await?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn grab_command(&self, cmd: &GrabCommand) -> Result<(), ClientError> {
+        self.post("/grabber/command", cmd).await
+    }
+
+    /// Pasa archivos del capturador a la lista de descargas.
+    pub async fn grab_take(&self, req: &TakeRequest) -> Result<TakeResponse, ClientError> {
+        let resp = self.send(Method::POST, "/grabber/take", Some(req)).await?;
+        Ok(resp.json().await?)
     }
 
     /// Pide al servicio que pare (guarda el progreso antes).

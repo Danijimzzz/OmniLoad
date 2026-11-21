@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 
 use slint::{ModelRc, SharedString, VecModel};
 
-use crate::grabber::{Check, GrabPackage};
 use crate::manager::{RowInfo, State, sizes};
 use crate::{AppWindow, DlRow, GrabTreeRow, Stat, format, sync_model};
+use omni_grab::{Check, Dest, GrabItem, GrabPackage};
 
 /// Colores de estado (los traduce el tema de Slint).
 const TONE_ACCENT: i32 = 0;
@@ -424,8 +424,11 @@ fn fill_selection(ui: &AppWindow, rows: &[RowInfo], st: &mut UiState) {
     ui.set_sel_can_stop(can_stop);
 }
 
-fn avail(check: &Check) -> (String, i32) {
-    match check {
+fn avail(item: &GrabItem) -> (String, i32) {
+    if item.duplicate && matches!(item.check, Check::Online { .. }) {
+        return ("Ya está en Descargas".into(), TONE_WARN);
+    }
+    match &item.check {
         Check::Checking => ("Comprobando…".into(), TONE_MUTED),
         Check::Online { resumable: true } => ("En línea".into(), TONE_OK),
         Check::Online { resumable: false } => ("En línea · una conexión".into(), TONE_OK),
@@ -438,6 +441,7 @@ pub fn fill_grabber(
     ui: &AppWindow,
     model: &VecModel<GrabTreeRow>,
     packages: &[GrabPackage],
+    dest: &Dest,
     st: &mut UiState,
 ) {
     // La selección puede ser un archivo: se traduce a su paquete.
@@ -457,8 +461,14 @@ pub fn fill_grabber(
 
     let mut out = Vec::new();
     let (mut n_items, mut n_sel, mut sel_bytes) = (0, 0, 0u64);
+    let mut n_offline = 0;
     for p in packages {
         n_items += p.items.len();
+        n_offline += p
+            .items
+            .iter()
+            .filter(|i| matches!(i.check, Check::Offline(_)))
+            .count();
         for i in p.items.iter().filter(|i| i.selected) {
             n_sel += 1;
             sel_bytes += i.size.unwrap_or(0);
@@ -513,13 +523,13 @@ pub fn fill_grabber(
             avail: avail_text.into(),
             tone,
             priority: p.priority.label().into(),
-            dest: p.folder.display().to_string().into(),
+            dest: p.folder(dest).display().to_string().into(),
         });
         if !expanded {
             continue;
         }
         for i in shown {
-            let (text, tone) = avail(&i.check);
+            let (text, tone) = avail(i);
             out.push(GrabTreeRow {
                 key: i.id as i32,
                 is_package: false,
@@ -541,6 +551,7 @@ pub fn fill_grabber(
 
     ui.set_grab_count(n_items as i32);
     ui.set_grab_selected_count(n_sel);
+    ui.set_grab_offline_count(n_offline as i32);
     ui.set_grab_summary(
         format!(
             "{n_sel} de {n_items} archivos{}",
@@ -559,7 +570,7 @@ pub fn fill_grabber(
         .and_then(|id| packages.iter().find(|p| p.id == id));
     ui.set_pkg_selected(sel.is_some());
     if let Some(p) = sel {
-        let folder = p.folder.display().to_string();
+        let folder = p.folder(dest).display().to_string();
         // Se reescribe un campo al cambiar de paquete, o si el valor cambió por
         // otro lado (por ejemplo, la carpeta automática al renombrar) y no es
         // ya lo que pone el campo. Así no se pisa lo que se está tecleando.

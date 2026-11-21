@@ -3942,6 +3942,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "omni-core",
+ "omni-grab",
  "omni-queue",
  "omni-store",
  "omni-testserver",
@@ -3964,6 +3965,7 @@ dependencies = [
  "indicatif",
  "omni-api",
  "omni-core",
+ "omni-grab",
  "omni-queue",
  "omni-testserver",
  "serde_json",
@@ -4002,7 +4004,11 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "omni-core",
+ "omni-queue",
+ "omni-testserver",
  "reqwest",
+ "serde",
+ "serde_json",
  "tokio",
  "url",
 ]

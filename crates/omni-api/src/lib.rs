@@ -15,9 +15,14 @@
 //! - Todas las rutas van bajo `/api/v1`, para poder cambiar la API sin
 //!   romper clientes viejos.
 //!
+//! El servicio también guarda el capturador de enlaces ([`omni_grab`]): lo
+//! que se copia o se pega se comprueba allí, y la lista sigue aunque se
+//! cierre la ventana.
+//!
 //! [`Service`] es el servicio (lo usa `omnid`, y la ventana si no encuentra
 //! el programa `omnid`), [`Client`] el cliente asíncrono y [`RemoteQueue`] un
-//! cliente pensado para la ventana, que no puede esperar a la red en su hilo.
+//! cliente pensado para la ventana, que no puede esperar a la red en su hilo
+//! ([`RemoteGrabber`] hace lo mismo con el capturador).
 
 mod client;
 mod launch;
@@ -29,9 +34,12 @@ mod types;
 pub use client::{Client, ClientError};
 pub use launch::{connect_or_launch, omnid_exe, spawn_omnid};
 pub use paths::{Endpoint, Paths};
-pub use remote::RemoteQueue;
+pub use remote::{RemoteGrabber, RemoteQueue};
 pub use server::{Service, ServiceError};
-pub use types::{AddResponse, ErrorResponse, Ids, PriorityRequest, SpeedLimitRequest, Status};
+pub use types::{
+    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest,
+    SpeedLimitRequest, Status, TakeRequest, TakeResponse,
+};
 
 /// Versión de la API (va en la ruta: `/api/v1`).
 pub const API_VERSION: u32 = 1;

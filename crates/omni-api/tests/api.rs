@@ -155,3 +155,113 @@ fn remote_queue_for_the_window() {
         service.stop().await;
     });
 }
+
+/// El capturador vive en el servicio: la ventana manda enlaces, ve cómo se
+/// comprueban, los pasa a descargas, y la lista sobrevive a un reinicio.
+#[test]
+fn grabber_in_the_service() {
+    use omni_api::RemoteGrabber;
+    use omni_grab::{Check, Dest, GrabCommand, Pick};
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let data = pseudo_random_bytes(4096, 33);
+    let server = rt.block_on(TestServer::start(data, ServerConfig::default()));
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::for_db(dir.path().join("omniload.db"));
+    let service = rt.block_on(Service::start(&paths, fast_opts())).unwrap();
+    let client = rt.block_on(Client::connect(&paths)).unwrap();
+    let q = RemoteQueue::new(rt.handle().clone(), client.clone());
+    let g = RemoteGrabber::new(rt.handle().clone(), client.clone());
+
+    let wait = |pred: &dyn Fn(&RemoteGrabber) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !pred(&g) {
+            assert!(Instant::now() < deadline, "{:?}", g.snapshot());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let checked = |g: &RemoteGrabber, n: usize| {
+        let items: Vec<_> = g.snapshot().into_iter().flat_map(|p| p.items).collect();
+        items.len() == n && items.iter().all(|i| i.check != Check::Checking)
+    };
+
+    // Una descarga ya existente: el capturador avisa del duplicado.
+    let mut old = NewJob::new(server.url("vieja.bin"), dir.path());
+    old.start = false;
+    q.add(old).unwrap();
+
+    let text = format!(
+        "{} {} {}",
+        server.url("serie.part1.rar"),
+        server.url("serie.part2.rar"),
+        server.url("vieja.bin")
+    );
+    let added = g.add_links(&text, true, 0).unwrap();
+    assert_eq!(added.added, 3);
+    assert_ne!(added.batch, 0);
+    assert!(g.add_links("sin enlaces", false, 0).is_err());
+    wait(&|g| checked(g, 3));
+    assert_eq!(g.batch_items(added.batch).len(), 3);
+    let pkgs = g.snapshot();
+    let serie = pkgs.iter().find(|p| p.name == "serie").unwrap();
+    assert_eq!(serie.items[0].size, Some(4096));
+    let vieja = pkgs
+        .iter()
+        .flat_map(|p| &p.items)
+        .find(|i| i.name == "vieja.bin");
+    assert!(vieja.is_some_and(|i| i.duplicate && !i.selected));
+
+    // Los cambios se ven al momento en la ventana.
+    g.command(GrabCommand::RenamePackage {
+        id: serie.id,
+        name: "Mi serie".into(),
+    });
+    assert!(g.snapshot().iter().any(|p| p.name == "Mi serie"));
+    // …y el servicio la aplica enseguida.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !rt
+        .block_on(client.grabber())
+        .unwrap()
+        .packages
+        .iter()
+        .any(|p| p.name == "Mi serie")
+    {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // Reiniciar el servicio no pierde la lista.
+    rt.block_on(service.stop());
+    g.close();
+    q.close();
+    let service = rt.block_on(Service::start(&paths, fast_opts())).unwrap();
+    let client = rt.block_on(Client::connect(&paths)).unwrap();
+    let q = RemoteQueue::new(rt.handle().clone(), client.clone());
+    let g = RemoteGrabber::new(rt.handle().clone(), client);
+    let names: Vec<String> = g.snapshot().into_iter().map(|p| p.name).collect();
+    assert!(names.contains(&"Mi serie".to_owned()), "{names:?}");
+
+    // A descargas: solo lo marcado (el duplicado se queda).
+    let dest = Dest {
+        base: dir.path().join("descargas"),
+        per_package: true,
+        single_file_too: false,
+    };
+    let res = g.take(Pick::Selected, dest, false).unwrap();
+    assert_eq!(res.ids.len(), 2, "{res:?}");
+    assert!(res.errors.is_empty());
+    let jobs = q.snapshot();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut jobs = jobs;
+    while jobs.len() < 3 {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+        jobs = q.snapshot();
+    }
+    let part1 = jobs.iter().find(|j| j.name == "serie.part1.rar").unwrap();
+    assert_eq!(part1.package, "Mi serie");
+    assert_eq!(part1.folder, dir.path().join("descargas").join("Mi serie"));
+    assert_eq!(g.snapshot().iter().map(|p| p.items.len()).sum::<usize>(), 1);
+
+    rt.block_on(service.stop());
+}
