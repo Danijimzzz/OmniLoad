@@ -20,7 +20,7 @@ use tracing::{info, warn};
 
 use crate::format;
 
-pub use omni_queue::{JobInfo as RowInfo, NewJob as NewDownload, Priority, State};
+pub use omni_queue::{JobInfo as RowInfo, Priority, State};
 
 /// Cuánto esperar a que `omnid` conteste al lanzarlo.
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);

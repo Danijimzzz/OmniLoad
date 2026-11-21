@@ -66,7 +66,17 @@ pub async fn probe_with(
     // No leemos el cuerpo: si el servidor ignora el rango y manda el archivo
     // entero, soltar la respuesta cierra la conexión.
     drop(resp);
+    info_from_response(status, final_url, &headers)
+}
 
+/// Lo que dice del archivo la respuesta a un `GET` con `Range: bytes=0-0`
+/// (estado, URL final y cabeceras). Sirve para quien ya tiene esa respuesta
+/// en la mano, como el capturador, y no quiere repetir la petición.
+pub fn info_from_response(
+    status: StatusCode,
+    final_url: Url,
+    headers: &HeaderMap,
+) -> Result<RemoteInfo> {
     let (size, accepts_ranges) = match status {
         StatusCode::PARTIAL_CONTENT => {
             let total = headers
@@ -80,7 +90,7 @@ pub async fn probe_with(
                 _ => (None, false),
             }
         }
-        StatusCode::OK => (content_length(&headers), false),
+        StatusCode::OK => (content_length(headers), false),
         StatusCode::RANGE_NOT_SATISFIABLE => {
             // Archivo vacío: "bytes */0".
             let total = headers

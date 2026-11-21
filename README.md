@@ -29,9 +29,13 @@ Copias un enlace y OmniLoad se encarga del resto.
 - 🌙 **Sigue aunque cierres la ventana.** Si quieres, OmniLoad continúa
   descargando en segundo plano y al abrirlo lo ves todo tal cual.
 - 📋 **Copia y listo.** Copia un enlace en cualquier sitio y OmniLoad lo detecta
-  solo. No hace falta pegar nada.
+  solo. No hace falta pegar nada. Hasta pilla los enlaces escondidos detrás
+  de un "descarga aquí" cuando copias un trozo de una web.
 - 🔎 **Mira antes de bajar.** Antes de descargar te enseña qué hay detrás de
-  cada enlace: nombre, tamaño y si sigue disponible.
+  cada enlace: nombre, tamaño y si sigue disponible. Cien enlaces se
+  comprueban en un par de segundos.
+- 🔁 **Sin repetir.** Si un enlace ya está en tus descargas, te avisa y no lo
+  marca, para que no bajes lo mismo dos veces.
 - 🗂️ **Todo en su sitio.** Cada grupo de archivos va a su propia carpeta, con
   su nombre.
 - 🎨 **A tu gusto.** Cinco temas, modo oscuro y colores para elegir.
@@ -41,7 +45,8 @@ Copias un enlace y OmniLoad se encarga del resto.
 ## Cómo se usa
 
 1. **Copia los enlaces** que quieras bajar (de una web, un correo, un chat…).
-   También puedes pulsar **Añadir enlaces** y pegarlos.
+   También puedes pulsar **Añadir enlaces** y pegarlos, o abrir una lista de
+   enlaces guardada en un archivo `.txt` o una página `.html`.
 2. **Elige qué bajar.** OmniLoad comprueba cada enlace y agrupa los archivos
    que van juntos (por ejemplo, las partes de un mismo `.rar`). Si pegas una
    página web, encuentra los archivos que enlaza.
@@ -57,6 +62,12 @@ Copias un enlace y OmniLoad se encarga del resto.
 Todo lo que copias o pegas llega aquí antes de descargarse. Verás cada archivo
 con su tamaño y si está **en línea** o **caído**, agrupado en paquetes. Marca lo
 que quieras, cambia el nombre o la carpeta del paquete y elige su prioridad.
+
+- Lo que **ya tienes en Descargas** aparece desmarcado y avisado.
+- Si un enlace falló porque se cortó internet, **Reintentar caídos** los
+  vuelve a mirar.
+- La lista **no se pierde**: aunque cierres la ventana o apagues el ordenador,
+  al volver sigue ahí.
 
 ### Aviso al copiar enlaces
 
@@ -132,7 +143,7 @@ En Linux necesitas además `libfontconfig-dev` y `libxkbcommon-dev`
 ## Para desarrolladores
 
 ¿Quieres usar OmniLoad desde la terminal (`omni add`, `omni list`, `omni
-limit 2M`…), compilarlo o saber cómo funciona por dentro? Está todo en [docs/DESARROLLO.md](docs/DESARROLLO.md).
+check`, `omni limit 2M`…), compilarlo o saber cómo funciona por dentro? Está todo en [docs/DESARROLLO.md](docs/DESARROLLO.md).
 
 ## Licencia
 

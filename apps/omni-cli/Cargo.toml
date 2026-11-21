@@ -17,6 +17,7 @@ clap.workspace = true
 indicatif.workspace = true
 omni-api.workspace = true
 omni-core.workspace = true
+omni-grab.workspace = true
 omni-queue.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

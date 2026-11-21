@@ -9,9 +9,14 @@ repository.workspace = true
 
 [dependencies]
 omni-core.workspace = true
+omni-queue.workspace = true
 reqwest.workspace = true
-url.workspace = true
+serde.workspace = true
+tokio.workspace = true
+url = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 axum.workspace = true
+omni-testserver.workspace = true
+serde_json.workspace = true
 tokio.workspace = true

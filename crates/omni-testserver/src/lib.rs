@@ -35,6 +35,8 @@ pub struct ServerConfig {
     pub content_disposition: Option<String>,
     /// Máximo de respuestas simultáneas; las de más reciben 429.
     pub max_concurrent: Option<u32>,
+    /// Pausa antes de contestar (latencia de un servidor lejano).
+    pub response_delay: Option<Duration>,
 }
 
 impl Default for ServerConfig {
@@ -48,6 +50,7 @@ impl Default for ServerConfig {
             chunk_delay: None,
             content_disposition: None,
             max_concurrent: None,
+            response_delay: None,
         }
     }
 }
@@ -226,6 +229,9 @@ async fn handler(State(st): State<Arc<Inner>>, headers: HeaderMap) -> Response {
             ActiveSlot(st.clone())
         }
     };
+    if let Some(d) = cfg.response_delay {
+        tokio::time::sleep(d).await;
+    }
     let (data, etag) = st.content.read().unwrap().clone();
     let len = data.len() as u64;
 

@@ -486,6 +486,12 @@ impl Queue {
             .collect()
     }
 
+    /// ¿Hay ya una descarga con este enlace (en cualquier estado)? El
+    /// capturador lo usa para avisar de duplicados.
+    pub fn contains_url(&self, url: &str) -> bool {
+        self.entries().iter().any(|e| e.url == url)
+    }
+
     /// ¿Hay alguna descarga en marcha?
     pub fn any_active(&self) -> bool {
         self.entries().iter().any(|e| e.state.is_active())

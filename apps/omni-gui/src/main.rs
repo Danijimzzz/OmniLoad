@@ -7,10 +7,12 @@
 //! lee el estado cuatro veces por segundo y actualiza las tablas.
 //!
 //! Como en JDownloader, los enlaces no se descargan directamente: primero van
-//! al capturador ([`grabber`]), que los agrupa en paquetes y enseña qué hay
-//! antes de bajar nada. De ahí pasan a la cola ([`manager`]).
+//! al capturador, que los agrupa en paquetes y enseña qué hay antes de bajar
+//! nada. El capturador también vive en el servicio ([`omni_grab`]); la
+//! ventana lo ve con [`RemoteGrabber`]. De ahí pasan a la cola ([`manager`]).
 //!
-//! `omniload <url>...` abre la ventana y analiza esos enlaces.
+//! `omniload <url o archivo>...` abre la ventana y analiza esos enlaces (o
+//! los de esos archivos `.txt`/`.html`).
 //!
 //! Para ver los registros del motor, arranca desde una terminal con
 //! `RUST_LOG=omni_core=debug`. En Windows, la versión release no abre consola;
@@ -21,7 +23,6 @@
 
 mod clipboard;
 mod format;
-mod grabber;
 mod manager;
 mod platform;
 mod popup;
@@ -37,8 +38,9 @@ use std::time::{Duration, Instant};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
-use grabber::Grabber;
-use manager::{Manager, NewDownload, Priority};
+use manager::{Manager, Priority};
+use omni_api::{RemoteGrabber, TakeResponse};
+use omni_grab::{Check, Dest, GrabCommand, Pick};
 use settings::Settings;
 use views::{DlSelection, UiState};
 
@@ -48,7 +50,7 @@ slint::include_modules!();
 struct App {
     ui: slint::Weak<AppWindow>,
     manager: Arc<Manager>,
-    grabber: Arc<Grabber>,
+    grabber: RemoteGrabber,
     settings: RefCell<Settings>,
     state: RefCell<UiState>,
     dl_rows: Rc<VecModel<DlRow>>,
@@ -58,7 +60,6 @@ struct App {
     pop: RefCell<popup::State>,
     pop_rows: Rc<VecModel<PopRow>>,
     pop_place: Cell<Option<(i32, i32)>>,
-    next_batch: Cell<u64>,
 }
 
 impl App {
@@ -67,9 +68,9 @@ impl App {
     }
 
     /// Dónde va cada paquete, según los ajustes.
-    fn dest(&self) -> grabber::Dest {
+    fn dest(&self) -> Dest {
         let s = self.settings.borrow();
-        grabber::Dest {
+        Dest {
             base: s.download_dir.clone(),
             per_package: s.package_folders,
             single_file_too: s.single_file_folders,
@@ -87,10 +88,11 @@ impl App {
     fn refresh(&self) {
         let Some(ui) = self.ui() else { return };
         let rows = self.manager.snapshot();
-        let grabbed = self.grabber.snapshot(&self.dest());
+        let grabbed = self.grabber.snapshot();
+        let dest = self.dest();
         let mut st = self.state.borrow_mut();
         views::fill_downloads(&ui, &self.dl_rows, &rows, &mut st);
-        views::fill_grabber(&ui, &self.grab_rows, &grabbed, &mut st);
+        views::fill_grabber(&ui, &self.grab_rows, &grabbed, &dest, &mut st);
         drop(st);
         sync_queue_settings(&ui, &self.manager);
         self.refresh_popup();
@@ -103,19 +105,23 @@ impl App {
             && !grabbed
                 .iter()
                 .flat_map(|p| &p.items)
-                .any(|i| i.check == grabber::Check::Checking)
+                .any(|i| i.check == Check::Checking)
         {
             self.show("", false);
         }
     }
 
     fn analyze(&self, text: &str, quiet: bool) {
-        self.analyze_in(text, quiet, 0);
+        self.analyze_in(text, quiet, false, 0);
     }
 
-    fn analyze_in(&self, text: &str, quiet: bool, batch: u64) -> bool {
-        let ok = match self.grabber.analyze(text, batch) {
-            Ok(n) => {
+    /// Manda enlaces al capturador. Con `new_batch` forman una tanda nueva;
+    /// si no, se suman a `batch` (0: ninguna). Devuelve la tanda, o `None`
+    /// si no había enlaces nuevos.
+    fn analyze_in(&self, text: &str, quiet: bool, new_batch: bool, batch: u64) -> Option<u64> {
+        let res = match self.grabber.add_links(text, new_batch, batch) {
+            Ok(added) => {
+                let n = added.added;
                 let msg = if n == 1 {
                     "Analizando 1 enlace…".to_owned()
                 } else {
@@ -125,17 +131,33 @@ impl App {
                 if !quiet && let Some(ui) = self.ui() {
                     ui.set_tab(1);
                 }
-                true
+                Some(added.batch)
             }
             Err(msg) => {
                 if !quiet {
                     self.show(&msg, true);
                 }
-                false
+                None
             }
         };
         self.refresh();
-        ok
+        res
+    }
+
+    /// Abre archivos con enlaces (`.txt`, `.html`…) y los manda al
+    /// capturador.
+    fn analyze_files(&self, files: &[PathBuf]) {
+        let mut text = String::new();
+        for f in files {
+            match read_link_file(f) {
+                Ok(urls) => text.extend(urls.iter().map(|u| format!("{u}\n"))),
+                Err(msg) => {
+                    self.show(&msg, true);
+                    return;
+                }
+            }
+        }
+        self.analyze(&text, false);
     }
 
     /// Texto copiado con enlaces: al capturador y, si está activado, al aviso
@@ -150,15 +172,13 @@ impl App {
         let open = self.pop.borrow().is_open();
         if open {
             let batch = self.pop.borrow().batch;
-            if self.analyze_in(text, true, batch) {
+            if self.analyze_in(text, true, false, batch).is_some() {
                 self.pop.borrow_mut().more_links();
             }
             return;
         }
-        let batch = self.next_batch.get() + 1;
-        self.next_batch.set(batch);
-        self.pop.borrow_mut().open(batch, mode == 1, Instant::now());
-        if self.analyze_in(text, true, batch) {
+        if let Some(batch) = self.analyze_in(text, true, true, 0) {
+            self.pop.borrow_mut().open(batch, mode == 1, Instant::now());
             self.popup
                 .set_autostart(self.settings.borrow().clip_popup_autostart);
             self.pop_place.set(None);
@@ -207,7 +227,7 @@ impl App {
         let rows = items
             .iter()
             .map(|i| {
-                let (status, usable, tone) = popup::status(&i.check);
+                let (status, usable, tone) = popup::status(i);
                 PopRow {
                     key: i.id as i32,
                     name: i.name.clone().into(),
@@ -263,44 +283,32 @@ impl App {
     /// Pasa a la cola lo disponible y marcado de la tanda del aviso.
     fn popup_download(&self, start: bool) {
         let batch = self.pop.borrow().batch;
-        let picked = self.grabber.take_batch(batch, &self.dest());
+        let res = self.grabber.take(Pick::Batch(batch), self.dest(), start);
         self.close_popup();
-        if !picked.is_empty() {
-            self.queue(picked, start);
-        }
+        self.taken(res, start, false);
     }
 
     /// Pasa lo marcado del capturador a la cola.
     fn grab_to_queue(&self, start: bool) {
-        let picked = self.grabber.take_selected(&self.dest());
-        if picked.is_empty() {
-            self.show("No hay archivos marcados.", true);
-            return;
-        }
-        self.queue(picked, start);
+        let res = self.grabber.take(Pick::Selected, self.dest(), start);
+        self.taken(res, start, true);
     }
 
-    fn queue(&self, picked: Vec<grabber::Picked>, start: bool) {
-        let mut errors = Vec::new();
-        for p in picked {
-            let new = NewDownload {
-                url: p.url,
-                dir: p.folder,
-                name: Some(p.name.clone()),
-                package: p.package,
-                priority: p.priority,
-                size: p.size,
-                start,
-                speed_limit: None,
-            };
-            if let Err(msg) = self.manager.add(new) {
-                errors.push(format!("{}: {msg}.", p.name));
+    /// Cuenta lo que pasó al llevar archivos a la cola.
+    fn taken(&self, res: Result<TakeResponse, String>, start: bool, from_grabber: bool) {
+        match res {
+            Ok(r) if r.ids.is_empty() && r.errors.is_empty() => {
+                if from_grabber {
+                    self.show("No hay archivos marcados.", true);
+                }
+                return;
             }
-        }
-        if errors.is_empty() {
-            self.show("", false);
-        } else {
-            self.show(&errors.join(" "), true);
+            Ok(r) if r.errors.is_empty() => self.show("", false),
+            Ok(r) => self.show(&r.errors.join(" "), true),
+            Err(e) => {
+                self.show(&e, true);
+                return;
+            }
         }
         if start {
             self.manager.start_all();
@@ -359,10 +367,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if manager.in_process() {
         tracing::info!("el servicio corre dentro de la ventana");
     }
-    let grabber = Arc::new(Grabber::new(
-        rt.handle().clone(),
-        omni_core::Network::system_default()?.client().clone(),
-    ));
+    let grabber = RemoteGrabber::new(rt.handle().clone(), manager.client().clone());
 
     popup::select_backend();
     let ui = AppWindow::new()?;
@@ -389,7 +394,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pop: RefCell::default(),
         pop_rows,
         pop_place: Cell::new(None),
-        next_batch: Cell::new(0),
     });
 
     let timer = Timer::default();
@@ -420,9 +424,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Enlaces pasados como argumentos (`omniload <url>...`), por ejemplo desde
     // "Abrir con" o un acceso directo: van al capturador, como los pegados.
+    // También archivos: "Abrir con OmniLoad" sobre una lista .txt.
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if !args.is_empty() {
-        app.analyze(&args.join("\n"), false);
+    let (files, links): (Vec<PathBuf>, Vec<String>) = {
+        let (f, l): (Vec<String>, Vec<String>) = args
+            .into_iter()
+            .partition(|a| std::path::Path::new(a).is_file());
+        (f.into_iter().map(PathBuf::from).collect(), l)
+    };
+    if !links.is_empty() {
+        app.analyze(&links.join("\n"), false);
+    }
+    if !files.is_empty() {
+        app.analyze_files(&files);
     }
     app.refresh();
 
@@ -432,10 +446,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(timer);
     drop(clip_timer);
     app.save_settings();
+    app.grabber.close();
     let keep = app.settings.borrow().keep_downloading;
     rt.block_on(manager.close(keep));
     rt.shutdown_timeout(Duration::from_secs(1));
     Ok(())
+}
+
+/// Lee los enlaces de un archivo `.txt`, `.html`…
+fn read_link_file(path: &std::path::Path) -> Result<Vec<url::Url>, String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let len = std::fs::metadata(path)
+        .map_err(|e| format!("No se pudo abrir {name}: {e}."))?
+        .len();
+    if len > omni_grab::MAX_LINK_FILE {
+        return Err(format!(
+            "{name} es demasiado grande para ser una lista de enlaces."
+        ));
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("No se pudo leer {name}: {e}."))?;
+    omni_grab::links_from_file(&name, &bytes)
 }
 
 /// El aviso tiene su propia copia del tema: se iguala a la de la ventana.
@@ -478,7 +511,7 @@ fn connect_popup(ui: &AppWindow, app: &Rc<App>) {
         let app = app.clone();
         move || {
             let batch = app.pop.borrow().batch;
-            app.grabber.discard_batch(batch);
+            app.grabber.command(GrabCommand::DiscardBatch { batch });
             app.close_popup();
             app.refresh();
         }
@@ -497,7 +530,10 @@ fn connect_popup(ui: &AppWindow, app: &Rc<App>) {
     p.on_check({
         let app = app.clone();
         move |key, on| {
-            app.grabber.set_item_selected(key as u64, on);
+            app.grabber.command(GrabCommand::SelectItem {
+                id: key as u64,
+                selected: on,
+            });
             app.refresh();
         }
     });
@@ -602,6 +638,23 @@ fn connect_header(ui: &AppWindow, app: &Rc<App>) {
                 ui.set_add_dialog_open(false);
                 ui.set_add_dialog_text(SharedString::new());
             }
+        }
+    });
+    ui.on_add_links_file({
+        let app = app.clone();
+        move || {
+            let Some(files) = rfd::FileDialog::new()
+                .set_title("Abrir archivo con enlaces")
+                .add_filter("Listas de enlaces", omni_grab::LINK_FILE_EXTENSIONS)
+                .add_filter("Todos los archivos", &["*"])
+                .pick_files()
+            else {
+                return;
+            };
+            if let Some(ui) = app.ui() {
+                ui.set_add_dialog_open(false);
+            }
+            app.analyze_files(&files);
         }
     });
 }
@@ -714,32 +767,41 @@ fn connect_grabber(ui: &AppWindow, app: &Rc<App>) {
     ui.on_grab_check({
         let app = app.clone();
         move |key, is_package, on| {
-            if is_package {
-                app.grabber.set_package_selected(key as u64, on);
+            let (id, selected) = (key as u64, on);
+            app.grabber.command(if is_package {
+                GrabCommand::SelectPackage { id, selected }
             } else {
-                app.grabber.set_item_selected(key as u64, on);
-            }
+                GrabCommand::SelectItem { id, selected }
+            });
             app.refresh();
         }
     });
     ui.on_grab_select_all({
         let app = app.clone();
         move |on| {
-            app.grabber.select_all(on);
+            app.grabber.command(GrabCommand::SelectAll { selected: on });
             app.refresh();
         }
     });
     ui.on_grab_remove_offline({
         let app = app.clone();
         move || {
-            app.grabber.remove_offline();
+            app.grabber.command(GrabCommand::RemoveOffline);
+            app.refresh();
+        }
+    });
+    ui.on_grab_recheck({
+        let app = app.clone();
+        move || {
+            app.grabber
+                .command(GrabCommand::Recheck { ids: Vec::new() });
             app.refresh();
         }
     });
     ui.on_grab_clear({
         let app = app.clone();
         move || {
-            app.grabber.clear();
+            app.grabber.command(GrabCommand::Clear);
             app.refresh();
         }
     });
@@ -758,7 +820,10 @@ fn connect_grabber(ui: &AppWindow, app: &Rc<App>) {
         let app = app.clone();
         move |name| {
             if let Some(id) = app.state.borrow().grab_package() {
-                app.grabber.rename_package(id, &name);
+                app.grabber.command(GrabCommand::RenamePackage {
+                    id,
+                    name: name.to_string(),
+                });
             }
             app.refresh();
         }
@@ -767,8 +832,10 @@ fn connect_grabber(ui: &AppWindow, app: &Rc<App>) {
         let app = app.clone();
         move |folder| {
             if let Some(id) = app.state.borrow().grab_package() {
-                app.grabber
-                    .set_package_folder(id, PathBuf::from(folder.trim()));
+                app.grabber.command(GrabCommand::SetPackageFolder {
+                    id,
+                    folder: PathBuf::from(folder.trim()),
+                });
             }
             app.refresh();
         }
@@ -779,7 +846,8 @@ fn connect_grabber(ui: &AppWindow, app: &Rc<App>) {
             let Some(ui) = app.ui() else { return };
             let id = app.state.borrow().grab_package();
             if let (Some(id), Some(dir)) = (id, pick_folder(&ui.get_pkg_folder_text())) {
-                app.grabber.set_package_folder(id, dir);
+                app.grabber
+                    .command(GrabCommand::SetPackageFolder { id, folder: dir });
                 app.refresh();
             }
         }
@@ -788,8 +856,10 @@ fn connect_grabber(ui: &AppWindow, app: &Rc<App>) {
         let app = app.clone();
         move |i| {
             if let Some(id) = app.state.borrow().grab_package() {
-                app.grabber
-                    .set_package_priority(id, Priority::from_index(i as usize));
+                app.grabber.command(GrabCommand::SetPackagePriority {
+                    id,
+                    priority: Priority::from_index(i as usize),
+                });
             }
             app.refresh();
         }
@@ -799,7 +869,7 @@ fn connect_grabber(ui: &AppWindow, app: &Rc<App>) {
         move || {
             let id = app.state.borrow().grab_package();
             if let Some(id) = id {
-                app.grabber.remove_package(id);
+                app.grabber.command(GrabCommand::RemovePackage { id });
             }
             app.refresh();
         }

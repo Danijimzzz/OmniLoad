@@ -40,7 +40,7 @@ mod state;
 pub use download::{Destination, Download, DownloadOptions, DownloadOutcome};
 pub use error::{Error, Result};
 pub use network::{Network, NetworkId};
-pub use probe::{RemoteInfo, probe, probe_with};
+pub use probe::{RemoteInfo, info_from_response, probe, probe_with};
 pub use progress::{NetworkStats, Progress};
 pub use rate::RateLimit;
 pub use reqwest::header::HeaderMap;
