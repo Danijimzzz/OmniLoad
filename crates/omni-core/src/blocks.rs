@@ -50,13 +50,16 @@ impl Block {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LeaseId(u64);
 
-/// Lo que una conexión debe pedir al servidor: `Range: bytes=start-(end-1)`.
+/// Trabajo asignado a una conexión: escribir `[start, end)` del bloque. La
+/// petición HTTP pide `Range: bytes=start-(request_end-1)`, que puede abarcar
+/// los bloques siguientes (ver [`BlockQueue::extend`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Lease {
     pub id: LeaseId,
     pub block: usize,
     pub start: u64,
     pub end: u64,
+    pub request_end: u64,
 }
 
 /// Qué debe hacer una conexión tras confirmar bytes escritos.
@@ -86,6 +89,10 @@ impl Slot {
     /// Posición más avanzada escrita de forma contigua desde el inicio.
     fn frontier(&self) -> u64 {
         self.block.start + self.block.written
+    }
+
+    fn is_pending(&self) -> bool {
+        !self.block.is_done() && self.leases.is_empty()
     }
 
     /// Lo que falta tras la conexión más adelantada.
@@ -158,17 +165,25 @@ impl BlockQueue {
     /// Asigna trabajo a una conexión de la red `network`, o `None` si todo lo
     /// que falta ya tiene suficientes conexiones.
     pub fn next(&mut self, network: NetworkId) -> Option<Lease> {
-        // 1. Bloque pendiente sin nadie trabajando.
-        if let Some(idx) = self
-            .slots
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| !s.block.is_done() && s.leases.is_empty())
-            .min_by_key(|(_, s)| s.block.start)
-            .map(|(i, _)| i)
-        {
+        // 1. Bloque pendiente sin nadie trabajando, dentro del tramo pendiente
+        //    más grande. Si a ese tramo ya llega por detrás una conexión
+        //    (que seguirá de largo con su misma petición), se empieza por la
+        //    mitad; así las conexiones quedan repartidas y cada una avanza
+        //    muchos bloques seguidos con una sola petición HTTP.
+        if let Some((run, len)) = self.largest_pending_run() {
+            let order = self.sorted_indices();
+            let preceded_by_active = run > 0 && !self.slots[order[run - 1]].leases.is_empty();
+            let pick = if preceded_by_active {
+                run + len / 2
+            } else {
+                run
+            };
+            let idx = order[pick];
+            let request_end = self.slots[order[run + len - 1]].block.end;
             let start = self.slots[idx].frontier();
-            return Some(self.lease(idx, network, start));
+            let mut lease = self.lease(idx, network, start);
+            lease.request_end = request_end;
+            return Some(lease);
         }
 
         // 2. Partir el bloque activo al que más le falta.
@@ -244,7 +259,57 @@ impl BlockQueue {
             block: idx,
             start,
             end: slot.block.end,
+            request_end: slot.block.end,
         }
+    }
+
+    /// Índices de los bloques ordenados por posición.
+    fn sorted_indices(&self) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..self.slots.len()).collect();
+        order.sort_by_key(|&i| self.slots[i].block.start);
+        order
+    }
+
+    /// Tramo de bloques pendientes seguidos con más bytes por bajar:
+    /// (posición en el orden, número de bloques).
+    fn largest_pending_run(&self) -> Option<(usize, usize)> {
+        let order = self.sorted_indices();
+        let mut best: Option<(usize, usize, u64)> = None;
+        let mut i = 0;
+        while i < order.len() {
+            if !self.slots[order[i]].is_pending() {
+                i += 1;
+                continue;
+            }
+            let run = i;
+            let mut bytes = 0;
+            while i < order.len() && self.slots[order[i]].is_pending() {
+                bytes += self.slots[order[i]].block.remaining();
+                i += 1;
+            }
+            if best.is_none_or(|(_, _, b)| bytes > b) {
+                best = Some((run, i - run, bytes));
+            }
+        }
+        best.map(|(run, len, _)| (run, len))
+    }
+
+    /// Cuando una conexión termina su bloque y su petición HTTP sigue
+    /// trayendo datos (hasta `request_end`), coge el bloque siguiente si nadie
+    /// lo tiene y continúa sin abrir otra petición.
+    pub fn extend(&mut self, prev: &Lease, network: NetworkId) -> Option<Lease> {
+        let prev_end = self.slots.get(prev.block)?.block.end;
+        if prev_end >= prev.request_end {
+            return None;
+        }
+        let idx = self
+            .slots
+            .iter()
+            .position(|s| s.block.start == prev_end && s.is_pending())?;
+        self.release(prev);
+        let mut lease = self.lease(idx, network, prev_end);
+        lease.request_end = prev.request_end;
+        Some(lease)
     }
 
     /// Final actual del bloque de una asignación, o `None` si debe parar.
@@ -342,12 +407,35 @@ mod tests {
     }
 
     #[test]
-    fn hands_out_pending_blocks_in_order() {
+    fn spreads_connections_over_the_file() {
+        let mut q = BlockQueue::new(64 * MIB, 8 * MIB, MIB);
+        let a = q.next(N0).unwrap();
+        // La primera pide desde el principio hasta el final del archivo.
+        assert_eq!((a.start, a.end, a.request_end), (0, 8 * MIB, 64 * MIB));
+        // La segunda empieza a mitad del tramo que queda.
+        let b = q.next(N0).unwrap();
+        assert_eq!((b.start, b.request_end), (32 * MIB, 64 * MIB));
+        // La tercera, a mitad del tramo pendiente más grande.
+        let c = q.next(N0).unwrap();
+        assert_eq!(c.start, 16 * MIB);
+        assert_eq!(c.request_end, 32 * MIB);
+    }
+
+    #[test]
+    fn extends_into_next_block_with_same_request() {
         let mut q = BlockQueue::new(24 * MIB, 8 * MIB, MIB);
         let a = q.next(N0).unwrap();
+        assert_eq!(q.commit(&a, 8 * MIB).1, Commit::Stop);
+        let a2 = q.extend(&a, N0).unwrap();
+        assert_eq!(
+            (a2.start, a2.end, a2.request_end),
+            (8 * MIB, 16 * MIB, 24 * MIB)
+        );
+        // Si el siguiente ya lo tiene otra conexión, no se extiende.
         let b = q.next(N0).unwrap();
-        assert_eq!((a.start, a.end), (0, 8 * MIB));
-        assert_eq!((b.start, b.end), (8 * MIB, 16 * MIB));
+        assert_eq!(b.start, 16 * MIB);
+        q.commit(&a2, 16 * MIB);
+        assert!(q.extend(&a2, N0).is_none());
     }
 
     #[test]
@@ -419,6 +507,7 @@ mod tests {
         let mut q = BlockQueue::new(2 * MIB, MIB, MIB);
         let a = q.next(N0).unwrap();
         let b = q.next(N1).unwrap();
+        assert_eq!((a.start, b.start), (0, MIB));
         q.commit(&a, 512 * 1024);
         q.commit(&b, MIB + 900 * 1024);
         // N0 debería ir a ayudar al bloque de N1, aunque le falte menos.

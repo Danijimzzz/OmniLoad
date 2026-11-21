@@ -65,6 +65,38 @@ async fn multipart_download_matches() {
 }
 
 #[tokio::test]
+async fn few_requests_for_many_blocks() {
+    // 128 bloques y 4 conexiones: cada conexión debe recorrer muchos bloques
+    // seguidos con una sola petición. Hay servidores que limitan cuántas
+    // peticiones aceptan por minuto.
+    let data = pseudo_random_bytes((8 * MIB) as usize, 11);
+    let cfg = ServerConfig {
+        chunk_delay: Some(Duration::from_millis(1)),
+        ..ServerConfig::default()
+    };
+    let server = TestServer::start(data.clone(), cfg).await;
+    let dir = tempfile::tempdir().unwrap();
+    let opts = DownloadOptions {
+        block_size: 64 * KIB,
+        min_block_size: 32 * KIB,
+        ..fast_opts()
+    };
+    let out = Download::new(
+        &server.url("a.bin"),
+        Destination::Dir(dir.path().into()),
+        opts,
+    )
+    .unwrap()
+    .run(CancellationToken::new())
+    .await
+    .unwrap();
+    assert_eq!(read(&out.path), data);
+    let requests = server.ranges().len();
+    eprintln!("peticiones: {requests}");
+    assert!(requests <= 24, "{requests} peticiones para 128 bloques");
+}
+
+#[tokio::test]
 async fn small_file_and_content_disposition() {
     let data = b"hola".to_vec();
     let cfg = ServerConfig {

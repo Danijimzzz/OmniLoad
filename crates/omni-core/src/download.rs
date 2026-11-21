@@ -553,7 +553,7 @@ async fn worker(sh: Arc<Shared>, net: Network) {
             limiter.release();
             break;
         };
-        let res = fetch(&sh, &net, &lease).await;
+        let (lease, res) = fetch(&sh, &net, lease).await;
         sh.queue().release(&lease);
         limiter.release();
         let Err(f) = res else {
@@ -625,12 +625,28 @@ impl FetchError {
     }
 }
 
-/// Descarga el rango de una asignación y lo escribe en su sitio.
-async fn fetch(sh: &Shared, net: &Network, lease: &Lease) -> Result<(), FetchError> {
-    let mut req = net
-        .client()
-        .get(sh.info.url.clone())
-        .header(RANGE, format!("bytes={}-{}", lease.start, lease.end - 1));
+/// Descarga el rango de una asignación y lo escribe en su sitio. Si la
+/// petición abarca más bloques y el siguiente está libre, sigue con él sin
+/// abrir otra petición. Devuelve la última asignación, para soltarla.
+async fn fetch(sh: &Shared, net: &Network, lease: Lease) -> (Lease, Result<(), FetchError>) {
+    let mut w = Writer {
+        sh,
+        net,
+        lease,
+        buf: Vec::with_capacity(sh.opts.write_buffer),
+        pos: lease.start,
+        progressed: false,
+    };
+    let res = fetch_inner(&mut w).await;
+    (w.lease, res)
+}
+
+async fn fetch_inner(w: &mut Writer<'_>) -> Result<(), FetchError> {
+    let (sh, net, lease) = (w.sh, w.net, w.lease);
+    let mut req = net.client().get(sh.info.url.clone()).header(
+        RANGE,
+        format!("bytes={}-{}", lease.start, lease.request_end - 1),
+    );
     let if_range = sh.info.if_range();
     if let Some(v) = if_range {
         req = req.header(IF_RANGE, v);
@@ -674,14 +690,6 @@ async fn fetch(sh: &Shared, net: &Network, lease: &Lease) -> Result<(), FetchErr
         progress: &sh.progress,
         network: net.id(),
     };
-    let mut w = Writer {
-        sh,
-        net,
-        lease,
-        buf: Vec::with_capacity(sh.opts.write_buffer),
-        pos: lease.start,
-        progressed: false,
-    };
     let mut stream = resp.bytes_stream();
     let mut last_flush = Instant::now();
     loop {
@@ -720,12 +728,12 @@ async fn fetch(sh: &Shared, net: &Network, lease: &Lease) -> Result<(), FetchErr
                 if w.flush().await? == Commit::Stop {
                     return Ok(());
                 }
-                let end = sh.queue().allowed_end(lease);
+                let end = sh.queue().allowed_end(&w.lease);
                 return match end {
                     Some(end) if w.pos < end => Err(FetchError::new(
                         Error::ShortBody {
-                            received: w.pos - lease.start,
-                            expected: end - lease.start,
+                            received: w.pos - w.lease.start,
+                            expected: end - w.lease.start,
                         },
                         w.progressed,
                     )),
@@ -752,7 +760,8 @@ impl Drop for ReceivingGuard<'_> {
 struct Writer<'a> {
     sh: &'a Shared,
     net: &'a Network,
-    lease: &'a Lease,
+    /// Asignación actual (cambia al pasar al bloque siguiente).
+    lease: Lease,
     buf: Vec<u8>,
     /// Siguiente posición del archivo a escribir.
     pos: u64,
@@ -761,33 +770,53 @@ struct Writer<'a> {
 
 impl Writer<'_> {
     /// Escribe el búfer en su posición, recortado al final actual del bloque
-    /// (puede haber encogido al partirse), y lo confirma en la cola.
+    /// (puede haber encogido al partirse), y lo confirma en la cola. Si el
+    /// bloque se termina y el siguiente está libre, sigue con él con lo que
+    /// sobre del búfer.
     async fn flush(&mut self) -> Result<Commit, FetchError> {
-        let Some(end) = self.sh.queue().allowed_end(self.lease) else {
-            self.buf.clear();
-            return Ok(Commit::Stop);
-        };
-        if self.buf.is_empty() {
-            return Ok(Commit::Continue { end });
+        loop {
+            let Some(end) = self.sh.queue().allowed_end(&self.lease) else {
+                self.buf.clear();
+                return Ok(Commit::Stop);
+            };
+            if self.buf.is_empty() {
+                return Ok(Commit::Continue { end });
+            }
+            let n = (self.buf.len() as u64).min(end.saturating_sub(self.pos)) as usize;
+            let mut data = std::mem::take(&mut self.buf);
+            let rest = data.split_off(n);
+            let file = self.sh.file.clone();
+            let pos = self.pos;
+            let mut data = tokio::task::spawn_blocking(move || {
+                platform::write_all_at(&file, &data, pos).map(|()| data)
+            })
+            .await
+            .map_err(|e| FetchError::new(Error::Io(io::Error::other(e)), self.progressed))?
+            .map_err(|e| FetchError::new(Error::Io(e), self.progressed))?;
+            self.pos += n as u64;
+            self.progressed |= n > 0;
+            let mut queue = self.sh.queue();
+            let (gained, commit) = queue.commit(&self.lease, self.pos);
+            self.sh.progress.add(self.net.id(), gained);
+            if commit == Commit::Stop && self.pos == end {
+                // Bloque terminado: seguir con el siguiente con esta misma
+                // petición si está libre.
+                if let Some(next) = queue.extend(&self.lease, self.net.id()) {
+                    self.lease = next;
+                    drop(queue);
+                    self.buf = rest;
+                    continue;
+                }
+            }
+            drop(queue);
+            // Reutilizar la memoria del búfer.
+            data.clear();
+            data.extend_from_slice(&rest);
+            self.buf = data;
+            if commit == Commit::Stop {
+                self.buf.clear();
+            }
+            return Ok(commit);
         }
-        let n = (self.buf.len() as u64).min(end.saturating_sub(self.pos)) as usize;
-        let mut data = std::mem::take(&mut self.buf);
-        data.truncate(n);
-        let file = self.sh.file.clone();
-        let pos = self.pos;
-        let data = tokio::task::spawn_blocking(move || {
-            platform::write_all_at(&file, &data, pos).map(|()| data)
-        })
-        .await
-        .map_err(|e| FetchError::new(Error::Io(io::Error::other(e)), self.progressed))?
-        .map_err(|e| FetchError::new(Error::Io(e), self.progressed))?;
-        // Reutilizar la memoria del búfer.
-        self.buf = data;
-        self.buf.clear();
-        self.pos += n as u64;
-        self.progressed |= n > 0;
-        let (gained, commit) = self.sh.queue().commit(self.lease, self.pos);
-        self.sh.progress.add(self.net.id(), gained);
-        Ok(commit)
     }
 }
