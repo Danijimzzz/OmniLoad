@@ -85,6 +85,22 @@ struct Item {
     size: Option<u64>,
     check: Check,
     selected: bool,
+    /// Tanda de enlaces copiados a la que pertenece (0: ninguna), para el
+    /// aviso de abajo a la derecha.
+    batch: u64,
+}
+
+impl Item {
+    fn view(&self) -> GrabItem {
+        GrabItem {
+            id: self.id,
+            name: self.name.clone(),
+            host: self.url.host_str().unwrap_or("").to_owned(),
+            size: self.size,
+            check: self.check.clone(),
+            selected: self.selected,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -155,7 +171,9 @@ impl Grabber {
 
     /// Analiza los enlaces que haya en `text`. Devuelve cuántos enlaces
     /// nuevos se van a comprobar.
-    pub fn analyze(&self, text: &str) -> Result<usize, String> {
+    /// Analiza los enlaces de `text`. `batch` marca la tanda del aviso de
+    /// enlaces copiados (0 si no hay aviso).
+    pub fn analyze(&self, text: &str, batch: u64) -> Result<usize, String> {
         let urls = extract_urls(text);
         if urls.is_empty() {
             return Err("No encuentro ningún enlace http o https en lo que has pegado.".into());
@@ -178,6 +196,7 @@ impl Grabber {
                     size: None,
                     check: Check::Checking,
                     selected: true,
+                    batch,
                 });
                 id
             };
@@ -232,6 +251,7 @@ impl Grabber {
                     title,
                     links,
                 }) => {
+                    let batch = st.items.iter().find(|i| i.id == id).map_or(0, |i| i.batch);
                     st.items.retain(|i| i.id != id);
                     st.drop_empty_packages();
                     if !follow_pages {
@@ -267,6 +287,7 @@ impl Grabber {
                             size: None,
                             check: Check::Checking,
                             selected: true,
+                            batch,
                         });
                         new.push((id, link));
                     }
@@ -386,6 +407,38 @@ impl Grabber {
     /// descargarlos. `base` es la carpeta de descargas: cada paquete va a
     /// `base/<paquete>` salvo que se haya elegido otra.
     pub fn take_selected(&self, base: &Path) -> Vec<Picked> {
+        self.take_where(base, |i| i.selected)
+    }
+
+    /// Saca de la lista lo marcado y disponible de una tanda de enlaces
+    /// copiados; lo que aún se comprueba se queda en el capturador.
+    pub fn take_batch(&self, batch: u64, base: &Path) -> Vec<Picked> {
+        self.take_where(base, |i| {
+            i.batch == batch && i.selected && matches!(i.check, Check::Online { .. })
+        })
+    }
+
+    /// Quita del capturador todos los enlaces de una tanda.
+    pub fn discard_batch(&self, batch: u64) {
+        let mut st = self.shared.state();
+        st.items.retain(|i| i.batch != batch);
+        st.drop_empty_packages();
+    }
+
+    /// Los archivos de una tanda, el más reciente primero.
+    pub fn batch_items(&self, batch: u64) -> Vec<GrabItem> {
+        let st = self.shared.state();
+        let mut items: Vec<GrabItem> = st
+            .items
+            .iter()
+            .filter(|i| i.batch == batch)
+            .map(Item::view)
+            .collect();
+        items.sort_by_key(|i| std::cmp::Reverse(i.id));
+        items
+    }
+
+    fn take_where(&self, base: &Path, pick: impl Fn(&Item) -> bool) -> Vec<Picked> {
         let mut st = self.shared.state();
         let mut picked = Vec::new();
         let packages: Vec<(u64, String, PathBuf, Priority)> = st
@@ -394,7 +447,7 @@ impl Grabber {
             .map(|p| (p.id, p.name.clone(), folder_of(p, base), p.priority))
             .collect();
         st.items.retain(|i| {
-            if !i.selected {
+            if !pick(i) {
                 return true;
             }
             if let Some((_, name, folder, prio)) = packages.iter().find(|p| p.0 == i.package) {
@@ -432,14 +485,7 @@ impl Grabber {
                     .items
                     .iter()
                     .filter(|i| i.package == p.id)
-                    .map(|i| GrabItem {
-                        id: i.id,
-                        name: i.name.clone(),
-                        host: i.url.host_str().unwrap_or("").to_owned(),
-                        size: i.size,
-                        check: i.check.clone(),
-                        selected: i.selected,
-                    })
+                    .map(Item::view)
                     .collect(),
             })
             .filter(|p| !p.items.is_empty())
@@ -549,7 +595,7 @@ mod tests {
             server.url("fotos.part2.rar"),
             server.url("pelicula.mkv")
         );
-        assert_eq!(g.analyze(&text), Ok(3));
+        assert_eq!(g.analyze(&text, 0), Ok(3));
         let pkgs = wait_checked(&g, 3).await;
         assert_eq!(pkgs.len(), 2);
         assert_eq!(pkgs[0].name, "fotos");
@@ -560,8 +606,8 @@ mod tests {
         assert_eq!(pkgs[1].items[0].check, Check::Online { resumable: true });
 
         // Repetir los mismos enlaces no los duplica.
-        assert!(g.analyze(&text).is_err());
-        assert!(g.analyze("sin enlaces").is_err());
+        assert!(g.analyze(&text, 0).is_err());
+        assert!(g.analyze("sin enlaces", 0).is_err());
 
         // Propiedades del paquete y selección.
         g.rename_package(pkgs[0].id, "Viaje");
@@ -580,5 +626,39 @@ mod tests {
         assert_eq!(left.iter().map(|p| p.items.len()).sum::<usize>(), 2);
         g.clear();
         assert!(g.snapshot(Path::new("/d")).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn batches_of_copied_links() {
+        let server = TestServer::start(pseudo_random_bytes(3000, 2), ServerConfig::default()).await;
+        let net = Network::system_default().unwrap();
+        let g = Grabber::new(Handle::current(), net.client().clone());
+
+        g.analyze(&server.url("antes.zip"), 0).unwrap();
+        let text = format!(
+            "{}\n{}\nhttp://127.0.0.1:1/caido.zip",
+            server.url("a.zip"),
+            server.url("b.zip")
+        );
+        assert_eq!(g.analyze(&text, 7), Ok(3));
+        wait_checked(&g, 4).await;
+
+        let items = g.batch_items(7);
+        assert_eq!(items.len(), 3);
+        // El más reciente primero.
+        assert_eq!(items[0].name, "caido.zip");
+        assert!(matches!(items[0].check, Check::Offline(_)));
+
+        // Solo se llevan los disponibles de la tanda.
+        let picked = g.take_batch(7, Path::new("/d"));
+        let mut names: Vec<_> = picked.iter().map(|p| p.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["a.zip", "b.zip"]);
+        assert_eq!(g.batch_items(7).len(), 1);
+
+        g.discard_batch(7);
+        assert!(g.batch_items(7).is_empty());
+        // Lo que no era de la tanda sigue ahí.
+        assert_eq!(g.batch_items(0).len(), 1);
     }
 }

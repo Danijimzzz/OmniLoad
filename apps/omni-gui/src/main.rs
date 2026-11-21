@@ -22,16 +22,18 @@ mod format;
 mod grabber;
 mod manager;
 mod platform;
+mod popup;
 mod settings;
 mod views;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use omni_core::DownloadOptions;
+use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
 use grabber::Grabber;
@@ -50,6 +52,12 @@ struct App {
     state: RefCell<UiState>,
     dl_rows: Rc<VecModel<DlRow>>,
     grab_rows: Rc<VecModel<GrabTreeRow>>,
+    /// El aviso de enlaces copiados, y su estado.
+    popup: ClipPopup,
+    pop: RefCell<popup::State>,
+    pop_rows: Rc<VecModel<PopRow>>,
+    pop_place: Cell<Option<(i32, i32)>>,
+    next_batch: Cell<u64>,
 }
 
 impl App {
@@ -77,6 +85,7 @@ impl App {
         views::fill_downloads(&ui, &self.dl_rows, &rows, &mut st);
         views::fill_grabber(&ui, &self.grab_rows, &grabbed, &mut st);
         drop(st);
+        self.refresh_popup();
 
         let notes = self.grabber.take_notes();
         if !notes.is_empty() {
@@ -93,7 +102,11 @@ impl App {
     }
 
     fn analyze(&self, text: &str, quiet: bool) {
-        match self.grabber.analyze(text) {
+        self.analyze_in(text, quiet, 0);
+    }
+
+    fn analyze_in(&self, text: &str, quiet: bool, batch: u64) -> bool {
+        let ok = match self.grabber.analyze(text, batch) {
             Ok(n) => {
                 let msg = if n == 1 {
                     "Analizando 1 enlace…".to_owned()
@@ -104,11 +117,149 @@ impl App {
                 if !quiet && let Some(ui) = self.ui() {
                     ui.set_tab(1);
                 }
+                true
             }
-            Err(msg) if !quiet => self.show(&msg, true),
-            Err(_) => {}
-        }
+            Err(msg) => {
+                if !quiet {
+                    self.show(&msg, true);
+                }
+                false
+            }
+        };
         self.refresh();
+        ok
+    }
+
+    /// Texto copiado con enlaces: al capturador y, si está activado, al aviso
+    /// de abajo a la derecha. Lo que se copie con el aviso abierto se suma a
+    /// la misma tanda.
+    fn copied(&self, text: &str) {
+        let mode = self.settings.borrow().clip_popup;
+        if mode == 2 {
+            self.analyze(text, true);
+            return;
+        }
+        let open = self.pop.borrow().is_open();
+        if open {
+            let batch = self.pop.borrow().batch;
+            if self.analyze_in(text, true, batch) {
+                self.pop.borrow_mut().more_links();
+            }
+            return;
+        }
+        let batch = self.next_batch.get() + 1;
+        self.next_batch.set(batch);
+        self.pop.borrow_mut().open(batch, mode == 1, Instant::now());
+        if self.analyze_in(text, true, batch) {
+            self.popup
+                .set_autostart(self.settings.borrow().clip_popup_autostart);
+            self.pop_place.set(None);
+            self.refresh_popup();
+            tracing::debug!("aviso: tanda {batch}");
+            if let Err(e) = self.popup.show() {
+                tracing::warn!("no se pudo abrir el aviso: {e}");
+            }
+            self.place_popup();
+        } else {
+            self.pop.borrow_mut().close();
+        }
+    }
+
+    fn close_popup(&self) {
+        tracing::debug!("aviso: cerrar");
+        self.pop.borrow_mut().close();
+        self.pop_rows.set_vec(Vec::new());
+        let _ = self.popup.hide();
+    }
+
+    /// Redibuja el aviso y lo cierra solo si toca.
+    fn refresh_popup(&self) {
+        if !self.pop.borrow().is_open() {
+            return;
+        }
+        let Some(ui) = self.ui() else { return };
+        copy_theme(&ui, &self.popup);
+        let batch = self.pop.borrow().batch;
+        let items = self.grabber.batch_items(batch);
+        let c = popup::counts(&items);
+        if c.total == 0 && self.pop.borrow().should_autoclose(Instant::now()) {
+            // Ya no queda nada de la tanda (se descargó o se quitó).
+            self.close_popup();
+            return;
+        }
+        let now = Instant::now();
+        let time = self.pop.borrow_mut().tick(&c, now);
+        if self.settings.borrow().clip_popup_autoclose
+            && self.pop.borrow().should_autoclose(now)
+            && !self.popup.get_hovered()
+        {
+            self.close_popup();
+            return;
+        }
+        let rows = items
+            .iter()
+            .map(|i| {
+                let (status, usable, tone) = popup::status(&i.check);
+                PopRow {
+                    key: i.id as i32,
+                    name: i.name.clone().into(),
+                    host: i.host.clone().into(),
+                    size: i.size.map(format::bytes).unwrap_or_default().into(),
+                    status: status.into(),
+                    tone,
+                    checked: usable && i.selected,
+                    usable,
+                }
+            })
+            .collect();
+        sync_model(&self.pop_rows, rows);
+        let (ok_arc, bad_arc) = popup::ring_arcs(c.ok, c.bad, c.total);
+        let p = &self.popup;
+        p.set_compact(self.pop.borrow().compact);
+        p.set_total(c.total as i32);
+        p.set_ok(c.ok as i32);
+        p.set_bad(c.bad as i32);
+        p.set_checking(c.checking > 0);
+        p.set_time_text(time.into());
+        p.set_ok_arc(ok_arc.into());
+        p.set_bad_arc(bad_arc.into());
+        p.set_to_download(c.chosen as i32);
+        self.place_popup();
+    }
+
+    /// Lleva el aviso a la esquina de abajo a la derecha de la pantalla de la
+    /// ventana principal.
+    fn place_popup(&self) {
+        let Some(ui) = self.ui() else { return };
+        // El tamaño que pide ahora, no el de la ventana, que se pone al día
+        // un poco después.
+        let scale = self.popup.window().scale_factor();
+        let want =
+            slint::LogicalSize::new(self.popup.get_want_width(), self.popup.get_want_height());
+        let size = want.to_physical(scale);
+        if self.popup.window().size() != size {
+            self.popup.window().set_size(want);
+        }
+        let monitor = ui
+            .window()
+            .with_winit_window(|w| w.current_monitor().or_else(|| w.primary_monitor()))
+            .flatten();
+        let Some(monitor) = monitor else { return };
+        let pos = popup::corner(&monitor, size);
+        if self.pop_place.get() != Some((pos.x, pos.y)) {
+            self.popup.window().set_position(pos);
+            self.pop_place.set(Some((pos.x, pos.y)));
+        }
+    }
+
+    /// Pasa a la cola lo disponible y marcado de la tanda del aviso.
+    fn popup_download(&self, start: bool) {
+        let batch = self.pop.borrow().batch;
+        let picked = self.grabber.take_batch(batch, &self.base_dir());
+        self.close_popup();
+        if !picked.is_empty() {
+            self.queue(picked, start);
+        }
     }
 
     /// Pasa lo marcado del capturador a la cola.
@@ -118,6 +269,10 @@ impl App {
             self.show("No hay archivos marcados.", true);
             return;
         }
+        self.queue(picked, start);
+    }
+
+    fn queue(&self, picked: Vec<grabber::Picked>, start: bool) {
         let mut errors = Vec::new();
         for p in picked {
             let new = NewDownload {
@@ -169,6 +324,9 @@ impl App {
         s.max_active = ui.get_max_active();
         s.connections = ui.get_connections();
         s.watch_clipboard = ui.get_watch_clipboard();
+        s.clip_popup = ui.get_clip_popup();
+        s.clip_popup_autoclose = ui.get_clip_autoclose();
+        s.clip_popup_autostart = self.popup.get_autostart();
         s.download_dir = PathBuf::from(ui.get_download_dir().as_str());
         s.save();
         self.manager.set_max_active(s.max_active as usize);
@@ -195,8 +353,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         omni_core::Network::system_default()?.client().clone(),
     ));
 
+    popup::select_backend();
     let ui = AppWindow::new()?;
     apply_settings(&ui, &settings);
+    let clip_popup = popup::create(ClipPopup::new)?;
+    clip_popup.set_autostart(settings.clip_popup_autostart);
+    let pop_rows: Rc<VecModel<PopRow>> = Rc::new(VecModel::default());
+    clip_popup.set_rows(ModelRc::from(pop_rows.clone()));
 
     let dl_rows: Rc<VecModel<DlRow>> = Rc::new(VecModel::default());
     ui.set_downloads(ModelRc::from(dl_rows.clone()));
@@ -211,6 +374,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state: RefCell::new(UiState::default()),
         dl_rows,
         grab_rows,
+        popup: clip_popup,
+        pop: RefCell::default(),
+        pop_rows,
+        pop_place: Cell::new(None),
+        next_batch: Cell::new(0),
     });
 
     let timer = Timer::default();
@@ -228,7 +396,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         clip_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
             let on = app.ui().is_some_and(|ui| ui.get_watch_clipboard());
             if let Some(text) = watcher.poll(on) {
-                app.analyze(&text, true);
+                app.copied(&text);
             }
         });
     }
@@ -237,6 +405,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     connect_downloads(&ui, &app);
     connect_grabber(&ui, &app);
     connect_settings(&ui, &app);
+    connect_popup(&ui, &app);
 
     // Enlaces pasados como argumentos (`omniload <url>...`), por ejemplo desde
     // "Abrir con" o un acceso directo: van al capturador, como los pegados.
@@ -259,6 +428,91 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// El aviso tiene su propia copia del tema: se iguala a la de la ventana.
+fn copy_theme(ui: &AppWindow, popup: &ClipPopup) {
+    let from = ui.global::<Theme>();
+    let to = popup.global::<Theme>();
+    to.set_kind(from.get_kind());
+    to.set_follow_system(from.get_follow_system());
+    to.set_system_dark(from.get_system_dark());
+    to.set_accent_index(from.get_accent_index());
+    to.set_compact(from.get_compact());
+    to.set_reduce_transparency(from.get_reduce_transparency());
+}
+
+fn connect_popup(ui: &AppWindow, app: &Rc<App>) {
+    let p = &app.popup;
+    p.on_play({
+        let app = app.clone();
+        move || app.popup_download(true)
+    });
+    p.on_download({
+        let app = app.clone();
+        move || {
+            let start = app.popup.get_autostart();
+            app.popup_download(start);
+        }
+    });
+    p.on_open_grabber({
+        let app = app.clone();
+        move || {
+            app.close_popup();
+            if let Some(ui) = app.ui() {
+                ui.set_tab(1);
+                ui.window().set_minimized(false);
+                ui.window().with_winit_window(|w| w.focus_window());
+            }
+        }
+    });
+    p.on_discard({
+        let app = app.clone();
+        move || {
+            let batch = app.pop.borrow().batch;
+            app.grabber.discard_batch(batch);
+            app.close_popup();
+            app.refresh();
+        }
+    });
+    p.on_close({
+        let app = app.clone();
+        move || app.close_popup()
+    });
+    p.on_minimize({
+        let app = app.clone();
+        move || {
+            app.pop.borrow_mut().compact = true;
+            app.refresh_popup();
+        }
+    });
+    p.on_check({
+        let app = app.clone();
+        move |key, on| {
+            app.grabber.set_item_selected(key as u64, on);
+            app.refresh();
+        }
+    });
+    p.on_autostart_changed({
+        let app = app.clone();
+        move || app.save_settings()
+    });
+    p.window().on_close_requested({
+        let app = app.clone();
+        move || {
+            app.pop.borrow_mut().close();
+            slint::CloseRequestResponse::HideWindow
+        }
+    });
+    // Al cerrar la ventana principal se cierra también el aviso, para que el
+    // programa termine.
+    ui.window().on_close_requested({
+        let app = app.clone();
+        move || {
+            app.close_popup();
+            slint::CloseRequestResponse::HideWindow
+        }
+    });
+}
+
 fn apply_settings(ui: &AppWindow, s: &Settings) {
     let theme = ui.global::<Theme>();
     theme.set_kind(s.theme);
@@ -270,6 +524,8 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_max_active(s.max_active);
     ui.set_connections(s.connections);
     ui.set_watch_clipboard(s.watch_clipboard);
+    ui.set_clip_popup(s.clip_popup);
+    ui.set_clip_autoclose(s.clip_popup_autoclose);
     ui.set_download_dir(s.download_dir.display().to_string().into());
 }
 

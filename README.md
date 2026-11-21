@@ -27,6 +27,15 @@ JDownloader:
 3. **Añadir a descargas** los deja en la cola parados; **Iniciar descargas**
    los pone a bajar.
 
+Al copiar enlaces sale un aviso abajo a la derecha, siempre encima y sin
+quitar el foco, con los enlaces copiados mientras se comprueban. La versión
+completa enseña la lista con su estado y los botones **Descargar**, **Abrir en
+el capturador** y **Descartar**. La compacta enseña el número de enlaces, el
+tiempo de comprobación, una rueda que se llena en verde (aptos) y rojo
+(caídos) y un botón de play para descargar los aptos. Se elige en Ajustes ›
+Apariencia › Portapapeles, junto con cerrarlo solo 1 s después de terminar
+(activado por defecto). En Wayland el sistema decide dónde se abre.
+
 La pestaña **Descargas** muestra el árbol de paquetes con progreso, velocidad,
 tiempo restante, prioridad y estado; abajo, el panel del paquete o archivo
 elegido y un resumen con los totales. La barra inferior tiene iniciar, pausar

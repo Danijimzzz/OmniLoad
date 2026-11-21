@@ -27,6 +27,12 @@ pub struct Settings {
     pub max_active: i32,
     pub connections: i32,
     pub watch_clipboard: bool,
+    /// Aviso al copiar enlaces: 0 completo, 1 compacto, 2 desactivado.
+    pub clip_popup: i32,
+    /// Cerrar el aviso 1 s después de terminar la comprobación.
+    pub clip_popup_autoclose: bool,
+    /// "Iniciar al añadir" del aviso completo.
+    pub clip_popup_autostart: bool,
 }
 
 impl Default for Settings {
@@ -42,6 +48,9 @@ impl Default for Settings {
             max_active: 3,
             connections: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
+            clip_popup: 1,
+            clip_popup_autoclose: true,
+            clip_popup_autostart: true,
         }
     }
 }
@@ -111,5 +120,7 @@ mod tests {
         assert!(s.compact);
         assert_eq!(s.max_active, 3);
         assert!(s.watch_clipboard);
+        assert_eq!(s.clip_popup, 1);
+        assert!(s.clip_popup_autoclose);
     }
 }

@@ -4,7 +4,7 @@
 //
 // La lógica vive en Rust (src/); aquí solo está la presentación.
 
-import { ComboBox, LineEdit, ListView, Palette, SpinBox, TextEdit } from "std-widgets.slint";
+import { ComboBox, LineEdit, ListView, Palette, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 
 // ---------------------------------------------------------------- Tema ----
 
@@ -721,6 +721,8 @@ export component AppWindow inherits Window {
     in-out property <int> max-active: 3;
     in-out property <int> connections: 8;
     in-out property <bool> watch-clipboard: true;
+    in-out property <int> clip-popup: 1;
+    in-out property <bool> clip-autoclose: true;
     in-out property <string> download-dir;
 
     // Cabecera.
@@ -1353,116 +1355,142 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                if root.settings-section == 1: VerticalLayout {
-                    padding: 28px;
-                    spacing: 18px;
-                    alignment: start;
+                if root.settings-section == 1: apariencia := ScrollView {
                     VerticalLayout {
-                        spacing: 6px;
-                        Text { text: "Apariencia"; font-size: 28px; font-weight: 700; color: Theme.text; }
-                        Text {
-                            text: "Los cambios se aplican al momento.";
-                            font-size: 14px;
-                            color: Theme.muted;
+                        width: apariencia.visible-width;
+                        padding: 28px;
+                        spacing: 18px;
+                        alignment: start;
+                        VerticalLayout {
+                            spacing: 6px;
+                            Text { text: "Apariencia"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                            Text {
+                                text: "Los cambios se aplican al momento.";
+                                font-size: 14px;
+                                color: Theme.muted;
+                            }
                         }
-                    }
 
-                    VerticalLayout {
-                        spacing: 12px;
-                        SectionTitle { text: "Tema"; }
-                        HorizontalLayout {
+                        VerticalLayout {
                             spacing: 12px;
-                            ThemeCard {
-                                title: "Cristal claro"; subtitle: "Translúcido, por defecto";
-                                bg: #eef1f6; pan: #ffffff80; bd: #ffffffd9; rad: 7px;
-                                selected: Theme.kind == 0;
-                                picked => { Theme.kind = 0; root.settings-changed(); }
-                            }
-                            ThemeCard {
-                                title: "Cristal oscuro"; subtitle: "Translúcido, de noche";
-                                bg: #0d1017; pan: #28304a8c; bd: #ffffff33; rad: 7px;
-                                selected: Theme.kind == 1;
-                                picked => { Theme.kind = 1; root.settings-changed(); }
-                            }
-                            ThemeCard {
-                                title: "Claro"; subtitle: "Plano, sin efectos";
-                                bg: #f4f5f7; pan: #ffffff; bd: #dfe2e8; rad: 4px;
-                                selected: Theme.kind == 2;
-                                picked => { Theme.kind = 2; root.settings-changed(); }
-                            }
-                            ThemeCard {
-                                title: "Grafito"; subtitle: "Oscuro plano";
-                                bg: #16181d; pan: #23272f; bd: #323844; rad: 4px;
-                                selected: Theme.kind == 3;
-                                picked => { Theme.kind = 3; root.settings-changed(); }
-                            }
-                            ThemeCard {
-                                title: "Alto contraste"; subtitle: "Máxima legibilidad";
-                                bg: #000000; pan: #000000; bd: #ffffff; rad: 1px;
-                                selected: Theme.kind == 4;
-                                picked => { Theme.kind = 4; root.settings-changed(); }
-                            }
-                        }
-                        LabeledCheck {
-                            text: "Cambiar entre claro y oscuro según el sistema";
-                            checked: Theme.follow-system;
-                            toggled(v) => { Theme.follow-system = v; root.settings-changed(); }
-                        }
-                    }
-
-                    VerticalLayout {
-                        SectionTitle { text: "Ventana"; }
-                        SettingRow {
-                            title: "Panel de propiedades";
-                            subtitle: "Dónde se muestran los detalles del paquete o archivo elegido";
-                            Segmented {
-                                options: ["Abajo", "A la derecha", "Oculto"];
-                                current <=> root.properties-panel;
-                                changed-by-user => { root.settings-changed(); }
-                            }
-                        }
-                        SettingRow {
-                            title: "Densidad";
-                            subtitle: "Compacta muestra más descargas sin desplazar";
-                            Segmented {
-                                options: ["Cómoda", "Compacta"];
-                                current: Theme.compact ? 1 : 0;
-                                changed-by-user(i) => { Theme.compact = i == 1; root.settings-changed(); }
-                            }
-                        }
-                        SettingRow {
-                            title: "Color de acento";
-                            subtitle: "Botones, barras de progreso y selección";
+                            SectionTitle { text: "Tema"; }
                             HorizontalLayout {
-                                spacing: 10px;
-                                for a[i] in [
-                                    { name: "Azul", light: #0a5fd0, dark: #6fb1ff },
-                                    { name: "Violeta", light: #6a3fd6, dark: #b39bff },
-                                    { name: "Verde", light: #137a4b, dark: #5fd49a },
-                                    { name: "Naranja", light: #b4500a, dark: #ffab6b },
-                                    { name: "Rosa", light: #b8306a, dark: #ff8fc0 },
-                                    { name: "Grafito", light: #3d4654, dark: #c9d1de },
-                                ]: Swatch {
-                                    name: a.name;
-                                    c: Theme.dark ? a.dark : a.light;
-                                    selected: i == Theme.accent-index;
-                                    picked => { Theme.accent-index = i; root.settings-changed(); }
+                                spacing: 12px;
+                                ThemeCard {
+                                    title: "Cristal claro"; subtitle: "Translúcido, por defecto";
+                                    bg: #eef1f6; pan: #ffffff80; bd: #ffffffd9; rad: 7px;
+                                    selected: Theme.kind == 0;
+                                    picked => { Theme.kind = 0; root.settings-changed(); }
+                                }
+                                ThemeCard {
+                                    title: "Cristal oscuro"; subtitle: "Translúcido, de noche";
+                                    bg: #0d1017; pan: #28304a8c; bd: #ffffff33; rad: 7px;
+                                    selected: Theme.kind == 1;
+                                    picked => { Theme.kind = 1; root.settings-changed(); }
+                                }
+                                ThemeCard {
+                                    title: "Claro"; subtitle: "Plano, sin efectos";
+                                    bg: #f4f5f7; pan: #ffffff; bd: #dfe2e8; rad: 4px;
+                                    selected: Theme.kind == 2;
+                                    picked => { Theme.kind = 2; root.settings-changed(); }
+                                }
+                                ThemeCard {
+                                    title: "Grafito"; subtitle: "Oscuro plano";
+                                    bg: #16181d; pan: #23272f; bd: #323844; rad: 4px;
+                                    selected: Theme.kind == 3;
+                                    picked => { Theme.kind = 3; root.settings-changed(); }
+                                }
+                                ThemeCard {
+                                    title: "Alto contraste"; subtitle: "Máxima legibilidad";
+                                    bg: #000000; pan: #000000; bd: #ffffff; rad: 1px;
+                                    selected: Theme.kind == 4;
+                                    picked => { Theme.kind = 4; root.settings-changed(); }
+                                }
+                            }
+                            LabeledCheck {
+                                text: "Cambiar entre claro y oscuro según el sistema";
+                                checked: Theme.follow-system;
+                                toggled(v) => { Theme.follow-system = v; root.settings-changed(); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            SectionTitle { text: "Ventana"; }
+                            SettingRow {
+                                title: "Panel de propiedades";
+                                subtitle: "Dónde se muestran los detalles del paquete o archivo elegido";
+                                Segmented {
+                                    options: ["Abajo", "A la derecha", "Oculto"];
+                                    current <=> root.properties-panel;
+                                    changed-by-user => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Densidad";
+                                subtitle: "Compacta muestra más descargas sin desplazar";
+                                Segmented {
+                                    options: ["Cómoda", "Compacta"];
+                                    current: Theme.compact ? 1 : 0;
+                                    changed-by-user(i) => { Theme.compact = i == 1; root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Color de acento";
+                                subtitle: "Botones, barras de progreso y selección";
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    for a[i] in [
+                                        { name: "Azul", light: #0a5fd0, dark: #6fb1ff },
+                                        { name: "Violeta", light: #6a3fd6, dark: #b39bff },
+                                        { name: "Verde", light: #137a4b, dark: #5fd49a },
+                                        { name: "Naranja", light: #b4500a, dark: #ffab6b },
+                                        { name: "Rosa", light: #b8306a, dark: #ff8fc0 },
+                                        { name: "Grafito", light: #3d4654, dark: #c9d1de },
+                                    ]: Swatch {
+                                        name: a.name;
+                                        c: Theme.dark ? a.dark : a.light;
+                                        selected: i == Theme.accent-index;
+                                        picked => { Theme.accent-index = i; root.settings-changed(); }
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    VerticalLayout {
-                        SectionTitle { text: "Cristal"; }
-                        SettingRow {
-                            title: "Reducir transparencia";
-                            subtitle: "Paneles opacos: más rápido en equipos modestos y más legible";
-                            Check {
-                                checked: Theme.reduce-transparency;
-                                label: "Reducir transparencia";
-                                toggled(v) => { Theme.reduce-transparency = v; root.settings-changed(); }
+                        VerticalLayout {
+                            SectionTitle { text: "Cristal"; }
+                            SettingRow {
+                                title: "Reducir transparencia";
+                                subtitle: "Paneles opacos: más rápido en equipos modestos y más legible";
+                                Check {
+                                    checked: Theme.reduce-transparency;
+                                    label: "Reducir transparencia";
+                                    toggled(v) => { Theme.reduce-transparency = v; root.settings-changed(); }
+                                }
                             }
                         }
+
+                        VerticalLayout {
+                            SectionTitle { text: "Portapapeles"; }
+                            SettingRow {
+                                title: "Aviso al copiar enlaces";
+                                subtitle: "Ventanita abajo a la derecha con los enlaces copiados mientras se comprueban";
+                                Segmented {
+                                    options: ["Completo", "Compacto", "Desactivado"];
+                                    current <=> root.clip-popup;
+                                    changed-by-user => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Cerrar el aviso automáticamente";
+                                subtitle: "1 s después de terminar la comprobación";
+                                Check {
+                                    checked <=> root.clip-autoclose;
+                                    label: "Cerrar el aviso automáticamente";
+                                    toggled => { root.settings-changed(); }
+                                }
+                            }
+                        }
+                
                     }
                 }
             }
@@ -1508,6 +1536,318 @@ export component AppWindow inherits Window {
                 }
             }
             init => { links.focus(); }
+        }
+    }
+}
+
+// ---- Aviso de enlaces copiados (abajo a la derecha) ----
+
+export struct PopRow {
+    key: int,
+    name: string,
+    host: string,
+    size: string,
+    status: string,
+    tone: int,
+    checked: bool,
+    // Disponible: se puede marcar.
+    usable: bool,
+}
+
+// Un botón redondo solo con icono.
+component RoundBtn inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> filled: false;
+    in property <length> size: 28px;
+    in property <bool> enabled: true;
+    callback clicked();
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { if enabled { clicked(); } }
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: primary ? Theme.accent : touch.has-hover ? Theme.head : transparent;
+    opacity: enabled ? 1 : 0.45;
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        size: root.size * 0.5;
+        commands: root.icon;
+        filled: root.filled;
+        ink: root.primary ? Theme.on-accent : Theme.muted;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component ClipPopup inherits Window {
+    title: "OmniLoad · enlaces copiados";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+
+    in property <bool> compact: true;
+    in property <[PopRow]> rows;
+    in property <int> total;
+    in property <int> ok;
+    in property <int> bad;
+    in property <bool> checking;
+    in property <string> time-text;
+    // Rueda: arco verde (aptos) y rojo (caídos), en un cuadro de 44×44.
+    in property <string> ok-arc;
+    in property <string> bad-arc;
+    in property <int> to-download;
+    in-out property <bool> autostart: true;
+    out property <bool> hovered: hover.has-hover;
+
+    callback play();
+    callback download();
+    callback open-grabber();
+    callback discard();
+    callback close();
+    callback minimize();
+    callback check(int, bool);
+    callback autostart-changed();
+    changed autostart => { autostart-changed(); }
+
+    property <int> shown: min(rows.length, 5);
+    // Tamaño que pide el aviso; Rust coloca la ventana con él.
+    out property <length> want-width: compact ? 300px : 440px;
+    out property <length> want-height: compact ? 72px : 56px + max(1, shown) * 44px + 96px;
+    width: want-width;
+    height: want-height;
+
+    hover := TouchArea { }
+
+    Panel {
+        background: Theme.glass ? (Theme.dark ? #1c2236f5 : #fffffff5) : Theme.panel;
+        drop-shadow-blur: 0px;
+        drop-shadow-offset-y: 0px;
+
+        // Compacta: play · texto · rueda · cerrar
+        if root.compact: HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 8px;
+            spacing: 12px;
+            alignment: stretch;
+            RoundBtn {
+                y: (parent.height - self.height) / 2;
+                size: 40px;
+                primary: true;
+                filled: true;
+                icon: "M8 5l12 7-12 7z";
+                label: "Descargar los enlaces aptos";
+                enabled: root.ok > 0;
+                clicked => { root.play(); }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.total == 1 ? "1 enlace copiado" : root.total + " enlaces copiados";
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.time-text;
+                    font-size: 12px;
+                    color: Theme.muted;
+                    overflow: elide;
+                }
+            }
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                width: 44px;
+                height: 44px;
+                accessible-role: progress-indicator;
+                accessible-label: root.ok + " de " + root.total + " enlaces aptos";
+                Path {
+                    width: 44px;
+                    height: 44px;
+                    viewbox-width: 44;
+                    viewbox-height: 44;
+                    commands: "M 22 4 A 18 18 0 1 1 22 40 A 18 18 0 1 1 22 4";
+                    stroke: Theme.track;
+                    stroke-width: 4px;
+                    fill: transparent;
+                }
+                Path {
+                    width: 44px;
+                    height: 44px;
+                    viewbox-width: 44;
+                    viewbox-height: 44;
+                    commands: root.ok-arc;
+                    stroke: Theme.ok;
+                    stroke-width: 4px;
+                    fill: transparent;
+                }
+                Path {
+                    width: 44px;
+                    height: 44px;
+                    viewbox-width: 44;
+                    viewbox-height: 44;
+                    commands: root.bad-arc;
+                    stroke: Theme.err;
+                    stroke-width: 4px;
+                    fill: transparent;
+                }
+                Text {
+                    text: root.ok + "/" + root.total;
+                    font-size: root.total >= 100 ? 9px : 11px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            RoundBtn {
+                y: 8px;
+                size: 24px;
+                icon: "M6 6l12 12M18 6L6 18";
+                label: "Cerrar";
+                clicked => { root.close(); }
+            }
+        }
+
+        // Completa: cabecera, lista y botones
+        if !root.compact: VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 8px;
+                height: 32px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 5px;
+                    Text {
+                        text: (root.total == 1 ? "1 enlace copiado" : root.total + " enlaces copiados")
+                            + " · " + root.ok + " disponibles"
+                            + (root.bad == 1 ? " · 1 caído" : root.bad > 1 ? " · " + root.bad + " caídos" : "");
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text;
+                        overflow: elide;
+                    }
+                    Rectangle {
+                        height: 3px;
+                        border-radius: 1.5px;
+                        background: Theme.track;
+                        clip: true;
+                        Rectangle {
+                            x: 0;
+                            width: root.total == 0 ? 0px : parent.width * root.ok / root.total;
+                            background: Theme.ok;
+                        }
+                        Rectangle {
+                            x: root.total == 0 ? 0px : parent.width * root.ok / root.total;
+                            width: root.total == 0 ? 0px : parent.width * root.bad / root.total;
+                            background: Theme.err;
+                        }
+                    }
+                }
+                RoundBtn {
+                    y: (parent.height - self.height) / 2;
+                    icon: "M6 12h12";
+                    label: "Minimizar";
+                    clicked => { root.minimize(); }
+                }
+                RoundBtn {
+                    y: (parent.height - self.height) / 2;
+                    icon: "M6 6l12 12M18 6L6 18";
+                    label: "Cerrar";
+                    clicked => { root.close(); }
+                }
+            }
+            Rectangle {
+                height: max(1, root.shown) * 44px;
+                border-radius: Theme.r2;
+                background: Theme.panel2;
+                clip: true;
+                ListView {
+                    for row in root.rows: Rectangle {
+                        height: 44px;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            Check {
+                                y: (parent.height - self.height) / 2;
+                                checked: row.checked;
+                                enabled: row.usable;
+                                label: "Incluir " + row.name;
+                                toggled(v) => { root.check(row.key, v); }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 1px;
+                                Text {
+                                    text: row.name;
+                                    font-size: 13px;
+                                    color: Theme.text;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: row.host + (row.size == "" ? "" : " · " + row.size);
+                                    font-size: 11px;
+                                    color: Theme.muted;
+                                    overflow: elide;
+                                }
+                            }
+                            Text {
+                                text: row.status;
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: Theme.tone(row.tone);
+                                vertical-alignment: center;
+                            }
+                        }
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: Theme.line;
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                LabeledCheck {
+                    text: "Iniciar al añadir";
+                    checked <=> root.autostart;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: root.time-text;
+                    font-size: 12px;
+                    color: Theme.muted;
+                    vertical-alignment: center;
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Btn {
+                    text: "Descargar (" + root.to-download + ")";
+                    icon: "M8 5l12 7-12 7z";
+                    icon-filled: true;
+                    primary: true;
+                    enabled: root.to-download > 0;
+                    clicked => { root.download(); }
+                }
+                Btn { text: "Abrir en el capturador"; clicked => { root.open-grabber(); } }
+                Rectangle { horizontal-stretch: 1; }
+                Btn { text: "Descartar"; clicked => { root.discard(); } }
+            }
         }
     }
 }
