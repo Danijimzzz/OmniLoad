@@ -34,12 +34,15 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Dependencias de la interfaz (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev libxkbcommon-dev
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Pruebas
         run: cargo test --workspace --locked
-      - name: Compilar omni en release
-        run: cargo build --release --locked -p omni-cli
+      - name: Compilar omni y omniload en release
+        run: cargo build --release --locked -p omni-cli -p omni-gui
 
   msrv:
     name: Versión mínima de Rust (1.88)
@@ -48,4 +51,5 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev libxkbcommon-dev
       - run: cargo check --workspace --all-targets --locked

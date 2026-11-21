@@ -3,10 +3,34 @@
 Gestor de descargas de escritorio escrito en Rust, pensado como alternativa
 rápida y ligera a JDownloader. Funciona en Windows, Linux y macOS.
 
-> Estado: **fase 1**, núcleo por línea de comandos. La interfaz nativa (Slint)
-> llega en la fase 4.
+> Estado: **fase 1**, núcleo por línea de comandos, y una primera versión de la
+> interfaz nativa (Slint).
 
-## Uso
+## Interfaz gráfica
+
+```sh
+cargo run --release -p omni-gui            # abre la ventana
+cargo run --release -p omni-gui -- <url>   # y empieza a descargar ese enlace
+```
+
+El ejecutable queda en `target/release/omniload(.exe)`. Pega un enlace, elige
+carpeta y número de conexiones y pulsa **Descargar**. Cada descarga muestra
+progreso, velocidad, tiempo restante, conexiones activas (y el límite si el
+servidor rechaza conexiones de más) y los botones de pausar y reanudar.
+
+Pausar guarda el progreso; reanudar sigue donde se quedó. Al cerrar la ventana
+se pausa todo. La lista aún no se guarda entre sesiones (llegará con
+`omni-store` en la fase 2), pero volver a añadir el mismo enlace en la misma
+carpeta reanuda desde el `.part`.
+
+En Linux hacen falta `libfontconfig` y `libxkbcommon-x11` (vienen en cualquier
+escritorio). Para compilar: `sudo apt install libfontconfig-dev libxkbcommon-dev`
+en Debian/Ubuntu.
+
+## Línea de comandos
+
+La CLI sigue siendo la mejor forma de depurar, porque muestra los errores en la
+terminal:
 
 ```sh
 omni get https://ejemplo.com/archivo.iso              # a la carpeta actual
@@ -62,6 +86,8 @@ crates/
   omni-testserver/  servidor HTTP falso para las pruebas (cortes, 503, ETag)
 apps/
   omni-cli/         binario `omni`
+  omni-gui/         binario `omniload`, la ventana (Slint)
+    ui/app.slint    diseño de la ventana
 ```
 
 ## Desarrollo
@@ -70,6 +96,7 @@ apps/
 cargo test --workspace      # pruebas, incluida la de matar el proceso y reanudar
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --release -p omni-cli   # target/release/omni(.exe)
+cargo build --release -p omni-gui   # target/release/omniload(.exe)
 ```
 
 Antes de subir cambios, pasa estas tres comprobaciones en tu equipo (son las

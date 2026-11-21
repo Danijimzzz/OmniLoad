@@ -1,0 +1,218 @@
+// Ventana principal de OmniLoad.
+//
+// La lógica vive en Rust (src/main.rs); aquí solo está la presentación. Cada
+// fila de la lista es un `DownloadRow` que Rust rellena cuatro veces por
+// segundo a partir del `Progress` del motor.
+
+import { Button, LineEdit, SpinBox, ProgressIndicator, ListView, Palette } from "std-widgets.slint";
+
+// Estado de una descarga, tal como lo pinta la interfaz.
+export enum RowState { starting, running, pausing, paused, done, failed }
+
+export struct DownloadRow {
+    name: string,
+    folder: string,
+    state: RowState,
+    // 0..1; negativo si aún no se sabe el tamaño.
+    fraction: float,
+    status: string,
+    sizes: string,
+    speed: string,
+    eta: string,
+    connections: string,
+    detail: string,
+}
+
+component Card inherits Rectangle {
+    in property <DownloadRow> item;
+    callback pause();
+    callback resume();
+    callback open-folder();
+    callback remove();
+
+    background: Palette.alternate-background;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Palette.border;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: item.name;
+                font-weight: 700;
+                font-size: 14px;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: item.status;
+                color: item.state == RowState.failed ? #d13438
+                    : item.state == RowState.done ? #2e9d4e
+                    : Palette.foreground;
+            }
+        }
+
+        ProgressIndicator {
+            progress: max(item.fraction, 0);
+            indeterminate: item.fraction < 0 && (item.state == RowState.running || item.state == RowState.starting);
+        }
+
+        HorizontalLayout {
+            spacing: 16px;
+            Text { text: item.sizes; }
+            Text { text: item.speed; }
+            Text { text: item.eta; }
+            Text {
+                text: item.connections;
+                horizontal-stretch: 1;
+                horizontal-alignment: right;
+                overflow: elide;
+            }
+        }
+
+        if item.detail != "": Text {
+            text: item.detail;
+            wrap: word-wrap;
+            color: item.state == RowState.failed ? #d13438 : Palette.foreground;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Text {
+                text: item.folder;
+                opacity: 0.7;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            if item.state == RowState.running || item.state == RowState.starting: Button {
+                text: "Pausar";
+                clicked => { root.pause(); }
+            }
+            if item.state == RowState.paused || item.state == RowState.failed: Button {
+                text: item.state == RowState.failed ? "Reintentar" : "Reanudar";
+                primary: true;
+                clicked => { root.resume(); }
+            }
+            Button {
+                text: "Abrir carpeta";
+                clicked => { root.open-folder(); }
+            }
+            Button {
+                text: "Quitar";
+                enabled: item.state != RowState.pausing;
+                clicked => { root.remove(); }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "OmniLoad";
+    icon: @image-url("icon.png");
+    preferred-width: 820px;
+    preferred-height: 560px;
+    min-width: 560px;
+    min-height: 360px;
+
+    in-out property <string> url;
+    in-out property <string> folder;
+    in-out property <int> connections: 8;
+    in property <[DownloadRow]> downloads;
+    in property <string> message;
+    in property <bool> message-is-error;
+
+    callback add-download(/* url */ string, /* carpeta */ string, /* conexiones */ int);
+    callback choose-folder();
+    callback pause(int);
+    callback resume(int);
+    callback open-folder(int);
+    callback remove(int);
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: "Enlace";
+                vertical-alignment: center;
+                min-width: 70px;
+            }
+            url-edit := LineEdit {
+                placeholder-text: "Pega aquí el enlace (http o https) y pulsa Intro";
+                text <=> root.url;
+                accepted => { root.add-download(root.url, root.folder, root.connections); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: "Carpeta";
+                vertical-alignment: center;
+                min-width: 70px;
+            }
+            LineEdit {
+                text <=> root.folder;
+                placeholder-text: "Carpeta donde guardar";
+            }
+            Button {
+                text: "Elegir…";
+                clicked => { root.choose-folder(); }
+            }
+            Text {
+                text: "Conexiones";
+                vertical-alignment: center;
+            }
+            SpinBox {
+                minimum: 1;
+                maximum: 32;
+                value <=> root.connections;
+                width: 90px;
+            }
+            Button {
+                text: "Descargar";
+                primary: true;
+                clicked => { root.add-download(root.url, root.folder, root.connections); }
+            }
+        }
+
+        if root.message != "": Text {
+            text: root.message;
+            wrap: word-wrap;
+            color: root.message-is-error ? #d13438 : Palette.foreground;
+        }
+
+        if root.downloads.length == 0: Rectangle {
+            vertical-stretch: 1;
+            Text {
+                text: "Aún no hay descargas. Pega un enlace arriba para empezar.";
+                opacity: 0.6;
+            }
+        }
+
+        if root.downloads.length > 0: ListView {
+            vertical-stretch: 1;
+            for row[i] in root.downloads: VerticalLayout {
+                padding-bottom: 8px;
+                padding-right: 4px;
+                Card {
+                    item: row;
+                    pause => { root.pause(i); }
+                    resume => { root.resume(i); }
+                    open-folder => { root.open-folder(i); }
+                    remove => { root.remove(i); }
+                }
+            }
+        }
+    }
+
+    init => { url-edit.focus(); }
+}
