@@ -3934,13 +3934,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-api"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "fs4",
+ "getrandom 0.3.4",
+ "hex",
+ "omni-core",
+ "omni-queue",
+ "omni-store",
+ "omni-testserver",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "omni-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
  "indicatif",
+ "omni-api",
  "omni-core",
+ "omni-queue",
  "omni-testserver",
  "serde_json",
  "tempfile",
@@ -3989,10 +4013,10 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "dirs",
+ "omni-api",
  "omni-core",
  "omni-grab",
  "omni-queue",
- "omni-store",
  "omni-testserver",
  "reqwest",
  "rfd",
@@ -4046,6 +4070,20 @@ dependencies = [
  "omni-core",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "omnid"
+version = "0.1.0"
+dependencies = [
+ "omni-api",
+ "omni-core",
+ "omni-queue",
+ "omni-testserver",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4768,6 +4806,8 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
+ "serde",
+ "serde_json",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

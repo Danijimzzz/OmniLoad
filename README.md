@@ -26,6 +26,8 @@ Copias un enlace y OmniLoad se encarga del resto.
   descargas también se guarda: al volver a abrir, todo está como lo dejaste.
 - 🚦 **No te deja sin internet.** Pon un límite de velocidad y sigue viendo
   vídeos o jugando mientras descarga.
+- 🌙 **Sigue aunque cierres la ventana.** Si quieres, OmniLoad continúa
+  descargando en segundo plano y al abrirlo lo ves todo tal cual.
 - 📋 **Copia y listo.** Copia un enlace en cualquier sitio y OmniLoad lo detecta
   solo. No hace falta pegar nada.
 - 🔎 **Mira antes de bajar.** Antes de descargar te enseña qué hay detrás de
@@ -79,7 +81,8 @@ quitarlo. Se cierra solo al terminar de comprobar.
 - **Límite de velocidad** en la barra de arriba (por ejemplo, 2 MB/s), que se
   aplica al momento, también a lo que ya se está bajando.
 - Al cerrar OmniLoad, lo que se estaba bajando queda en la cola y **sigue solo**
-  la próxima vez que lo abras.
+  la próxima vez que lo abras. Y si activas **Seguir descargando al cerrar la
+  ventana** (en Ajustes), ni siquiera se para.
 - Si un servidor limita las conexiones, OmniLoad se adapta solo y **lo
   recuerda** para la próxima vez. En Ajustes puedes poner cuántas conexiones
   abrir como mucho a una misma web, y las descargas a la misma web se reparten
@@ -107,16 +110,20 @@ Mientras tanto puedes compilarlo tú mismo en dos pasos:
 2. Descarga este proyecto y, dentro de su carpeta, ejecuta:
 
    ```sh
-   cargo run --release -p omni-gui
+   cargo build --release -p omni-gui -p omnid -p omni-cli
    ```
+
+   y abre `target/release/omniload` (`omniload.exe` en Windows). Los tres
+   programas tienen que estar en la misma carpeta, como quedan al compilar.
+
+   (`cargo run --release -p omni-gui` también vale, pero sin `omnid` las
+   descargas se paran al cerrar la ventana.)
 
 En Linux necesitas además `libfontconfig-dev` y `libxkbcommon-dev`
 (`sudo apt install libfontconfig-dev libxkbcommon-dev` en Debian/Ubuntu).
 
 ## Próximamente
 
-- OmniLoad seguirá descargando aunque cierres la ventana (un servicio en
-  segundo plano).
 - Descargar de Mega, Gofile, Google Drive y Mediafire.
 - Descomprimir automáticamente, con contraseñas.
 - Descargar usando varias conexiones a internet a la vez (por ejemplo, wifi y
@@ -124,8 +131,8 @@ En Linux necesitas además `libfontconfig-dev` y `libxkbcommon-dev`
 
 ## Para desarrolladores
 
-¿Quieres compilar, usar la versión de terminal (`omni`) o saber cómo funciona
-por dentro? Está todo en [docs/DESARROLLO.md](docs/DESARROLLO.md).
+¿Quieres usar OmniLoad desde la terminal (`omni add`, `omni list`, `omni
+limit 2M`…), compilarlo o saber cómo funciona por dentro? Está todo en [docs/DESARROLLO.md](docs/DESARROLLO.md).
 
 ## Licencia
 

@@ -1,0 +1,28 @@
+[package]
+name = "omni-api"
+description = "API local de OmniLoad: el servicio omnid y su cliente (ventana y CLI)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum.workspace = true
+fs4.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+omni-core.workspace = true
+omni-queue.workspace = true
+omni-store.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+omni-testserver.workspace = true
+tempfile.workspace = true

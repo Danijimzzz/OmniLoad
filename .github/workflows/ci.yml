@@ -41,8 +41,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Pruebas
         run: cargo test --workspace --locked
-      - name: Compilar omni y omniload en release
-        run: cargo build --release --locked -p omni-cli -p omni-gui
+      - name: Compilar omni, omniload y omnid en release
+        run: cargo build --release --locked -p omni-cli -p omni-gui -p omnid
 
   msrv:
     name: Versión mínima de Rust (1.88)
