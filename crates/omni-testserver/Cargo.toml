@@ -1,0 +1,15 @@
+[package]
+name = "omni-testserver"
+description = "Servidor HTTP falso para las pruebas de OmniLoad: rangos, cortes, 503 y cambios de ETag"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+axum.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+tokio.workspace = true
