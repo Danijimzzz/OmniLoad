@@ -1,0 +1,19 @@
+[package]
+name = "omni-store"
+description = "Almacén SQLite de OmniLoad: cola de descargas, ajustes y lo aprendido de cada servidor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dirs.workspace = true
+omni-core.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

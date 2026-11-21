@@ -720,6 +720,8 @@ export component AppWindow inherits Window {
     in-out property <int> properties-panel: 0;
     in-out property <int> max-active: 3;
     in-out property <int> connections: 8;
+    in-out property <int> speed-limit: 0;
+    in-out property <int> max-per-server: 8;
     in-out property <bool> watch-clipboard: true;
     in-out property <int> clip-popup: 1;
     in-out property <bool> package-folders: true;
@@ -795,6 +797,8 @@ export component AppWindow inherits Window {
     changed theme-dark => { Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light; }
     changed max-active => { queue-settings-changed(); }
     changed connections => { queue-settings-changed(); }
+    changed speed-limit => { queue-settings-changed(); }
+    changed max-per-server => { queue-settings-changed(); }
     changed watch-clipboard => { settings-changed(); }
     init => {
         Theme.system-dark = Palette.color-scheme == ColorScheme.dark;
@@ -953,6 +957,13 @@ export component AppWindow inherits Window {
                         minimum: 1;
                         maximum: 32;
                         value <=> root.connections;
+                    }
+                    Text { text: "Límite"; color: Theme.text; vertical-alignment: center; }
+                    ComboBox {
+                        width: 120px;
+                        // Mismo orden que SPEED_LIMITS en settings.rs.
+                        model: ["Sin límite", "256 KB/s", "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s", "50 MB/s", "100 MB/s"];
+                        current-index <=> root.speed-limit;
                     }
                     Rectangle { horizontal-stretch: 1; }
                     LineEdit {
@@ -1365,6 +1376,16 @@ export component AppWindow inherits Window {
                             enabled: root.package-folders;
                             label: "Carpeta también para paquetes de un solo archivo";
                             toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Conexiones por servidor";
+                        subtitle: "Cuántas conexiones se abren como mucho a una misma web sumando todas las descargas (0 = sin tope). Si el servidor acepta menos, OmniLoad lo aprende solo y lo recuerda.";
+                        SpinBox {
+                            width: 90px;
+                            minimum: 0;
+                            maximum: 64;
+                            value <=> root.max-per-server;
                         }
                     }
                     SettingRow {

@@ -16,6 +16,11 @@
 //! segundo en un archivo de estado junto al `.part`, después de un `fsync`, para
 //! poder reanudar tras un cierre, un `kill -9` o un corte de luz.
 //!
+//! Para varias descargas a la vez hay dos piezas compartidas: [`RateLimit`]
+//! (límite de velocidad, global o por descarga) y [`ServerLimits`] (cuántas
+//! conexiones se abren como mucho a un mismo servidor sumando todas las
+//! descargas, y lo que se ha aprendido de cada uno).
+//!
 //! El código propio de cada sistema operativo vive en [`platform`].
 
 pub mod blocks;
@@ -27,14 +32,19 @@ mod network;
 pub mod platform;
 mod probe;
 mod progress;
+mod rate;
 mod retry;
+mod servers;
 mod state;
 
 pub use download::{Destination, Download, DownloadOptions, DownloadOutcome};
 pub use error::{Error, Result};
 pub use network::{Network, NetworkId};
-pub use probe::{RemoteInfo, probe};
+pub use probe::{RemoteInfo, probe, probe_with};
 pub use progress::{NetworkStats, Progress};
+pub use rate::RateLimit;
+pub use reqwest::header::HeaderMap;
+pub use servers::{ServerLimit, ServerLimits, ServerStatus};
 pub use state::state_path_for;
 
 /// Tamaño de bloque por defecto: 8 MiB.
