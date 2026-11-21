@@ -103,14 +103,6 @@ impl Progress {
         self.with_stats(network, |s| s.receiving = s.receiving.saturating_sub(1));
     }
 
-    pub(crate) fn receiving(&self, network: NetworkId) -> usize {
-        self.per_network
-            .lock()
-            .expect("progreso envenenado")
-            .get(&network)
-            .map_or(0, |s| s.receiving)
-    }
-
     pub(crate) fn set_limit(&self, network: NetworkId, limit: usize) {
         self.with_stats(network, |s| s.limit = limit);
     }

@@ -49,8 +49,11 @@ se quedó, también tras un cierre forzado o un corte de luz.
 2. **Reserva**: se crea `archivo.part` con su tamaño final, para detectar la
    falta de espacio al principio.
 3. **Cola de bloques**: el archivo se reparte en bloques de 8 MiB. Empiezan 8
-   conexiones y cada una coge el siguiente bloque libre al acabar el suyo, así
-   que la conexión más rápida descarga más.
+   conexiones repartidas a lo largo del archivo; cada una pide con una sola
+   petición HTTP todo el tramo libre que tiene por delante y va encadenando
+   bloques mientras el siguiente siga libre. Así la conexión más rápida
+   descarga más y el servidor recibe pocas peticiones (algunos limitan cuántas
+   aceptan por minuto).
 4. **Final rápido**: cuando no quedan bloques libres, una conexión ociosa parte
    por la mitad el bloque al que más le falta (mínimo 1 MiB por mitad) o, si ya
    es pequeño, compite con él; gana la primera que acabe.
@@ -65,6 +68,9 @@ se quedó, también tras un cierre forzado o un corte de luz.
 7. **Reintentos**: cortes de red, 5xx y 429 se reintentan con espera
    exponencial (1, 2, 4… hasta 60 s, respetando `Retry-After`). 403, 404 y 410
    marcan el enlace como caducado.
+   Si el servidor rechaza conexiones por exceso (429 o 503 con varias
+   abiertas), se baja al número que acepta y cada 60 s se prueba con una más.
+   Siempre HTTP/1.1: cada conexión es una conexión TCP propia.
 8. **Cierre**: se comprueba el tamaño (y el SHA-256 si se pidió) y se renombra
    `.part` al nombre final.
 
