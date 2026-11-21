@@ -9,7 +9,7 @@
 //!
 //! Cada conexión pertenece a una [`Network`]. En la fase 1 solo existe la red
 //! por defecto del sistema, pero la cola y el motor ya trabajan con varias,
-//! para que la descarga multi-red (fase 2b) no obligue a rehacer nada.
+//! para que la descarga multi-red (última fase del plan) no obligue a rehacer nada.
 //!
 //! Los datos se escriben directamente en su posición del archivo final
 //! (`.part`), sin unir trozos al terminar. El progreso se guarda cada medio
