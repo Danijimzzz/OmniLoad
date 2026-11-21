@@ -22,6 +22,7 @@ pub mod blocks;
 mod download;
 mod error;
 pub mod filename;
+mod limiter;
 mod network;
 pub mod platform;
 mod probe;

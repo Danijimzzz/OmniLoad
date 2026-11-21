@@ -178,6 +178,39 @@ async fn retries_503() {
 }
 
 #[tokio::test]
+async fn adapts_to_server_connection_limit() {
+    // Un servidor que solo acepta 2 conexiones a la vez (como los de prueba
+    // de Hetzner): las demás reciben 429. No debe agotar los reintentos.
+    let data = pseudo_random_bytes((3 * MIB) as usize, 10);
+    let cfg = ServerConfig {
+        max_concurrent: Some(2),
+        chunk_delay: Some(Duration::from_millis(1)),
+        ..ServerConfig::default()
+    };
+    let server = TestServer::start(data.clone(), cfg).await;
+    let dir = tempfile::tempdir().unwrap();
+    let opts = DownloadOptions {
+        connections_per_network: 8,
+        max_retries: 2,
+        ..fast_opts()
+    };
+    let dl = Download::new(
+        &server.url("a.bin"),
+        Destination::Dir(dir.path().into()),
+        opts,
+    )
+    .unwrap();
+    let progress = dl.progress();
+    let out = dl.run(CancellationToken::new()).await.unwrap();
+    assert_eq!(read(&out.path), data);
+    let stats = progress.per_network();
+    let limit = stats.values().next().unwrap().limit;
+    assert!(limit <= 2, "límite final {limit}");
+    // Unos pocos rechazos al principio, no una avalancha.
+    assert!(server.rejected() <= 12, "rechazos: {}", server.rejected());
+}
+
+#[tokio::test]
 async fn gives_up_after_max_retries() {
     let cfg = ServerConfig {
         fail_first: 1000,

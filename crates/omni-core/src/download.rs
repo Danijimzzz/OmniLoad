@@ -1,6 +1,7 @@
 //! El motor: sondea, reserva el archivo, lanza las conexiones sobre la cola de
 //! bloques, guarda el progreso y cierra la descarga.
 
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -19,12 +20,13 @@ use tracing::{debug, info, warn};
 use url::Url;
 
 use crate::blocks::{BlockQueue, Commit, Lease};
+use crate::limiter::{GROW_AFTER, Limiter};
 use crate::probe::{parse_content_range, status_error};
 use crate::retry::{Backoff, retry_after};
 use crate::state::{SavedState, part_path_for, state_path_for};
 use crate::{
     DEFAULT_BLOCK_SIZE, DEFAULT_CONNECTIONS_PER_NETWORK, DEFAULT_MIN_BLOCK_SIZE, Error, Network,
-    Progress, RemoteInfo, Result, platform, probe,
+    NetworkId, Progress, RemoteInfo, Result, platform, probe,
 };
 
 /// Cada cuánto vuelca una conexión su búfer a disco aunque no esté lleno.
@@ -233,6 +235,19 @@ impl Download {
             abort: cancel.child_token(),
             fatal: Mutex::new(None),
             state_path: state_path.to_path_buf(),
+            limits: self
+                .opts
+                .networks
+                .iter()
+                .map(|n| {
+                    self.progress
+                        .set_limit(n.id(), self.opts.connections_per_network);
+                    (
+                        n.id(),
+                        Limiter::new(self.opts.connections_per_network, GROW_AFTER),
+                    )
+                })
+                .collect(),
         });
 
         // Estado inicial en disco antes de bajar nada.
@@ -461,6 +476,8 @@ struct Shared {
     abort: CancellationToken,
     fatal: Mutex<Option<Error>>,
     state_path: PathBuf,
+    /// Límite adaptativo de conexiones de cada red.
+    limits: HashMap<NetworkId, Limiter>,
 }
 
 impl Shared {
@@ -520,53 +537,72 @@ async fn saver_loop(shared: Arc<Shared>, stop: CancellationToken) {
 /// Una conexión: coge bloques de la cola hasta que no quede trabajo.
 async fn worker(sh: Arc<Shared>, net: Network) {
     sh.progress.connection_opened(net.id());
+    let limiter = &sh.limits[&net.id()];
     let backoff = sh.opts.backoff();
     let mut failures = 0u32;
     loop {
-        if sh.abort.is_cancelled() {
+        // Esperar hueco: si el servidor limita las conexiones, las de más
+        // esperan aquí en lugar de insistir.
+        if !limiter.acquire(&sh.abort).await {
             break;
         }
+        sh.progress.set_limit(net.id(), limiter.allowed());
         let Some(lease) = sh.queue().next(net.id()) else {
             // Lo que falta ya tiene conexiones vivas; si alguna falla, ella
             // misma reintentará su bloque.
+            limiter.release();
             break;
         };
         let res = fetch(&sh, &net, &lease).await;
         sh.queue().release(&lease);
-        match res {
-            Ok(()) => failures = 0,
-            Err(f) => {
-                if f.progressed {
-                    failures = 0;
-                }
-                if matches!(f.error, Error::Cancelled) {
-                    break;
-                }
-                if !f.error.is_retriable() {
-                    sh.fail(f.error);
-                    break;
-                }
-                failures += 1;
-                sh.progress.retried(net.id());
-                if failures > sh.opts.max_retries {
-                    sh.fail(Error::RetriesExhausted(Box::new(f.error)));
-                    break;
-                }
-                let delay = f
-                    .retry_after
-                    .unwrap_or_else(|| backoff.delay(failures - 1))
-                    .min(sh.opts.retry_max);
-                info!(
-                    "{}: bloque en {} falló ({}); reintento en {delay:?}",
-                    net.id(),
-                    lease.start,
-                    f.error
-                );
-                tokio::select! {
-                    _ = sh.abort.cancelled() => break,
-                    _ = tokio::time::sleep(delay) => {}
-                }
+        limiter.release();
+        let Err(f) = res else {
+            failures = 0;
+            continue;
+        };
+        if f.progressed {
+            failures = 0;
+        }
+        if matches!(f.error, Error::Cancelled) {
+            break;
+        }
+        if !f.error.is_retriable() {
+            sh.fail(f.error);
+            break;
+        }
+        sh.progress.retried(net.id());
+
+        // 429/503 con varias conexiones abiertas: el servidor limita cuántas
+        // acepta. Se baja el límite y no cuenta como fallo.
+        let too_many = matches!(f.error, Error::HttpStatus { status: 429 | 503 })
+            && limiter.reject(sh.progress.receiving(net.id()));
+        let delay = if too_many {
+            sh.progress.set_limit(net.id(), limiter.allowed());
+            info!(
+                "{}: el servidor rechaza conexiones de más ({}); límite: {}",
+                net.id(),
+                f.error,
+                limiter.allowed()
+            );
+            f.retry_after.unwrap_or(sh.opts.retry_base)
+        } else {
+            failures += 1;
+            if failures > sh.opts.max_retries {
+                sh.fail(Error::RetriesExhausted(Box::new(f.error)));
+                break;
             }
+            let delay = f.retry_after.unwrap_or_else(|| backoff.delay(failures - 1));
+            info!(
+                "{}: bloque en {} falló ({}); reintento en {delay:?}",
+                net.id(),
+                lease.start,
+                f.error
+            );
+            delay
+        };
+        tokio::select! {
+            _ = sh.abort.cancelled() => break,
+            _ = tokio::time::sleep(delay.min(sh.opts.retry_max)) => {}
         }
     }
     sh.progress.connection_closed(net.id());

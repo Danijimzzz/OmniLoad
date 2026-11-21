@@ -33,6 +33,8 @@ pub struct ServerConfig {
     /// Pausa antes de cada trozo (para simular un servidor lento).
     pub chunk_delay: Option<Duration>,
     pub content_disposition: Option<String>,
+    /// Máximo de respuestas simultáneas; las de más reciben 429.
+    pub max_concurrent: Option<u32>,
 }
 
 impl Default for ServerConfig {
@@ -45,6 +47,7 @@ impl Default for ServerConfig {
             chunk: 16 * 1024,
             chunk_delay: None,
             content_disposition: None,
+            max_concurrent: None,
         }
     }
 }
@@ -56,6 +59,8 @@ struct Inner {
     cuts_left: AtomicU32,
     served: AtomicU64,
     requests: AtomicU64,
+    active: AtomicU32,
+    rejected: AtomicU64,
     ranges: Mutex<Vec<(u64, u64)>>,
 }
 
@@ -75,6 +80,8 @@ impl TestServer {
             cfg: RwLock::new(cfg),
             served: AtomicU64::new(0),
             requests: AtomicU64::new(0),
+            active: AtomicU32::new(0),
+            rejected: AtomicU64::new(0),
             ranges: Mutex::new(Vec::new()),
         });
         let app = Router::new().fallback(handler).with_state(inner.clone());
@@ -105,6 +112,11 @@ impl TestServer {
     /// Bytes de cuerpo enviados en total.
     pub fn bytes_served(&self) -> u64 {
         self.inner.served.load(Ordering::SeqCst)
+    }
+
+    /// Respuestas 429 por exceso de conexiones simultáneas.
+    pub fn rejected(&self) -> u64 {
+        self.inner.rejected.load(Ordering::SeqCst)
     }
 
     pub fn requests(&self) -> u64 {
@@ -153,6 +165,15 @@ fn take_one(counter: &AtomicU32) -> bool {
     }
 }
 
+/// Ocupa un hueco de `max_concurrent` mientras vive la respuesta.
+struct ActiveSlot(Arc<Inner>);
+
+impl Drop for ActiveSlot {
+    fn drop(&mut self) {
+        self.0.active.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 fn parse_range(headers: &HeaderMap) -> Option<(u64, Option<u64>)> {
     let v = headers.get(header::RANGE)?.to_str().ok()?;
     let (s, e) = v.strip_prefix("bytes=")?.split_once('-')?;
@@ -170,6 +191,26 @@ async fn handler(State(st): State<Arc<Inner>>, headers: HeaderMap) -> Response {
         return (StatusCode::SERVICE_UNAVAILABLE, "ocupado").into_response();
     }
     let cfg = st.cfg.read().unwrap().clone();
+    let slot = match cfg.max_concurrent {
+        Some(max) => {
+            let mut cur = st.active.load(Ordering::SeqCst);
+            loop {
+                if cur >= max {
+                    st.rejected.fetch_add(1, Ordering::SeqCst);
+                    return (StatusCode::TOO_MANY_REQUESTS, "demasiadas conexiones")
+                        .into_response();
+                }
+                match st
+                    .active
+                    .compare_exchange(cur, cur + 1, Ordering::SeqCst, Ordering::SeqCst)
+                {
+                    Ok(_) => break Some(ActiveSlot(st.clone())),
+                    Err(actual) => cur = actual,
+                }
+            }
+        }
+        None => None,
+    };
     let (data, etag) = st.content.read().unwrap().clone();
     let len = data.len() as u64;
 
@@ -222,8 +263,8 @@ async fn handler(State(st): State<Arc<Inner>>, headers: HeaderMap) -> Response {
 
     let cut_at = take_one(&st.cuts_left).then_some(start + cfg.cut_after);
 
-    let body_state = (start, data, st.clone(), false);
-    let stream = futures_util::stream::unfold(body_state, move |(pos, data, st, done)| {
+    let body_state = (start, data, st.clone(), false, slot);
+    let stream = futures_util::stream::unfold(body_state, move |(pos, data, st, done, slot)| {
         let cfg = cfg.clone();
         async move {
             if done || pos >= end {
@@ -233,7 +274,7 @@ async fn handler(State(st): State<Arc<Inner>>, headers: HeaderMap) -> Response {
                 && pos >= cut
             {
                 let err = io::Error::new(io::ErrorKind::ConnectionReset, "corte simulado");
-                return Some((Err(err), (pos, data, st, true)));
+                return Some((Err(err), (pos, data, st, true, slot)));
             }
             if let Some(d) = cfg.chunk_delay {
                 tokio::time::sleep(d).await;
@@ -244,7 +285,7 @@ async fn handler(State(st): State<Arc<Inner>>, headers: HeaderMap) -> Response {
             }
             let chunk = data.slice(pos as usize..next as usize);
             st.served.fetch_add(next - pos, Ordering::SeqCst);
-            Some((Ok::<_, io::Error>(chunk), (next, data, st, false)))
+            Some((Ok::<_, io::Error>(chunk), (next, data, st, false, slot)))
         }
     });
     (status, resp_headers, Body::from_stream(stream)).into_response()

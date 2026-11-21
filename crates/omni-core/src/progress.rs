@@ -25,6 +25,9 @@ pub struct NetworkStats {
     pub receiving: usize,
     /// Reintentos por errores (cortes, 503, 429…) desde el inicio.
     pub retries: u64,
+    /// Conexiones que el servidor acepta ahora mismo (baja si responde 429
+    /// o 503 por exceso de conexiones; 0 = aún no se sabe).
+    pub limit: usize,
 }
 
 impl Progress {
@@ -98,6 +101,18 @@ impl Progress {
 
     pub(crate) fn receiving_stopped(&self, network: NetworkId) {
         self.with_stats(network, |s| s.receiving = s.receiving.saturating_sub(1));
+    }
+
+    pub(crate) fn receiving(&self, network: NetworkId) -> usize {
+        self.per_network
+            .lock()
+            .expect("progreso envenenado")
+            .get(&network)
+            .map_or(0, |s| s.receiving)
+    }
+
+    pub(crate) fn set_limit(&self, network: NetworkId, limit: usize) {
+        self.with_stats(network, |s| s.limit = limit);
     }
 
     pub(crate) fn retried(&self, network: NetworkId) {

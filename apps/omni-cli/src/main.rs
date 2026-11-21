@@ -172,7 +172,11 @@ async fn get(args: GetArgs) -> Result<ExitCode> {
                 let stats = progress.per_network();
                 let receiving: usize = stats.values().map(|s| s.receiving).sum();
                 let retries: u64 = stats.values().map(|s| s.retries).sum();
+                let limit: usize = stats.values().map(|s| s.limit).sum();
                 let mut msg = format!("{receiving}/{connections} conexiones activas");
+                if limit > 0 && limit < connections {
+                    msg.push_str(&format!(" (el servidor solo acepta {limit})"));
+                }
                 if retries > 0 {
                     msg.push_str(&format!(" · {retries} reintentos"));
                 }
