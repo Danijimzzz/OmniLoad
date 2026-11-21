@@ -8,6 +8,7 @@ portada para usuarios es el [README](../README.md).
 Hace falta [Rust](https://rustup.rs) 1.88 o más nuevo.
 
 ```sh
+cargo build --release -p omni-gui -p omnid -p omni-cli   # los tres programas
 cargo run --release -p omni-gui            # abre la ventana
 cargo run --release -p omni-gui -- <url>   # y analiza ese enlace
 cargo build --release -p omni-gui          # target/release/omniload(.exe)
@@ -30,10 +31,39 @@ Support/OmniLoad`). La variable `OMNILOAD_DB` usa otro archivo. SQLite va
 compilado dentro del programa (`rusqlite` con `bundled`): no hay que instalar
 nada.
 
+## Los tres programas
+
+- `omniload`: la ventana.
+- `omnid`: el servicio que descarga. Tiene la cola y la ofrece por una API
+  HTTP local (ver abajo). La ventana y la CLI lo lanzan solos si no está en
+  marcha, buscándolo en la misma carpeta que ellos.
+- `omni`: la terminal.
+
+Si la ventana no encuentra `omnid` (por ejemplo, con `cargo run -p omni-gui`
+sin haberlo compilado), arranca el mismo servicio dentro de ella: todo va
+igual, pero las descargas se paran al cerrarla.
+
+Al cerrar la ventana se para el servicio (guardando el progreso) salvo que
+esté activado "Seguir descargando al cerrar la ventana". `omnid` escribe su
+registro en `omnid.log`, junto a la base de datos; para verlo en directo,
+ejecútalo en una terminal (`RUST_LOG=debug omnid`; Ctrl+C lo para).
+
 ## Línea de comandos (`omni`)
 
-La CLI sigue siendo la mejor forma de depurar, porque muestra los errores en la
-terminal:
+Con el servicio (la misma lista que ve la ventana; lo lanza si hace falta):
+
+```sh
+omni add <url>... -d Descargas -p "Mi paquete"   # a la cola (--parada: sin empezar)
+omni list                                        # lista con estado y velocidad
+omni pause [id...]     omni resume [id...]       # sin ids: todas
+omni remove <id...>                              # quita de la lista (no borra archivos)
+omni limit 2M          omni limit off            # límite global
+omni limit 500K --id 3                           # límite de una descarga
+omni service status    omni service stop
+```
+
+Sin servicio, descargando directamente en la terminal (lo mejor para depurar,
+porque muestra los errores):
 
 ```sh
 omni get https://ejemplo.com/archivo.iso              # a la carpeta actual
@@ -97,8 +127,8 @@ Si el servidor no acepta rangos, se descarga en un solo flujo sin reanudación.
 
 ## La cola (`omni-queue`)
 
-Prioridades, descargas a la vez, pausa global, límites y persistencia. La usa
-la ventana y la usará el servicio `omnid`. Detalles:
+Prioridades, descargas a la vez, pausa global, límites y persistencia. Vive
+en el servicio `omnid`. Detalles:
 
 - Se guarda en SQLite (`omni-store`) cada cambio de estado y, cada 2 s, el
   progreso. El progreso fino (qué bloques faltan) sigue en el `.part.omni`:
@@ -110,6 +140,33 @@ la ventana y la usará el servicio `omnid`. Detalles:
   falta). Hoy solo existe `DirectLinks`; los plugins de Mega, Gofile, Google
   Drive y Mediafire serán resolutores, porque sus enlaces directos caducan.
 - Cada descarga guarda sus redes (vacío = la del sistema) para la multi-red.
+
+## La API local (`omni-api`)
+
+- `omnid` escucha en `127.0.0.1`, en un puerto libre, y escribe `omnid.json`
+  (puerto, token, pid y versión) junto a la base de datos. En Unix ese
+  archivo es legible solo por el usuario.
+- Cada petición lleva `Authorization: Bearer <token>`: otra web abierta en el
+  navegador no puede mandar órdenes.
+- `omnid.lock` (candado del sistema) impide dos servicios con la misma base de
+  datos.
+- Rutas, todas bajo `/api/v1` y en JSON:
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/status` | versión, pid y ajustes |
+| GET | `/jobs` | la lista |
+| POST | `/jobs` | añadir (`NewJob`) |
+| POST | `/jobs/start`, `/jobs/stop`, `/jobs/remove` | `{"ids": [..]}` |
+| POST | `/jobs/priority` | `{"ids": [..], "priority": "high"}` |
+| POST | `/jobs/speed-limit` | `{"ids": [..], "bytes_per_sec": 1048576}` |
+| POST | `/queue/start-all`, `/queue/pause-all`, `/queue/stop-all` | botones de la barra |
+| GET/PUT | `/settings` | ajustes de la cola |
+| GET | `/servers` | conexiones por servidor |
+| POST | `/shutdown` | parar el servicio |
+
+- La ventana usa `RemoteQueue`: pregunta cuatro veces por segundo en segundo
+  plano y manda las órdenes sin bloquear su hilo.
 
 ### Preparado para varias redes
 
@@ -136,9 +193,11 @@ crates/
   omni-grab/        capturador de enlaces: archivo o página con archivos
   omni-store/       base de datos SQLite (lista, ajustes, servidores)
   omni-queue/       cola de descargas con límites y persistencia
+  omni-api/         servicio (API local) y sus clientes
   omni-testserver/  servidor HTTP falso para las pruebas (cortes, 503, ETag)
 apps/
   omni-cli/         binario `omni`
+  omnid/            binario `omnid`, el servicio
   omni-gui/         binario `omniload`, la ventana (Slint)
     ui/app.slint    diseño de la ventana
 ```

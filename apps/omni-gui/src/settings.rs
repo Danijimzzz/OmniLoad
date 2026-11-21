@@ -35,6 +35,8 @@ pub struct Settings {
     /// Conexiones como mucho a un mismo servidor (0 = sin tope).
     pub max_per_server: i32,
     pub watch_clipboard: bool,
+    /// Al cerrar la ventana, dejar que `omnid` siga descargando.
+    pub keep_downloading: bool,
     /// Aviso al copiar enlaces: 0 completo, 1 compacto, 2 desactivado.
     pub clip_popup: i32,
     /// Cerrar el aviso 1 s después de terminar la comprobación.
@@ -60,6 +62,7 @@ impl Default for Settings {
             speed_limit: 0,
             max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
+            keep_downloading: false,
             clip_popup: 1,
             clip_popup_autoclose: true,
             clip_popup_autostart: true,
@@ -75,6 +78,21 @@ pub const SPEED_LIMITS: [u64; 10] = [0, 256, 512, 1024, 2048, 5120, 10240, 20480
 pub fn speed_limit_bytes(index: i32) -> Option<u64> {
     let kib = SPEED_LIMITS.get(usize::try_from(index).ok()?).copied()?;
     (kib > 0).then_some(kib * 1024)
+}
+
+/// Posición del desplegable que corresponde a un límite: la exacta o, si se
+/// puso otro valor desde la terminal, la más cercana.
+pub fn speed_limit_index(bytes_per_sec: Option<u64>) -> i32 {
+    let Some(b) = bytes_per_sec.filter(|&b| b > 0) else {
+        return 0;
+    };
+    let kib = b / 1024;
+    SPEED_LIMITS
+        .iter()
+        .enumerate()
+        .skip(1)
+        .min_by_key(|(_, l)| l.abs_diff(kib))
+        .map_or(0, |(i, _)| i as i32)
 }
 
 impl Settings {
@@ -155,5 +173,12 @@ mod tests {
         assert_eq!(speed_limit_bytes(3), Some(1024 * 1024));
         assert_eq!(speed_limit_bytes(99), None);
         assert_eq!(speed_limit_bytes(-1), None);
+        assert_eq!(speed_limit_index(None), 0);
+        assert_eq!(speed_limit_index(Some(1024 * 1024)), 3);
+        // 300 KiB/s no está: se enseña la opción más cercana (256 KB/s).
+        assert_eq!(speed_limit_index(Some(300 * 1024)), 1);
+        for i in 0..SPEED_LIMITS.len() as i32 {
+            assert_eq!(speed_limit_index(speed_limit_bytes(i)), i);
+        }
     }
 }

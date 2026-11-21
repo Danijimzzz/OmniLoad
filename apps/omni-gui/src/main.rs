@@ -1,11 +1,10 @@
 //! `omniload`: interfaz gráfica de OmniLoad, nativa con Slint.
 //!
-//! La ventana corre en el hilo principal y la cola (`omni-queue`, con el
-//! motor `omni-core`) en un runtime de tokio dentro del mismo proceso. La
-//! lista de descargas y los ajustes de la cola se guardan en SQLite
-//! (`omni-store`), así que al volver a abrir todo sigue donde estaba. Un
-//! temporizador de Slint lee el estado cuatro veces por segundo y actualiza
-//! las tablas.
+//! La ventana corre en el hilo principal. Las descargas las hace el servicio
+//! `omnid` (ver [`manager`]), que guarda la lista en SQLite: al volver a abrir
+//! todo sigue donde estaba, y con "Seguir descargando al cerrar la ventana"
+//! las descargas continúan con la ventana cerrada. Un temporizador de Slint
+//! lee el estado cuatro veces por segundo y actualiza las tablas.
 //!
 //! Como en JDownloader, los enlaces no se descargan directamente: primero van
 //! al capturador ([`grabber`]), que los agrupa en paquetes y enseña qué hay
@@ -93,6 +92,7 @@ impl App {
         views::fill_downloads(&ui, &self.dl_rows, &rows, &mut st);
         views::fill_grabber(&ui, &self.grab_rows, &grabbed, &mut st);
         drop(st);
+        sync_queue_settings(&ui, &self.manager);
         self.refresh_popup();
 
         let notes = self.grabber.take_notes();
@@ -335,6 +335,7 @@ impl App {
         s.speed_limit = ui.get_speed_limit();
         s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
+        s.keep_downloading = ui.get_keep_downloading();
         s.clip_popup = ui.get_clip_popup();
         s.clip_popup_autoclose = ui.get_clip_autoclose();
         s.clip_popup_autostart = self.popup.get_autostart();
@@ -355,7 +356,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     let settings = Settings::load();
     let manager = Arc::new(manager::open(rt.handle().clone()));
-    apply_queue_settings(&manager, &settings);
+    if manager.in_process() {
+        tracing::info!("el servicio corre dentro de la ventana");
+    }
     let grabber = Arc::new(Grabber::new(
         rt.handle().clone(),
         omni_core::Network::system_default()?.client().clone(),
@@ -429,7 +432,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(timer);
     drop(clip_timer);
     app.save_settings();
-    rt.block_on(manager.shutdown(Duration::from_secs(5)));
+    let keep = app.settings.borrow().keep_downloading;
+    rt.block_on(manager.close(keep));
     rt.shutdown_timeout(Duration::from_secs(1));
     Ok(())
 }
@@ -524,9 +528,38 @@ fn apply_queue_settings(manager: &Manager, s: &Settings) {
     manager.update_settings(|q| {
         q.max_active = s.max_active.max(1) as usize;
         q.connections = s.connections.max(1) as usize;
-        q.speed_limit = settings::speed_limit_bytes(s.speed_limit);
+        // Un límite puesto desde la terminal (por ejemplo 300K) no está en
+        // el desplegable: se respeta mientras no se elija otra opción.
+        if settings::speed_limit_index(q.speed_limit) != s.speed_limit {
+            q.speed_limit = settings::speed_limit_bytes(s.speed_limit);
+        }
         q.max_per_server = s.max_per_server.max(0) as usize;
     });
+}
+
+/// La cola es del servicio, y la CLI también puede cambiarla: la ventana
+/// enseña siempre lo que tiene el servicio.
+fn sync_queue_settings(ui: &AppWindow, manager: &Manager) {
+    if !manager.online() {
+        return;
+    }
+    let q = manager.settings();
+    let speed = settings::speed_limit_index(q.speed_limit);
+    if ui.get_speed_limit() != speed {
+        ui.set_speed_limit(speed);
+    }
+    let max_active = q.max_active.min(i32::MAX as usize) as i32;
+    if ui.get_max_active() != max_active {
+        ui.set_max_active(max_active);
+    }
+    let connections = q.connections.min(i32::MAX as usize) as i32;
+    if ui.get_connections() != connections {
+        ui.set_connections(connections);
+    }
+    let per_server = q.max_per_server.min(i32::MAX as usize) as i32;
+    if ui.get_max_per_server() != per_server {
+        ui.set_max_per_server(per_server);
+    }
 }
 
 fn apply_settings(ui: &AppWindow, s: &Settings) {
@@ -542,6 +575,7 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_speed_limit(s.speed_limit);
     ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
+    ui.set_keep_downloading(s.keep_downloading);
     ui.set_clip_popup(s.clip_popup);
     ui.set_clip_autoclose(s.clip_popup_autoclose);
     ui.set_download_dir(s.download_dir.display().to_string().into());

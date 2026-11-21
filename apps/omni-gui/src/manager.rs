@@ -1,44 +1,130 @@
-//! Cola de descargas de la ventana: la de `omni-queue`, con la lista
-//! guardada en SQLite. Aquí solo quedan los nombres que usa la interfaz y
-//! algún texto para pintar.
+//! La cola de la ventana: la del servicio `omnid`.
+//!
+//! Al abrir, la ventana busca el servicio; si no está en marcha lanza el
+//! programa `omnid` que hay junto a `omniload`. Si no lo encuentra (por
+//! ejemplo, con `cargo run -p omni-gui` sin haber compilado `omnid`), arranca
+//! el mismo servicio dentro de la ventana: todo funciona igual, salvo que las
+//! descargas se paran al cerrarla.
+//!
+//! La ventana siempre habla con la cola por la API ([`RemoteQueue`]), así que
+//! hay un solo camino que probar.
 
-use std::sync::Arc;
+use std::ops::Deref;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use omni_queue::QueueConfig;
-use omni_store::Store;
+use omni_api::{Client, Paths, RemoteQueue, Service, ServiceError, connect_or_launch, omnid_exe};
+use omni_core::DownloadOptions;
 use tokio::runtime::Handle;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::format;
 
-pub use omni_queue::{
-    JobInfo as RowInfo, NewJob as NewDownload, Priority, Queue as Manager, State,
-};
+pub use omni_queue::{JobInfo as RowInfo, NewJob as NewDownload, Priority, State};
 
-/// Abre la cola con la base de datos de siempre. Si no se puede abrir (disco
-/// lleno, permisos…), la cola funciona igual pero sin guardar nada.
-pub fn open(rt: Handle) -> Manager {
-    let store = match Store::default_path().map(|p| (Store::open(&p), p)) {
-        Some((Ok(s), _)) => s,
-        Some((Err(e), p)) => {
-            warn!(
-                "no se pudo abrir {}: {e}; la lista no se guardará",
-                p.display()
-            );
-            Store::open_in_memory().expect("SQLite en memoria")
-        }
-        None => Store::open_in_memory().expect("SQLite en memoria"),
-    };
-    let cfg = QueueConfig::new(Arc::new(store));
-    match Manager::open(rt.clone(), cfg) {
-        Ok(q) => q,
-        Err(e) => {
-            // Base de datos ilegible: se empieza con una vacía en memoria.
-            warn!("no se pudo leer la lista de descargas: {e}");
-            let store = Arc::new(Store::open_in_memory().expect("SQLite en memoria"));
-            Manager::open(rt, QueueConfig::new(store)).expect("cola en memoria")
+/// Cuánto esperar a que `omnid` conteste al lanzarlo.
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Cuánto esperar a que guarde el progreso al cerrar.
+const STOP_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// La cola, con el servicio dentro de la ventana si hizo falta arrancarlo
+/// aquí.
+pub struct Manager {
+    remote: RemoteQueue,
+    local: Mutex<Option<Service>>,
+}
+
+impl Deref for Manager {
+    type Target = RemoteQueue;
+    fn deref(&self) -> &RemoteQueue {
+        &self.remote
+    }
+}
+
+impl Manager {
+    /// ¿Corre el servicio dentro de la ventana (y no en `omnid`)?
+    pub fn in_process(&self) -> bool {
+        self.local.lock().expect("servicio envenenado").is_some()
+    }
+
+    /// Al cerrar la ventana. Si `keep_running` y el servicio es `omnid`, las
+    /// descargas siguen; si no, se paran guardando el progreso (y siguen
+    /// solas la próxima vez).
+    pub async fn close(&self, keep_running: bool) {
+        let local = self.local.lock().expect("servicio envenenado").take();
+        match local {
+            Some(service) => {
+                self.remote.close();
+                service.stop().await;
+            }
+            None if keep_running => {
+                info!("la ventana se cierra; omnid sigue descargando");
+                self.remote.close();
+            }
+            None => self.remote.stop_service(STOP_TIMEOUT).await,
         }
     }
+}
+
+/// Encuentra o arranca el servicio y se conecta a él. Se llama desde el hilo
+/// de la ventana, fuera del runtime.
+pub fn open(rt: Handle) -> Manager {
+    let paths = Paths::system().unwrap_or_else(temp_paths);
+    let (client, local) = rt.block_on(connect(&paths)).unwrap_or_else(|e| {
+        // Último recurso: una base de datos temporal, para que la ventana
+        // funcione aunque no se guarde la lista.
+        warn!("{e}; se usa una lista temporal");
+        let paths = temp_paths();
+        rt.block_on(async {
+            let s = Service::start(&paths, DownloadOptions::default())
+                .await
+                .expect("servicio temporal");
+            let c = Client::connect(&paths).await.expect("servicio temporal");
+            (c, Some(s))
+        })
+    });
+    Manager {
+        remote: RemoteQueue::new(rt, client),
+        local: Mutex::new(local),
+    }
+}
+
+async fn connect(paths: &Paths) -> Result<(Client, Option<Service>), String> {
+    let exe = omnid_exe();
+    match connect_or_launch(paths, exe.as_deref(), LAUNCH_TIMEOUT).await {
+        Ok(c) => return Ok((c, None)),
+        Err(e) if exe.is_some() => warn!("{e}"),
+        Err(_) => info!("no hay omnid junto a la ventana: el servicio corre dentro de ella"),
+    }
+    match Service::start(paths, DownloadOptions::default()).await {
+        Ok(s) => {
+            let c = Client::connect(paths)
+                .await
+                .ok_or("el servicio interno no contesta")?;
+            Ok((c, Some(s)))
+        }
+        // Otro servicio tiene la base de datos pero aún no contesta (se
+        // está arrancando): esperarlo.
+        Err(ServiceError::AlreadyRunning) => {
+            let deadline = Instant::now() + LAUNCH_TIMEOUT;
+            while Instant::now() < deadline {
+                if let Some(c) = Client::connect(paths).await {
+                    return Ok((c, None));
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            Err("otro servicio de OmniLoad tiene la base de datos y no contesta".into())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn temp_paths() -> Paths {
+    Paths::for_db(
+        std::env::temp_dir()
+            .join(format!("omniload-{}", std::process::id()))
+            .join("omniload.db"),
+    )
 }
 
 /// Texto "a de b" para el tamaño.

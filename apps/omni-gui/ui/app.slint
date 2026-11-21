@@ -722,6 +722,7 @@ export component AppWindow inherits Window {
     in-out property <int> connections: 8;
     in-out property <int> speed-limit: 0;
     in-out property <int> max-per-server: 8;
+    in-out property <bool> keep-downloading: false;
     in-out property <bool> watch-clipboard: true;
     in-out property <int> clip-popup: 1;
     in-out property <bool> package-folders: true;
@@ -1386,6 +1387,15 @@ export component AppWindow inherits Window {
                             minimum: 0;
                             maximum: 64;
                             value <=> root.max-per-server;
+                        }
+                    }
+                    SettingRow {
+                        title: "Seguir descargando al cerrar la ventana";
+                        subtitle: "Las descargas continúan en segundo plano. Al volver a abrir OmniLoad las verás tal cual. Desde la terminal: «omni service stop» para pararlas.";
+                        Check {
+                            checked <=> root.keep-downloading;
+                            label: "Seguir descargando al cerrar la ventana";
+                            toggled => { root.settings-changed(); }
                         }
                     }
                     SettingRow {

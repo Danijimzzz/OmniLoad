@@ -2,10 +2,19 @@
 //!
 //! ```text
 //! omni get <url> [-o archivo | -d carpeta] [-x conexiones] [--sha256 HEX]
+//! omni add <url>... [-d carpeta] [--paquete NOMBRE] [--parada]
+//! omni list
+//! omni pause [id...] | omni resume [id...] | omni remove <id...>
+//! omni limit <8M | off> [--id ID...]
+//! omni service status | stop
 //! ```
 //!
-//! Ctrl+C pausa la descarga guardando el progreso; ejecutar el mismo comando
-//! otra vez la reanuda.
+//! `get` descarga directamente en la terminal (sin servicio): Ctrl+C pausa la
+//! descarga guardando el progreso y ejecutar el mismo comando la reanuda.
+//!
+//! El resto habla con el servicio `omnid` (el mismo que usa la ventana), y lo
+//! lanza si no está en marcha: las descargas siguen aunque se cierre la
+//! terminal.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -14,7 +23,9 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
+use omni_api::{Client, Paths, connect_or_launch, omnid_exe};
 use omni_core::{Destination, Download, DownloadOptions, Error};
+use omni_queue::{JobInfo, NewJob};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
@@ -31,6 +42,61 @@ struct Cli {
 enum Command {
     /// Descarga un archivo en varias partes, reanudando si ya estaba a medias.
     Get(GetArgs),
+    /// Añade enlaces a la cola del servicio (la misma que ve la ventana).
+    Add(AddArgs),
+    /// Muestra la lista de descargas.
+    #[command(alias = "ls")]
+    List,
+    /// Pausa descargas (sin ids: todas).
+    Pause { ids: Vec<u64> },
+    /// Reanuda descargas (sin ids: todas).
+    Resume { ids: Vec<u64> },
+    /// Quita descargas de la lista (no borra archivos).
+    #[command(alias = "rm")]
+    Remove {
+        #[arg(required = true)]
+        ids: Vec<u64>,
+    },
+    /// Límite de velocidad: global, o de unas descargas con --id.
+    Limit(LimitArgs),
+    /// El servicio en segundo plano.
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+}
+
+#[derive(Args)]
+struct AddArgs {
+    /// Uno o varios enlaces.
+    #[arg(required = true)]
+    urls: Vec<String>,
+    /// Carpeta de destino.
+    #[arg(short, long, default_value = ".")]
+    dir: PathBuf,
+    /// Nombre del paquete.
+    #[arg(short, long, default_value = "Desde la terminal")]
+    paquete: String,
+    /// Añadir sin empezar.
+    #[arg(long)]
+    parada: bool,
+}
+
+#[derive(Args)]
+struct LimitArgs {
+    /// Velocidad por segundo (por ejemplo 500K, 2M) u "off" para quitarlo.
+    speed: String,
+    /// Solo estas descargas.
+    #[arg(long = "id")]
+    ids: Vec<u64>,
+}
+
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// ¿Está en marcha?
+    Status,
+    /// Pararlo (guarda el progreso; lo que se descargaba sigue al volver).
+    Stop,
 }
 
 #[derive(Args)]
@@ -113,6 +179,121 @@ fn init_logging(verbose: bool) {
 async fn run(cli: Cli) -> Result<ExitCode> {
     match cli.command {
         Command::Get(args) => get(args).await,
+        Command::Service { action } => service(action).await,
+        cmd => {
+            let c = connect().await?;
+            remote(&c, cmd).await?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+fn paths() -> Result<Paths> {
+    Paths::system().context("no se encontró la carpeta de datos del sistema (usa OMNILOAD_DB)")
+}
+
+/// Se conecta al servicio, lanzándolo si hace falta.
+async fn connect() -> Result<Client> {
+    let paths = paths()?;
+    let exe = omnid_exe();
+    connect_or_launch(&paths, exe.as_deref(), Duration::from_secs(10))
+        .await
+        .map_err(|e| match exe {
+            Some(_) => anyhow::anyhow!(e),
+            None => anyhow::anyhow!(
+                "{e}. No encuentro el programa omnid junto a omni; compílalo con \
+                 `cargo build -p omnid`"
+            ),
+        })
+}
+
+async fn service(action: ServiceAction) -> Result<ExitCode> {
+    let paths = paths()?;
+    let client = Client::connect(&paths).await;
+    match (action, client) {
+        (ServiceAction::Status, Some(c)) => {
+            let st = c.status().await?;
+            println!("omnid {} en marcha (pid {})", st.version, st.pid);
+            println!("Base de datos: {}", paths.db.display());
+        }
+        (ServiceAction::Status, None) => println!("omnid no está en marcha"),
+        (ServiceAction::Stop, Some(c)) => {
+            c.shutdown().await?;
+            println!("Parando omnid; el progreso queda guardado.");
+        }
+        (ServiceAction::Stop, None) => println!("omnid no estaba en marcha"),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+async fn remote(c: &Client, cmd: Command) -> Result<()> {
+    match cmd {
+        Command::Add(a) => {
+            let dir = std::path::absolute(&a.dir).context("carpeta no válida")?;
+            for url in a.urls {
+                let new = NewJob {
+                    package: a.paquete.clone(),
+                    start: !a.parada,
+                    ..NewJob::new(url.clone(), dir.clone())
+                };
+                match c.add(&new).await {
+                    Ok(id) => println!("{id}\t{url}"),
+                    Err(e) => eprintln!("error: {url}: {e}"),
+                }
+            }
+        }
+        Command::List => print_jobs(&c.jobs().await?),
+        Command::Pause { ids } if ids.is_empty() => c.pause_all().await?,
+        Command::Pause { ids } => c.stop(&ids).await?,
+        Command::Resume { ids } if ids.is_empty() => c.start_all().await?,
+        Command::Resume { ids } => c.start(&ids).await?,
+        Command::Remove { ids } => c.remove(&ids).await?,
+        Command::Limit(l) => {
+            let speed = match l.speed.as_str() {
+                "off" | "no" | "0" => None,
+                s => Some(parse_size(s).map_err(anyhow::Error::msg)?),
+            };
+            if l.ids.is_empty() {
+                let mut s = c.settings().await?;
+                s.speed_limit = speed;
+                c.set_settings(&s).await?;
+            } else {
+                c.set_job_speed_limit(&l.ids, speed).await?;
+            }
+        }
+        Command::Get(_) | Command::Service { .. } => unreachable!(),
+    }
+    Ok(())
+}
+
+fn print_jobs(jobs: &[JobInfo]) {
+    if jobs.is_empty() {
+        println!("No hay descargas.");
+        return;
+    }
+    println!(
+        "{:>4}  {:<14} {:>6}  {:>10}  {:>11}  NOMBRE",
+        "ID", "ESTADO", "%", "TAMAÑO", "VELOCIDAD"
+    );
+    for j in jobs {
+        let pct = j
+            .fraction()
+            .map(|f| format!("{:.1}", f * 100.0))
+            .unwrap_or_default();
+        let size = j
+            .total
+            .map(|t| HumanBytes(t).to_string())
+            .unwrap_or_default();
+        let rate = if j.rate > 0.0 {
+            format!("{}/s", HumanBytes(j.rate as u64))
+        } else {
+            String::new()
+        };
+        let status: String = j.status().chars().take(14).collect();
+        println!(
+            "{:>4}  {:<14} {:>6}  {:>10}  {:>11}  {}",
+            j.id, status, pct, size, rate, j.name
+        );
     }
 }
 
