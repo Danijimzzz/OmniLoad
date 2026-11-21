@@ -1,0 +1,17 @@
+[package]
+name = "omni-grab"
+description = "Capturador de enlaces de OmniLoad: averigua qué archivos hay detrás de un enlace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+omni-core.workspace = true
+reqwest.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tokio.workspace = true
