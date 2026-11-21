@@ -81,8 +81,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-El workflow de GitHub Actions (Windows, Linux y macOS) está desactivado en cada
-cambio y solo se lanza a mano desde la pestaña Actions.
+Además, GitHub Actions compila y prueba en Windows, Linux y macOS en cada
+cambio.
 
 ## Licencia
 
