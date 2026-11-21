@@ -47,7 +47,7 @@ fn is_unsupported(e: &io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
+    use std::io::{Read, Seek, SeekFrom};
 
     #[test]
     fn positional_writes_out_of_order() {
@@ -55,6 +55,9 @@ mod tests {
         preallocate(&tmp, 10).unwrap();
         write_all_at(&tmp, b"world", 5).unwrap();
         write_all_at(&tmp, b"hello", 0).unwrap();
+        // En Windows seek_write mueve el cursor del archivo; el motor nunca lo
+        // usa, pero esta lectura sí, así que volvemos al principio.
+        tmp.seek(SeekFrom::Start(0)).unwrap();
         let mut s = String::new();
         tmp.read_to_string(&mut s).unwrap();
         assert_eq!(s, "helloworld");

@@ -31,7 +31,14 @@ fn read(path: &Path) -> Vec<u8> {
 #[tokio::test]
 async fn multipart_download_matches() {
     let data = pseudo_random_bytes((3 * MIB + 12_345) as usize, 1);
-    let server = TestServer::start(data.clone(), ServerConfig::default()).await;
+    // Una pausa mínima entre trozos: sin ella, en localhost el servidor llena
+    // los búferes del sistema con bytes que el cliente ya no quiere (al partir
+    // bloques en el final rápido) y la cuenta de bytes servidos sale inflada.
+    let cfg = ServerConfig {
+        chunk_delay: Some(Duration::from_millis(1)),
+        ..ServerConfig::default()
+    };
+    let server = TestServer::start(data.clone(), cfg).await;
     let dir = tempfile::tempdir().unwrap();
 
     let dl = Download::new(
@@ -47,7 +54,12 @@ async fn multipart_download_matches() {
     assert_eq!(read(&out.path), data);
     // Varias peticiones con rango, sin descargar nada dos veces de más.
     assert!(server.ranges().len() > 4);
-    assert!(server.bytes_served() < data.len() as u64 + 2 * 256 * KIB);
+    let served = server.bytes_served();
+    assert!(
+        served < data.len() as u64 + 2 * 256 * KIB,
+        "se sirvieron {served} bytes para un archivo de {}",
+        data.len()
+    );
     assert!(!state_path_for(&out.path).exists());
     assert!(!dir.path().join("archivo.bin.part").exists());
 }
