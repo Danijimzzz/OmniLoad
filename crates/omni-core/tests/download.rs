@@ -236,7 +236,9 @@ async fn resumes_after_cancel() {
     assert!(state_path_for(&dest).exists());
     let served_first = server.bytes_served();
 
-    server.set_chunk_delay(None);
+    // Pausa mínima: sin ella el servidor llena los búferes de localhost con
+    // bytes que el cliente ya no quiere y la cuenta de abajo sale inflada.
+    server.set_chunk_delay(Some(Duration::from_millis(1)));
     let out = Download::new(
         &server.url("a.bin"),
         Destination::File(dest.clone()),
