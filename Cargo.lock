@@ -1051,7 +1051,9 @@ dependencies = [
  "axum",
  "bytes",
  "futures-util",
+ "omni-core",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

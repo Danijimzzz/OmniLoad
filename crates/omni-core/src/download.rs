@@ -547,6 +547,7 @@ async fn worker(sh: Arc<Shared>, net: Network) {
                     break;
                 }
                 failures += 1;
+                sh.progress.retried(net.id());
                 if failures > sh.opts.max_retries {
                     sh.fail(Error::RetriesExhausted(Box::new(f.error)));
                     break;
@@ -555,7 +556,7 @@ async fn worker(sh: Arc<Shared>, net: Network) {
                     .retry_after
                     .unwrap_or_else(|| backoff.delay(failures - 1))
                     .min(sh.opts.retry_max);
-                debug!(
+                info!(
                     "{}: bloque en {} falló ({}); reintento en {delay:?}",
                     net.id(),
                     lease.start,
@@ -632,6 +633,11 @@ async fn fetch(sh: &Shared, net: &Network, lease: &Lease) -> Result<(), FetchErr
         }
     }
 
+    sh.progress.receiving_started(net.id());
+    let _receiving = ReceivingGuard {
+        progress: &sh.progress,
+        network: net.id(),
+    };
     let mut w = Writer {
         sh,
         net,
@@ -691,6 +697,18 @@ async fn fetch(sh: &Shared, net: &Network, lease: &Lease) -> Result<(), FetchErr
                 };
             }
         }
+    }
+}
+
+/// Marca una conexión como "recibiendo" mientras viva.
+struct ReceivingGuard<'a> {
+    progress: &'a Progress,
+    network: crate::NetworkId,
+}
+
+impl Drop for ReceivingGuard<'_> {
+    fn drop(&mut self) {
+        self.progress.receiving_stopped(self.network);
     }
 }
 

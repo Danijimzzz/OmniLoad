@@ -13,3 +13,7 @@ axum.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+omni-core.workspace = true
+tokio-util.workspace = true

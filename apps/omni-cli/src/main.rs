@@ -158,6 +158,7 @@ async fn get(args: GetArgs) -> Result<ExitCode> {
         .progress_chars("=> "),
     );
     let ticker = {
+        let connections = args.connections;
         let bar = bar.clone();
         let progress = progress.clone();
         tokio::spawn(async move {
@@ -168,8 +169,14 @@ async fn get(args: GetArgs) -> Result<ExitCode> {
                     bar.set_length(total);
                 }
                 bar.set_position(progress.downloaded());
-                let conns: usize = progress.per_network().values().map(|s| s.connections).sum();
-                bar.set_message(format!("{conns} conexiones"));
+                let stats = progress.per_network();
+                let receiving: usize = stats.values().map(|s| s.receiving).sum();
+                let retries: u64 = stats.values().map(|s| s.retries).sum();
+                let mut msg = format!("{receiving}/{connections} conexiones activas");
+                if retries > 0 {
+                    msg.push_str(&format!(" · {retries} reintentos"));
+                }
+                bar.set_message(msg);
             }
         })
     };

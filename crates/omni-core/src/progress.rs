@@ -19,7 +19,12 @@ pub struct Progress {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NetworkStats {
     pub bytes: u64,
+    /// Conexiones vivas, incluidas las que esperan para reintentar.
     pub connections: usize,
+    /// Conexiones recibiendo datos ahora mismo.
+    pub receiving: usize,
+    /// Reintentos por errores (cortes, 503, 429…) desde el inicio.
+    pub retries: u64,
 }
 
 impl Progress {
@@ -76,6 +81,27 @@ impl Progress {
             .entry(network)
             .or_default()
             .connections += 1;
+    }
+
+    fn with_stats(&self, network: NetworkId, f: impl FnOnce(&mut NetworkStats)) {
+        f(self
+            .per_network
+            .lock()
+            .expect("progreso envenenado")
+            .entry(network)
+            .or_default());
+    }
+
+    pub(crate) fn receiving_started(&self, network: NetworkId) {
+        self.with_stats(network, |s| s.receiving += 1);
+    }
+
+    pub(crate) fn receiving_stopped(&self, network: NetworkId) {
+        self.with_stats(network, |s| s.receiving = s.receiving.saturating_sub(1));
+    }
+
+    pub(crate) fn retried(&self, network: NetworkId) {
+        self.with_stats(network, |s| s.retries += 1);
     }
 
     pub(crate) fn connection_closed(&self, network: NetworkId) {
