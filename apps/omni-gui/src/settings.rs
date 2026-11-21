@@ -35,8 +35,16 @@ pub struct Settings {
     /// Conexiones como mucho a un mismo servidor (0 = sin tope).
     pub max_per_server: i32,
     pub watch_clipboard: bool,
-    /// Al cerrar la ventana, dejar que `omnid` siga descargando.
+    /// Al salir de OmniLoad, dejar que `omnid` siga descargando.
     pub keep_downloading: bool,
+    /// Cerrar la ventana la esconde en la bandeja (si hay bandeja).
+    pub close_to_tray: bool,
+    /// Minimizar la ventana también la esconde en la bandeja.
+    pub minimize_to_tray: bool,
+    /// Notificación del sistema al terminar descargas.
+    pub notify_done: bool,
+    /// Ya se avisó una vez de que OmniLoad sigue en la bandeja.
+    pub tray_hint_shown: bool,
     /// Aviso al copiar enlaces: 0 completo, 1 compacto, 2 desactivado.
     pub clip_popup: i32,
     /// Cerrar el aviso 1 s después de terminar la comprobación.
@@ -63,6 +71,10 @@ impl Default for Settings {
             max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
             keep_downloading: false,
+            close_to_tray: true,
+            minimize_to_tray: true,
+            notify_done: true,
+            tray_hint_shown: false,
             clip_popup: 1,
             clip_popup_autoclose: true,
             clip_popup_autostart: true,
@@ -128,6 +140,11 @@ impl Settings {
     }
 }
 
+/// `ventana.json` (ver [`crate::single`]): junto a los ajustes.
+pub fn instance_path() -> Option<PathBuf> {
+    path().map(|p| p.with_file_name("ventana.json"))
+}
+
 fn path() -> Option<PathBuf> {
     // Para pruebas y para tener varias configuraciones a la vez.
     if let Some(p) = std::env::var_os("OMNILOAD_AJUSTES") {
@@ -165,6 +182,10 @@ mod tests {
         assert!(s.clip_popup_autoclose);
         assert_eq!(s.speed_limit, 0);
         assert_eq!(s.max_per_server, 8);
+        assert!(s.close_to_tray);
+        assert!(s.minimize_to_tray);
+        assert!(s.notify_done);
+        assert!(!s.tray_hint_shown);
     }
 
     #[test]

@@ -26,8 +26,11 @@ Copias un enlace y OmniLoad se encarga del resto.
   descargas también se guarda: al volver a abrir, todo está como lo dejaste.
 - 🚦 **No te deja sin internet.** Pon un límite de velocidad y sigue viendo
   vídeos o jugando mientras descarga.
-- 🌙 **Sigue aunque cierres la ventana.** Si quieres, OmniLoad continúa
-  descargando en segundo plano y al abrirlo lo ves todo tal cual.
+- 🌙 **Sigue aunque cierres la ventana.** Al cerrarla, OmniLoad se queda en
+  un iconito junto al reloj y sigue descargando sin estorbar. Un clic en el
+  icono y vuelve la ventana.
+- 🔔 **Te avisa al terminar.** Una notificación cuando acaba un archivo o un
+  paquete entero, para que no tengas que estar mirando.
 - 📋 **Copia y listo.** Copia un enlace en cualquier sitio y OmniLoad lo detecta
   solo. No hace falta pegar nada. Hasta pilla los enlaces escondidos detrás
   de un "descarga aquí" cuando copias un trozo de una web.
@@ -91,14 +94,28 @@ quitarlo. Se cierra solo al terminar de comprobar.
 - Iniciar, pausar o detener todo con un clic, y buscar entre tus descargas.
 - **Límite de velocidad** en la barra de arriba (por ejemplo, 2 MB/s), que se
   aplica al momento, también a lo que ya se está bajando.
-- Al cerrar OmniLoad, lo que se estaba bajando queda en la cola y **sigue solo**
-  la próxima vez que lo abras. Y si activas **Seguir descargando al cerrar la
-  ventana** (en Ajustes), ni siquiera se para.
+- Al salir de OmniLoad, lo que se estaba bajando queda en la cola y **sigue
+  solo** la próxima vez que lo abras. Y si activas **Seguir descargando al
+  salir** (en Ajustes), ni siquiera se para.
 - Si un servidor limita las conexiones, OmniLoad se adapta solo y **lo
   recuerda** para la próxima vez. En Ajustes puedes poner cuántas conexiones
   abrir como mucho a una misma web, y las descargas a la misma web se reparten
   las conexiones de forma justa.
 - Si un enlace caduca, te lo dice claramente.
+
+### Junto al reloj (bandeja del sistema)
+
+Cerrar o minimizar la ventana no para nada: OmniLoad se queda en la bandeja
+del sistema, junto al reloj, y sigue descargando y vigilando lo que copias.
+
+- **Un clic en el icono** y vuelve la ventana. Al pasar el ratón ves cuántas
+  descargas van y a qué velocidad.
+- Con el **botón derecho**: pausar o reanudar todo, activar o quitar la
+  vigilancia del portapapeles y **Salir** del todo.
+- Si abres OmniLoad otra vez, no se abre una segunda ventana: aparece la que ya
+  tenías.
+- ¿Prefieres que la X cierre el programa? Desactívalo en **Ajustes ›
+  General**.
 
 ### Apariencia
 
@@ -131,7 +148,9 @@ Mientras tanto puedes compilarlo tú mismo en dos pasos:
    descargas se paran al cerrar la ventana.)
 
 En Linux necesitas además `libfontconfig-dev` y `libxkbcommon-dev`
-(`sudo apt install libfontconfig-dev libxkbcommon-dev` en Debian/Ubuntu).
+(`sudo apt install libfontconfig-dev libxkbcommon-dev` en Debian/Ubuntu). En
+GNOME, el icono de la bandeja necesita la extensión «AppIndicator» (Ubuntu ya
+la trae); el resto de escritorios lo muestran sin más.
 
 ## Próximamente
 

@@ -723,6 +723,11 @@ export component AppWindow inherits Window {
     in-out property <int> speed-limit: 0;
     in-out property <int> max-per-server: 8;
     in-out property <bool> keep-downloading: false;
+    in-out property <bool> close-to-tray: true;
+    in-out property <bool> minimize-to-tray: true;
+    in-out property <bool> notify-done: true;
+    // Hay icono en la bandeja del sistema.
+    in property <bool> tray-available: false;
     in-out property <bool> watch-clipboard: true;
     in-out property <int> clip-popup: 1;
     in-out property <bool> package-folders: true;
@@ -1351,7 +1356,9 @@ export component AppWindow inherits Window {
 
             Panel {
                 horizontal-stretch: 1;
-                if root.settings-section == 0: VerticalLayout {
+                if root.settings-section == 0: general := ScrollView {
+                  VerticalLayout {
+                    width: general.visible-width;
                     padding: 28px;
                     spacing: 6px;
                     alignment: start;
@@ -1397,11 +1404,44 @@ export component AppWindow inherits Window {
                         }
                     }
                     SettingRow {
-                        title: "Seguir descargando al cerrar la ventana";
-                        subtitle: "Las descargas continúan en segundo plano. Al volver a abrir OmniLoad las verás tal cual. Desde la terminal: «omni service stop» para pararlas.";
+                        title: "Cerrar a la bandeja";
+                        subtitle: root.tray-available
+                            ? "La X de la ventana la esconde junto al reloj y las descargas siguen. Para salir del todo: «Salir» en el menú del icono."
+                            : "Este escritorio no tiene bandeja del sistema: cerrar la ventana sale de OmniLoad. En GNOME, instala la extensión «AppIndicator» para tenerla.";
+                        opacity: root.tray-available ? 1 : 0.5;
+                        Check {
+                            checked <=> root.close-to-tray;
+                            enabled: root.tray-available;
+                            label: "Cerrar a la bandeja";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Minimizar a la bandeja";
+                        subtitle: "Al minimizar, la ventana desaparece de la barra de tareas y queda solo el icono de la bandeja.";
+                        opacity: root.tray-available ? 1 : 0.5;
+                        Check {
+                            checked <=> root.minimize-to-tray;
+                            enabled: root.tray-available;
+                            label: "Minimizar a la bandeja";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Avisar al terminar";
+                        subtitle: "Una notificación del sistema cuando termina un archivo o un paquete entero, o si falla (solo si no estás mirando la ventana).";
+                        Check {
+                            checked <=> root.notify-done;
+                            label: "Avisar al terminar";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Seguir descargando al salir";
+                        subtitle: "Al salir de OmniLoad las descargas continúan en segundo plano. Al volver a abrirlo las verás tal cual. Desde la terminal: «omni service stop» para pararlas.";
                         Check {
                             checked <=> root.keep-downloading;
-                            label: "Seguir descargando al cerrar la ventana";
+                            label: "Seguir descargando al salir";
                             toggled => { root.settings-changed(); }
                         }
                     }
@@ -1411,8 +1451,10 @@ export component AppWindow inherits Window {
                         Check {
                             checked <=> root.watch-clipboard;
                             label: "Vigilar portapapeles";
+                            toggled => { root.settings-changed(); }
                         }
                     }
+                  }
                 }
 
                 if root.settings-section == 1: apariencia := ScrollView {

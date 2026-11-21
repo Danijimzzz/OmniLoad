@@ -2,7 +2,7 @@
 //!
 //! La ventana corre en el hilo principal. Las descargas las hace el servicio
 //! `omnid` (ver [`manager`]), que guarda la lista en SQLite: al volver a abrir
-//! todo sigue donde estaba, y con "Seguir descargando al cerrar la ventana"
+//! todo sigue donde estaba, y con "Seguir descargando al salir"
 //! las descargas continúan con la ventana cerrada. Un temporizador de Slint
 //! lee el estado cuatro veces por segundo y actualiza las tablas.
 //!
@@ -14,6 +14,11 @@
 //! `omniload <url o archivo>...` abre la ventana y analiza esos enlaces (o
 //! los de esos archivos `.txt`/`.html`).
 //!
+//! Con icono en la bandeja del sistema ([`tray`]), cerrar o minimizar la
+//! ventana la esconde allí; «Salir» en el menú del icono cierra de verdad.
+//! Solo hay una ventana a la vez ([`single`]): abrir OmniLoad otra vez enseña
+//! la que ya estaba.
+//!
 //! Para ver los registros del motor, arranca desde una terminal con
 //! `RUST_LOG=omni_core=debug`. En Windows, la versión release no abre consola;
 //! la de depuración (`cargo run -p omni-gui`) sí.
@@ -24,15 +29,19 @@
 mod clipboard;
 mod format;
 mod manager;
+mod notify;
 mod platform;
 mod popup;
 mod settings;
+mod single;
+mod tray;
 mod views;
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use slint::winit_030::WinitWindowAccessor;
@@ -42,6 +51,7 @@ use manager::{Manager, Priority};
 use omni_api::{RemoteGrabber, TakeResponse};
 use omni_grab::{Check, Dest, GrabCommand, Pick};
 use settings::Settings;
+use tray::{Tray, TrayEvent, TrayStatus};
 use views::{DlSelection, UiState};
 
 slint::include_modules!();
@@ -60,6 +70,16 @@ struct App {
     pop: RefCell<popup::State>,
     pop_rows: Rc<VecModel<PopRow>>,
     pop_place: Cell<Option<(i32, i32)>>,
+    rt: tokio::runtime::Handle,
+    /// Icono de la bandeja (si el sistema tiene bandeja).
+    tray: RefCell<Option<Tray>>,
+    tray_tx: Sender<TrayEvent>,
+    tray_rx: Receiver<TrayEvent>,
+    /// Argumentos de otras ventanas que se abrieron estando esta en marcha.
+    instance_rx: Receiver<Vec<String>>,
+    /// La ventana está escondida en la bandeja.
+    hidden: Cell<bool>,
+    notes: RefCell<notify::Tracker>,
 }
 
 impl App {
@@ -88,6 +108,14 @@ impl App {
     fn refresh(&self) {
         let Some(ui) = self.ui() else { return };
         let rows = self.manager.snapshot();
+        self.notify_finished(&ui, &rows);
+        self.update_tray(&ui, &rows);
+        if self.hidden.get() {
+            // Escondida en la bandeja: no hace falta pintar las tablas (con
+            // miles de filas se notaría), pero el aviso de enlaces sigue.
+            self.refresh_popup();
+            return;
+        }
         let grabbed = self.grabber.snapshot();
         let dest = self.dest();
         let mut st = self.state.borrow_mut();
@@ -108,6 +136,162 @@ impl App {
                 .any(|i| i.check == Check::Checking)
         {
             self.show("", false);
+        }
+    }
+
+    /// Avisa con una notificación del sistema de lo que acaba de terminar,
+    /// si la ventana no está a la vista.
+    fn notify_finished(&self, ui: &AppWindow, rows: &[manager::RowInfo]) {
+        let notes = self.notes.borrow_mut().update(rows);
+        if notes.is_empty() || !self.settings.borrow().notify_done {
+            return;
+        }
+        let in_view = !self.hidden.get()
+            && !ui.window().is_minimized()
+            && ui
+                .window()
+                .with_winit_window(|w| w.has_focus())
+                .unwrap_or(false);
+        if in_view {
+            return;
+        }
+        for n in notes {
+            notify::send(&self.rt, n);
+        }
+    }
+
+    /// Pone al día la ayuda y el menú del icono de la bandeja.
+    fn update_tray(&self, ui: &AppWindow, rows: &[manager::RowInfo]) {
+        let guard = self.tray.borrow();
+        let Some(tray) = guard.as_ref() else { return };
+        let active = rows.iter().filter(|r| r.state.is_active()).count();
+        let waiting = rows
+            .iter()
+            .filter(|r| r.state == manager::State::Queued)
+            .count();
+        let rate = rows.iter().map(|r| r.rate).sum();
+        let paused = self.manager.is_held();
+        tray.update(&TrayStatus {
+            tooltip: tray::tooltip(active, waiting, rate, paused),
+            paused,
+            clipboard: ui.get_watch_clipboard(),
+        });
+        // Si la bandeja desaparece (se cerró el panel del escritorio) con la
+        // ventana escondida, la ventana vuelve: si no, no habría forma de
+        // llegar a ella.
+        let lost = !tray.available();
+        drop(guard);
+        if self.hidden.get() && lost {
+            self.show_window();
+        }
+    }
+
+    /// ¿Hay un icono en la bandeja donde esconder la ventana?
+    fn tray_available(&self) -> bool {
+        self.tray.borrow().as_ref().is_some_and(Tray::available)
+    }
+
+    /// Esconde la ventana en la bandeja. Las descargas siguen.
+    fn hide_to_tray(&self) {
+        let Some(ui) = self.ui() else { return };
+        self.hidden.set(true);
+        let _ = ui.hide();
+        let first = !self.settings.borrow().tray_hint_shown;
+        if first {
+            self.settings.borrow_mut().tray_hint_shown = true;
+            self.settings.borrow().save();
+            notify::send(
+                &self.rt,
+                notify::Note {
+                    title: "OmniLoad sigue en la bandeja".into(),
+                    body: "Las descargas continúan. Para salir del todo, usa «Salir» en el menú del icono.".into(),
+                },
+            );
+        }
+    }
+
+    /// Saca la ventana de la bandeja (o la trae delante).
+    fn show_window(&self) {
+        let Some(ui) = self.ui() else { return };
+        let was_hidden = self.hidden.replace(false);
+        if let Err(e) = ui.show() {
+            tracing::warn!("no se pudo enseñar la ventana: {e}");
+        }
+        ui.window().set_minimized(false);
+        ui.window().with_winit_window(|w| w.focus_window());
+        if was_hidden {
+            self.refresh();
+        }
+    }
+
+    /// Lo pedido desde el icono de la bandeja o desde otra ventana.
+    fn handle_events(&self) {
+        while let Ok(ev) = self.tray_rx.try_recv() {
+            match ev {
+                TrayEvent::Show => self.show_window(),
+                TrayEvent::StartAll => self.manager.start_all(),
+                TrayEvent::PauseAll => self.manager.pause_all(),
+                TrayEvent::ToggleClipboard => {
+                    if let Some(ui) = self.ui() {
+                        ui.set_watch_clipboard(!ui.get_watch_clipboard());
+                        self.save_settings();
+                    }
+                }
+                TrayEvent::Quit => {
+                    let _ = slint::quit_event_loop();
+                }
+            }
+        }
+        while let Ok(args) = self.instance_rx.try_recv() {
+            self.show_window();
+            self.open_args(args);
+        }
+        // Minimizar = esconder en la bandeja, si así se eligió.
+        if !self.hidden.get()
+            && self.settings.borrow().minimize_to_tray
+            && self.tray_available()
+            && self.ui().is_some_and(|ui| ui.window().is_minimized())
+        {
+            self.hide_to_tray();
+        }
+    }
+
+    /// El botón de cerrar de la ventana.
+    fn close_requested(&self) {
+        if self.settings.borrow().close_to_tray && self.tray_available() {
+            self.hide_to_tray();
+        } else {
+            self.close_popup();
+            let _ = slint::quit_event_loop();
+        }
+    }
+
+    /// Pone el icono en la bandeja. Se llama con el bucle de eventos ya en
+    /// marcha (macOS lo exige).
+    fn create_tray(&self) {
+        match Tray::new(&self.rt, self.tray_tx.clone()) {
+            Ok(t) => *self.tray.borrow_mut() = Some(t),
+            Err(e) => tracing::info!("sin icono en la bandeja ({e}): cerrar la ventana sale"),
+        }
+        if let Some(ui) = self.ui() {
+            ui.set_tray_available(self.tray.borrow().is_some());
+        }
+        self.refresh();
+    }
+
+    /// Enlaces y archivos pasados como argumentos (`omniload <url>...`), por
+    /// ejemplo desde «Abrir con» o un acceso directo: van al capturador, como
+    /// los pegados.
+    fn open_args(&self, args: Vec<String>) {
+        let (files, links): (Vec<String>, Vec<String>) = args
+            .into_iter()
+            .partition(|a| std::path::Path::new(a).is_file());
+        if !links.is_empty() {
+            self.analyze(&links.join("\n"), false);
+        }
+        if !files.is_empty() {
+            let files: Vec<PathBuf> = files.into_iter().map(PathBuf::from).collect();
+            self.analyze_files(&files);
         }
     }
 
@@ -344,6 +528,9 @@ impl App {
         s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
         s.keep_downloading = ui.get_keep_downloading();
+        s.close_to_tray = ui.get_close_to_tray();
+        s.minimize_to_tray = ui.get_minimize_to_tray();
+        s.notify_done = ui.get_notify_done();
         s.clip_popup = ui.get_clip_popup();
         s.clip_popup_autoclose = ui.get_clip_autoclose();
         s.clip_popup_autostart = self.popup.get_autostart();
@@ -357,6 +544,18 @@ impl App {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
+
+    // Si ya hay una ventana abierta (quizá escondida en la bandeja), se le
+    // pasan los argumentos y esta termina.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let (instance_tx, instance_rx) = mpsc::channel();
+    let _instance = match settings::instance_path() {
+        Some(path) => match single::claim(&path, &args, instance_tx) {
+            single::Claim::Forwarded => return Ok(()),
+            single::Claim::Primary(i) => Some(i),
+        },
+        None => None,
+    };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -382,6 +581,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let grab_rows: Rc<VecModel<GrabTreeRow>> = Rc::new(VecModel::default());
     ui.set_grabbed(ModelRc::from(grab_rows.clone()));
 
+    let (tray_tx, tray_rx) = mpsc::channel();
     let app = Rc::new(App {
         ui: ui.as_weak(),
         manager: manager.clone(),
@@ -394,12 +594,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pop: RefCell::default(),
         pop_rows,
         pop_place: Cell::new(None),
+        rt: rt.handle().clone(),
+        tray: RefCell::new(None),
+        tray_tx,
+        tray_rx,
+        instance_rx,
+        hidden: Cell::new(false),
+        notes: RefCell::default(),
     });
 
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, Duration::from_millis(250), {
         let app = app.clone();
-        move || app.refresh()
+        move || {
+            app.handle_events();
+            app.refresh();
+        }
     });
 
     // Vigilar el portapapeles, como JDownloader: lo que se copie con enlaces
@@ -422,29 +632,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     connect_settings(&ui, &app);
     connect_popup(&ui, &app);
 
-    // Enlaces pasados como argumentos (`omniload <url>...`), por ejemplo desde
-    // "Abrir con" o un acceso directo: van al capturador, como los pegados.
-    // También archivos: "Abrir con OmniLoad" sobre una lista .txt.
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let (files, links): (Vec<PathBuf>, Vec<String>) = {
-        let (f, l): (Vec<String>, Vec<String>) = args
-            .into_iter()
-            .partition(|a| std::path::Path::new(a).is_file());
-        (f.into_iter().map(PathBuf::from).collect(), l)
-    };
-    if !links.is_empty() {
-        app.analyze(&links.join("\n"), false);
-    }
-    if !files.is_empty() {
-        app.analyze_files(&files);
-    }
+    app.open_args(args);
     app.refresh();
 
-    ui.run()?;
+    // El icono de la bandeja, en cuanto arranque el bucle de eventos.
+    Timer::single_shot(Duration::ZERO, {
+        let app = app.clone();
+        move || app.create_tray()
+    });
 
-    // Al cerrar: pausar todo y dar tiempo al motor a guardar el progreso.
+    // El programa sigue con la ventana escondida en la bandeja: el bucle
+    // termina con «Salir» o al cerrar la ventana si no hay bandeja.
+    ui.show()?;
+    slint::run_event_loop_until_quit()?;
+    let _ = ui.hide();
+    let _ = app.popup.hide();
+
+    // Al salir: pausar todo (salvo "Seguir descargando al salir") y dar
+    // tiempo al motor a guardar el progreso.
     drop(timer);
     drop(clip_timer);
+    drop(app.tray.borrow_mut().take());
     app.save_settings();
     app.grabber.close();
     let keep = app.settings.borrow().keep_downloading;
@@ -502,9 +710,8 @@ fn connect_popup(ui: &AppWindow, app: &Rc<App>) {
             app.close_popup();
             if let Some(ui) = app.ui() {
                 ui.set_tab(1);
-                ui.window().set_minimized(false);
-                ui.window().with_winit_window(|w| w.focus_window());
             }
+            app.show_window();
         }
     });
     p.on_discard({
@@ -548,12 +755,12 @@ fn connect_popup(ui: &AppWindow, app: &Rc<App>) {
             slint::CloseRequestResponse::HideWindow
         }
     });
-    // Al cerrar la ventana principal se cierra también el aviso, para que el
-    // programa termine.
+    // Cerrar la ventana principal la esconde en la bandeja o, si no hay
+    // bandeja (o no se quiere), sale del programa.
     ui.window().on_close_requested({
         let app = app.clone();
         move || {
-            app.close_popup();
+            app.close_requested();
             slint::CloseRequestResponse::HideWindow
         }
     });
@@ -612,6 +819,9 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
     ui.set_keep_downloading(s.keep_downloading);
+    ui.set_close_to_tray(s.close_to_tray);
+    ui.set_minimize_to_tray(s.minimize_to_tray);
+    ui.set_notify_done(s.notify_done);
     ui.set_clip_popup(s.clip_popup);
     ui.set_clip_autoclose(s.clip_popup_autoclose);
     ui.set_download_dir(s.download_dir.display().to_string().into());
