@@ -137,6 +137,22 @@ pub fn pseudo_random_bytes(len: usize, seed: u64) -> Vec<u8> {
     out
 }
 
+/// Resta 1 al contador si es mayor que 0 y dice si lo hizo. Escrito a mano
+/// porque `fetch_update` está obsoleto en Rust reciente y su sustituto
+/// (`try_update`) no existe en nuestra versión mínima.
+fn take_one(counter: &AtomicU32) -> bool {
+    let mut cur = counter.load(Ordering::SeqCst);
+    loop {
+        if cur == 0 {
+            return false;
+        }
+        match counter.compare_exchange(cur, cur - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(actual) => cur = actual,
+        }
+    }
+}
+
 fn parse_range(headers: &HeaderMap) -> Option<(u64, Option<u64>)> {
     let v = headers.get(header::RANGE)?.to_str().ok()?;
     let (s, e) = v.strip_prefix("bytes=")?.split_once('-')?;
@@ -150,11 +166,7 @@ fn parse_range(headers: &HeaderMap) -> Option<(u64, Option<u64>)> {
 
 async fn handler(State(st): State<Arc<Inner>>, headers: HeaderMap) -> Response {
     st.requests.fetch_add(1, Ordering::SeqCst);
-    if st
-        .fail_left
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-        .is_ok()
-    {
+    if take_one(&st.fail_left) {
         return (StatusCode::SERVICE_UNAVAILABLE, "ocupado").into_response();
     }
     let cfg = st.cfg.read().unwrap().clone();
@@ -208,11 +220,7 @@ async fn handler(State(st): State<Arc<Inner>>, headers: HeaderMap) -> Response {
         HeaderValue::from_str(&(end - start).to_string()).unwrap(),
     );
 
-    let cut_at = st
-        .cuts_left
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-        .is_ok()
-        .then_some(start + cfg.cut_after);
+    let cut_at = take_one(&st.cuts_left).then_some(start + cfg.cut_after);
 
     let body_state = (start, data, st.clone(), false);
     let stream = futures_util::stream::unfold(body_state, move |(pos, data, st, done)| {
