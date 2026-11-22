@@ -4146,6 +4146,7 @@ version = "0.4.0-pr11"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "hex",
  "omni-core",
  "omni-grab",
  "omni-queue",
@@ -4153,6 +4154,7 @@ dependencies = [
  "percent-encoding",
  "reqwest",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-util",
  "tracing",

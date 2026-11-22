@@ -19,6 +19,8 @@
 
 mod archive;
 mod dropbox;
+mod gdrive;
+mod gofile;
 mod html;
 mod mediafire;
 mod pixeldrain;
@@ -34,6 +36,8 @@ use url::Url;
 
 pub use archive::ArchiveOrg;
 pub use dropbox::Dropbox;
+pub use gdrive::GoogleDrive;
+pub use gofile::Gofile;
 pub use mediafire::Mediafire;
 pub use pixeldrain::Pixeldrain;
 
@@ -77,6 +81,8 @@ impl Hosts {
             .with(ArchiveOrg::new())
             .with(Dropbox::new())
             .with(Mediafire::new())
+            .with(GoogleDrive::new())
+            .with(Gofile::new())
     }
 
     /// Añade un plugin. Los añadidos antes tienen preferencia.
@@ -228,4 +234,59 @@ pub(crate) fn status_error(status: StatusCode) -> Error {
 /// Un tamaño que la API da como número o como texto.
 pub(crate) fn json_size(v: &serde_json::Value) -> Option<u64> {
     v.as_u64().or_else(|| v.as_str()?.trim().parse().ok())
+}
+
+/// Lo que hay tras un enlace que puede ser un archivo o una página.
+pub(crate) enum Probed {
+    File(omni_core::RemoteInfo),
+    /// Una página HTML (con su dirección final).
+    Page {
+        url: Url,
+        html: String,
+    },
+}
+
+/// Como el sondeo del motor, pero si el servidor contesta con una página
+/// HTML la devuelve en vez de dar error (formularios de confirmación,
+/// avisos de cuota…).
+pub(crate) async fn probe_or_page(
+    client: &reqwest::Client,
+    url: &Url,
+    headers: &reqwest::header::HeaderMap,
+) -> omni_core::Result<Probed> {
+    use reqwest::header::{CONTENT_TYPE, RANGE};
+    let resp = client
+        .get(url.clone())
+        .headers(headers.clone())
+        .header(RANGE, "bytes=0-0")
+        .send()
+        .await?;
+    let status = resp.status();
+    let is_html = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.to_ascii_lowercase().starts_with("text/html"));
+    let final_url = resp.url().clone();
+    if is_html && (status.is_success() || status.as_u16() == 403 || status.as_u16() == 404) {
+        let mut resp = resp;
+        let mut buf = Vec::new();
+        while let Some(chunk) = resp.chunk().await? {
+            let room = MAX_BODY - buf.len();
+            buf.extend_from_slice(&chunk[..chunk.len().min(room)]);
+            if buf.len() >= MAX_BODY {
+                break;
+            }
+        }
+        if status.as_u16() == 404 {
+            return Err(Error::LinkExpired { status: 404 });
+        }
+        return Ok(Probed::Page {
+            url: final_url,
+            html: String::from_utf8_lossy(&buf).into_owned(),
+        });
+    }
+    let headers = resp.headers().clone();
+    drop(resp);
+    omni_core::info_from_response(status, final_url, &headers).map(Probed::File)
 }

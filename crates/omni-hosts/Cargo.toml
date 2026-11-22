@@ -9,12 +9,14 @@ repository.workspace = true
 
 [dependencies]
 base64.workspace = true
+hex.workspace = true
 omni-core.workspace = true
 omni-grab.workspace = true
 omni-queue.workspace = true
 percent-encoding.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
