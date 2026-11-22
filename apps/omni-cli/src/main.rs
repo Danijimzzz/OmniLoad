@@ -28,7 +28,9 @@ use clap::{Args, Parser, Subcommand};
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
 use omni_api::{Client, Paths, connect_or_launch, omnid_exe};
 use omni_core::{Destination, Download, DownloadOptions, Error};
-use omni_grab::{Check, Checkers, Grabber};
+use omni_grab::{Check, Grabber};
+use omni_hosts::Hosts;
+use omni_queue::Resolver;
 use omni_queue::{JobInfo, NewJob};
 use tokio_util::sync::CancellationToken;
 
@@ -324,7 +326,7 @@ async fn check(links: &[String]) -> Result<ExitCode> {
     let g = Grabber::new(
         tokio::runtime::Handle::current(),
         net.client().clone(),
-        Checkers::new(),
+        Hosts::standard().checkers(),
     );
     g.add_to_batch(&text, 0).map_err(anyhow::Error::msg)?;
     loop {
@@ -414,11 +416,20 @@ async fn get(args: GetArgs) -> Result<ExitCode> {
         overwrite: args.force,
         ..DownloadOptions::default()
     };
+    let cancel = CancellationToken::new();
+    // Pixeldrain, Mediafire…: el enlace directo se pide al plugin del host.
+    let net = omni_core::Network::system_default()?;
+    let link = Hosts::standard()
+        .resolver(net.client().clone())
+        .resolve(&args.url, &cancel)
+        .await
+        .context("no se pudo resolver el enlace")?;
+    let mut opts = opts;
+    opts.headers.extend(link.headers);
     let download =
-        Download::new(&args.url, dest, opts).context("no se pudo preparar la descarga")?;
+        Download::new(&link.url, dest, opts).context("no se pudo preparar la descarga")?;
     let progress = download.progress();
 
-    let cancel = CancellationToken::new();
     {
         let cancel = cancel.clone();
         tokio::spawn(async move {

@@ -1,0 +1,25 @@
+[package]
+name = "omni-hosts"
+description = "Plugins de hosts de descarga de OmniLoad (Pixeldrain, Archive.org, Dropbox, Mediafire…)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64.workspace = true
+omni-core.workspace = true
+omni-grab.workspace = true
+omni-queue.workspace = true
+percent-encoding.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+omni-testserver.workspace = true

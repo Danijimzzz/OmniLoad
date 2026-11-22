@@ -4028,7 +4028,7 @@ dependencies = [
 
 [[package]]
 name = "omni-api"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "axum",
  "fs4",
@@ -4036,6 +4036,7 @@ dependencies = [
  "hex",
  "omni-core",
  "omni-grab",
+ "omni-hosts",
  "omni-queue",
  "omni-store",
  "omni-testserver",
@@ -4051,7 +4052,7 @@ dependencies = [
 
 [[package]]
 name = "omni-cli"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "anyhow",
  "clap",
@@ -4059,6 +4060,7 @@ dependencies = [
  "omni-api",
  "omni-core",
  "omni-grab",
+ "omni-hosts",
  "omni-queue",
  "omni-testserver",
  "serde_json",
@@ -4071,7 +4073,7 @@ dependencies = [
 
 [[package]]
 name = "omni-core"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "bytes",
  "dirs",
@@ -4094,7 +4096,7 @@ dependencies = [
 
 [[package]]
 name = "omni-grab"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "axum",
  "omni-core",
@@ -4109,7 +4111,7 @@ dependencies = [
 
 [[package]]
 name = "omni-gui"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "arboard",
  "dirs",
@@ -4139,8 +4141,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "omni-hosts"
+version = "0.4.0-pr11"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "omni-core",
+ "omni-grab",
+ "omni-queue",
+ "omni-testserver",
+ "percent-encoding",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "omni-queue"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "chrono",
  "dirs",
@@ -4158,7 +4179,7 @@ dependencies = [
 
 [[package]]
 name = "omni-store"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "dirs",
  "omni-core",
@@ -4171,7 +4192,7 @@ dependencies = [
 
 [[package]]
 name = "omni-testserver"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "axum",
  "bytes",
@@ -4183,7 +4204,7 @@ dependencies = [
 
 [[package]]
 name = "omnid"
-version = "0.3.0"
+version = "0.4.0-pr11"
 dependencies = [
  "omni-api",
  "omni-core",

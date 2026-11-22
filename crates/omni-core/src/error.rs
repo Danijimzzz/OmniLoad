@@ -46,9 +46,22 @@ pub enum Error {
 
     #[error("descarga cancelada")]
     Cancelled,
+
+    /// Un host (Pixeldrain, Mediafire…) no deja descargar y sabe decir por
+    /// qué: archivo borrado, cuota agotada, enlace privado…
+    #[error("{host}: {message}")]
+    Host { host: String, message: String },
 }
 
 impl Error {
+    /// Un error explicable de un host.
+    pub fn host(host: impl Into<String>, message: impl Into<String>) -> Self {
+        Error::Host {
+            host: host.into(),
+            message: message.into(),
+        }
+    }
+
     /// ¿Merece la pena reintentar? Cortes de red, 5xx, 429 y respuestas
     /// incompletas sí; enlaces caducados, errores de disco o cambios en el
     /// archivo remoto no.

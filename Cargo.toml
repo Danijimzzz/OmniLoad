@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/omni-core",
     "crates/omni-grab",
+    "crates/omni-hosts",
     "crates/omni-api",
     "crates/omni-store",
     "crates/omni-queue",
@@ -13,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0-pr11"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
@@ -23,6 +24,7 @@ repository = "https://github.com/Danijimzzz/OmniLoad"
 omni-api = { path = "crates/omni-api" }
 omni-core = { path = "crates/omni-core" }
 omni-grab = { path = "crates/omni-grab" }
+omni-hosts = { path = "crates/omni-hosts" }
 omni-queue = { path = "crates/omni-queue" }
 omni-store = { path = "crates/omni-store" }
 omni-testserver = { path = "crates/omni-testserver" }
@@ -30,6 +32,7 @@ omni-testserver = { path = "crates/omni-testserver" }
 anyhow = "1"
 arboard = { version = "3", default-features = false }
 axum = "0.8"
+base64 = "0.22"
 bytes = "1"
 clap = { version = "4.5", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

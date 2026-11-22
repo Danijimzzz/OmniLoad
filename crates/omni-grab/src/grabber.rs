@@ -942,6 +942,7 @@ pub fn short_error(e: &omni_core::Error) -> String {
         Error::LinkExpired { status } => format!("acceso denegado ({status})"),
         Error::HttpStatus { status } => format!("error del servidor ({status})"),
         Error::RetriesExhausted(inner) => short_error(inner),
+        Error::Host { message, .. } => message.clone(),
         other => other.to_string(),
     }
 }
