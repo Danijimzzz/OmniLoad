@@ -171,7 +171,8 @@ impl Service {
     /// Para la API, guarda el progreso de las descargas y suelta el candado.
     pub async fn stop(self) {
         self.stop.cancel();
-        let _ = self.server.await;
+        // Una conexión abierta no puede impedir que el servicio termine.
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.server).await;
         let _ = self.saver.await;
         save_grabber(&self.grabber, &self.store);
         self.queue.shutdown(SHUTDOWN_GRACE).await;

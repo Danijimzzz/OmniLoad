@@ -72,6 +72,7 @@ export global Theme {
     out property <color> field: [#ffffffb3, #0f1424a6, #ffffff, #181b20, #000000][pal];
     // Barra de título: se funde con la ventana en cada tema.
     out property <color> bar: [#ffffffb3, #1c2236b0, #f3f4f7, #1a1d22, #000000][eff];
+    out property <color> window-edge: [#141e3c59, #ffffff47, #aeb5c2, #4a5160, #ffffff][eff];
     out property <color> bar-line: [#141e3c24, #ffffff1f, #d9dde4, #2b3039, #ffffff][eff];
     // Anillo de foco (teclado) y halo del campo enfocado.
     out property <color> ring: accent.with-alpha(0.55);
@@ -161,13 +162,6 @@ component Panel inherits Rectangle {
     drop-shadow-offset-y: Theme.glass ? 12px : 0px;
     drop-shadow-color: Theme.shadow;
     @children
-    Rectangle {
-        x: Theme.r;
-        y: 1px;
-        width: max(0px, parent.width - 2 * Theme.r);
-        height: 1px;
-        background: Theme.spec;
-    }
 }
 
 // Una columna de una tabla (el orden del modelo es el orden en pantalla).
@@ -530,15 +524,16 @@ component Cell inherits Text {
     overflow: elide;
 }
 
-// Hueco de una columna: ancho propio, sin estirarse (un ancho de columna no
-// afecta a las demás; lo que sobra queda a la derecha).
+// Hueco de una columna: ancho propio. Solo «Nombre» se estira para llenar la
+// tabla; el ancho de una columna no afecta a las demás.
 component ColSlot inherits Rectangle {
     in property <ColState> spec;
     visible: spec.shown;
     min-width: spec.shown ? spec.width : 0px;
-    max-width: spec.shown ? spec.width : 0px;
+    // «Nombre» es la columna elástica: se queda con el ancho que sobra.
+    max-width: spec.shown ? (spec.id == 0 ? 100000px : spec.width) : 0px;
     preferred-width: spec.shown ? spec.width : 0px;
-    horizontal-stretch: 0;
+    horizontal-stretch: spec.id == 0 ? 1 : 0;
 }
 
 // Cabecera de una tabla: arrastrar el borde derecho cambia el ancho y
@@ -550,6 +545,13 @@ component ColsHeader inherits Rectangle {
     callback resize-done();
     // Columna que se suelta y posición del ratón dentro de la cabecera.
     callback reorder(int, length);
+    // Menú del botón derecho: ocultar o mostrar columnas.
+    callback toggle(int);
+    callback reset();
+    in-out property <int> menu-col: 0;
+    in-out property <length> menu-x;
+    in-out property <length> menu-y;
+    in-out property <bool> sub-open: false;
     in-out property <int> dragging: -1;
     in-out property <length> pointer-x;
     height: 34px;
@@ -596,6 +598,13 @@ component ColsHeader inherits Rectangle {
             grab := TouchArea {
                 mouse-cursor: pointer;
                 pointer-event(e) => {
+                    if e.button == PointerEventButton.right && e.kind == PointerEventKind.down {
+                        root.menu-col = i;
+                        root.menu-x = min(self.absolute-position.x + self.mouse-x - root.absolute-position.x, max(0px, root.width - 440px));
+                        root.menu-y = root.height - 2px;
+                        root.sub-open = false;
+                        cols-menu.show();
+                    }
                     if e.button == PointerEventButton.left {
                         if e.kind == PointerEventKind.down {
                             pressing = true;
@@ -647,7 +656,134 @@ component ColsHeader inherits Rectangle {
                 }
             }
         }
-        Rectangle { horizontal-stretch: 1; }
+    }
+    // Menú del botón derecho sobre una cabecera. El submenú de columnas se abre
+    // a la derecha al pasar por «Mostrar columnas».
+    cols-menu := PopupWindow {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 440px;
+        height: 290px;
+        TouchArea { clicked => { cols-menu.close(); } }
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: 230px;
+            height: 3 * 36px + 17px;
+            background: Theme.menu-bg;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.rim;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000055;
+            VerticalLayout {
+                padding: 5px;
+                spacing: 0px;
+                Rectangle {
+                    height: 36px;
+                    border-radius: 7px;
+                    opacity: root.cols[root.menu-col].id == 0 ? 0.4 : 1;
+                    background: hide-ta.has-hover && root.cols[root.menu-col].id != 0 ? Theme.selbg : transparent;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        spacing: 10px;
+                        VerticalLayout { alignment: center; Icon { size: 16px; commands: "M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6zM4 4l16 16"; ink: Theme.muted; stroke-width: 1.8px; } }
+                        Text { text: "Ocultar esta columna"; color: Theme.text; font-size: Theme.font; vertical-alignment: center; }
+                    }
+                    hide-ta := TouchArea {
+                        enabled: root.cols[root.menu-col].id != 0;
+                        mouse-cursor: pointer;
+                        changed has-hover => { if self.has-hover { root.sub-open = false; } }
+                        clicked => { root.toggle(root.menu-col); cols-menu.close(); }
+                    }
+                }
+                Rectangle {
+                    height: 36px;
+                    border-radius: 7px;
+                    background: root.sub-open || show-ta.has-hover ? Theme.selbg : transparent;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        VerticalLayout { alignment: center; Icon { size: 16px; commands: "M5 6h14M5 12h14M5 18h14"; ink: Theme.muted; stroke-width: 1.8px; } }
+                        Text { horizontal-stretch: 1; text: "Mostrar columnas"; color: Theme.text; font-size: Theme.font; vertical-alignment: center; }
+                        VerticalLayout { alignment: center; Icon { size: 14px; commands: "M9 6l6 6-6 6"; ink: Theme.muted; stroke-width: 2px; } }
+                    }
+                    show-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        changed has-hover => { if self.has-hover { root.sub-open = true; } }
+                        clicked => { root.sub-open = true; }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.line; }
+                Rectangle {
+                    height: 36px;
+                    border-radius: 7px;
+                    background: reset-ta.has-hover ? Theme.selbg : transparent;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        spacing: 10px;
+                        VerticalLayout { alignment: center; Icon { size: 16px; commands: "M4 12a8 8 0 1 0 3-6.2M4 4v4h4"; ink: Theme.muted; stroke-width: 1.8px; } }
+                        Text { text: "Restablecer columnas"; color: Theme.muted; font-size: Theme.font; vertical-alignment: center; }
+                    }
+                    reset-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        changed has-hover => { if self.has-hover { root.sub-open = false; } }
+                        clicked => { root.reset(); cols-menu.close(); }
+                    }
+                }
+            }
+        }
+        if root.sub-open: Rectangle {
+            x: 230px;
+            y: 41px;
+            width: 200px;
+            height: root.cols.length * 32px + 10px;
+            background: Theme.menu-bg;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.rim;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000055;
+            VerticalLayout {
+                padding: 5px;
+                for c[i] in root.cols: Rectangle {
+                    height: 32px;
+                    border-radius: 7px;
+                    background: row-ta.has-hover && c.id != 0 ? Theme.hover : transparent;
+                    opacity: c.id == 0 ? 0.55 : 1;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 18px;
+                                height: 18px;
+                                border-radius: 5px;
+                                border-width: c.shown ? 0px : 1.5px;
+                                border-color: Theme.muted;
+                                background: c.shown ? Theme.accent : transparent;
+                                animate background { duration: 90ms; }
+                                accessible-role: checkbox;
+                                accessible-checkable: true;
+                                accessible-checked: c.shown;
+                                accessible-label: c.name;
+                                if c.shown: Icon { size: 14px; x: 2px; y: 2px; commands: "M5 12.5l4.5 4.5L19 7.5"; ink: Theme.on-accent; stroke-width: 3px; }
+                            }
+                        }
+                        Text { horizontal-stretch: 1; text: c.name; color: Theme.text; font-size: Theme.font; vertical-alignment: center; }
+                    }
+                    row-ta := TouchArea {
+                        enabled: c.id != 0;
+                        mouse-cursor: pointer;
+                        clicked => { root.toggle(i); }
+                    }
+                }
+            }
+        }
     }
     // Lo que se arrastra, siguiendo al ratón.
     if root.dragging >= 0: Rectangle {
@@ -706,6 +842,8 @@ component FolderIcon inherits Icon {
 // Columnas de las tablas: las pone Rust (ajustes guardados).
 export global DlCols {
     in-out property <[ColState]> cols;
+    callback toggle(int);
+    callback reset();
     callback resize(int, length);
     callback resize-done();
     callback reorder(int, length);
@@ -713,6 +851,8 @@ export global DlCols {
 
 export global GrabCols {
     in-out property <[ColState]> cols;
+    callback toggle(int);
+    callback reset();
     callback resize(int, length);
     callback resize-done();
     callback reorder(int, length);
@@ -846,117 +986,6 @@ component GrabLine inherits Rectangle {
 }
 
 // Botón «Columnas» con el menú para mostrar, ocultar y ordenar columnas.
-component ColsMenu inherits Btn {
-    in property <[ColState]> cols;
-    callback toggle(int);
-    callback move(int, int);
-    callback reset();
-    label: "Columnas";
-    icon: "M5 5v14M12 5v14M19 5v14";
-    text: "";
-    clicked => { menu.show(); }
-    menu := PopupWindow {
-        x: parent.width - 250px;
-        y: parent.height + 4px;
-        width: 250px;
-        Rectangle {
-            background: Theme.menu-bg;
-            border-radius: Theme.r;
-            border-width: 1px;
-            border-color: Theme.rim;
-            drop-shadow-blur: 24px;
-            drop-shadow-offset-y: 8px;
-            drop-shadow-color: #00000055;
-            VerticalLayout {
-                padding: 10px;
-                spacing: 2px;
-                Text {
-                    text: "Columnas";
-                    font-size: 13px * Theme.fscale;
-                    font-weight: 700;
-                    color: Theme.text;
-                }
-                Text {
-                    text: "Marca las que quieres ver. También puedes arrastrar las cabeceras para cambiarlas de sitio.";
-                    font-size: 11.5px * Theme.fscale;
-                    color: Theme.muted;
-                    wrap: word-wrap;
-                }
-                Rectangle { height: 6px; }
-                for c[i] in root.cols: Rectangle {
-                    height: 34px;
-                    border-radius: 8px;
-                    background: row-ta.has-hover ? Theme.hover : transparent;
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 4px;
-                        spacing: 10px;
-                        VerticalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 18px;
-                                height: 18px;
-                                border-radius: 5px;
-                                border-width: c.shown ? 0px : 1.5px;
-                                border-color: Theme.muted;
-                                background: c.shown ? Theme.accent : transparent;
-                                opacity: c.id == 0 ? 0.55 : 1;
-                                accessible-role: checkbox;
-                                accessible-checkable: true;
-                                accessible-checked: c.shown;
-                                accessible-label: c.name;
-                                if c.shown: Icon { size: 12px; x: 3px; y: 3px; commands: "M5 12l5 5 9-10"; ink: Theme.on-accent; stroke-width: 3px; }
-                            }
-                        }
-                        Text {
-                            horizontal-stretch: 1;
-                            text: c.name;
-                            font-size: Theme.font;
-                            color: Theme.text;
-                            vertical-alignment: center;
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 26px;
-                                height: 26px;
-                                border-radius: 7px;
-                                opacity: i > 0 ? 1 : 0.3;
-                                background: up.has-hover && i > 0 ? Theme.press : transparent;
-                                Icon { size: 14px; x: 6px; y: 6px; commands: "M6 15l6-6 6 6"; ink: Theme.muted; }
-                                accessible-role: button;
-                                accessible-label: "Subir " + c.name;
-                                up := TouchArea { enabled: i > 0; mouse-cursor: pointer; clicked => { root.move(i, -1); } }
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 26px;
-                                height: 26px;
-                                border-radius: 7px;
-                                opacity: i < root.cols.length - 1 ? 1 : 0.3;
-                                background: down.has-hover && i < root.cols.length - 1 ? Theme.press : transparent;
-                                Icon { size: 14px; x: 6px; y: 6px; commands: "M6 9l6 6 6-6"; ink: Theme.muted; }
-                                accessible-role: button;
-                                accessible-label: "Bajar " + c.name;
-                                down := TouchArea { enabled: i < root.cols.length - 1; mouse-cursor: pointer; clicked => { root.move(i, 1); } }
-                            }
-                        }
-                    }
-                    row-ta := TouchArea {
-                        width: parent.width - 70px;
-                        mouse-cursor: c.id == 0 ? MouseCursor.default : MouseCursor.pointer;
-                        clicked => { if c.id != 0 { root.toggle(i); } }
-                    }
-                }
-                Rectangle { height: 6px; }
-                Btn { text: "Restablecer columnas"; clicked => { root.reset(); } }
-            }
-        }
-    }
-}
-
 component FieldLabel inherits Text {
     font-size: 12px * Theme.fscale;
     font-weight: 600;
@@ -1512,7 +1541,7 @@ export component AppWindow inherits Window {
     no-frame: true;
     preferred-width: 1280px;
     preferred-height: 800px;
-    min-width: 1100px;
+    min-width: 1180px;
     min-height: 560px;
     background: Theme.wall;
     default-font-family: "Inter";
@@ -1543,9 +1572,6 @@ export component AppWindow inherits Window {
     callback win-toggle-maximize();
     callback win-close();
     callback win-resize(int);
-    callback col-toggle(int);
-    callback col-move(int, int);
-    callback col-reset();
     in-out property <int> max-per-server: 8;
     in-out property <bool> keep-downloading: false;
     in-out property <bool> close-to-tray: true;
@@ -1886,12 +1912,6 @@ export component AppWindow inherits Window {
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    ColsMenu {
-                        cols: DlCols.cols;
-                        toggle(i) => { root.col-toggle(i); }
-                        move(i, d) => { root.col-move(i, d); }
-                        reset => { root.col-reset(); }
-                    }
                     LineEdit {
                         // Se encoge antes de salirse de la barra en ventanas estrechas.
                         preferred-width: 240px;
@@ -1909,7 +1929,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Panel {
                     horizontal-stretch: 1;
-                    min-width: 0px;
+                    min-width: 300px;
                     clip: true;
                     VerticalLayout {
                         ColsHeader {
@@ -1917,6 +1937,8 @@ export component AppWindow inherits Window {
                             resize(i, w) => { DlCols.resize(i, w); }
                             resize-done => { DlCols.resize-done(); }
                             reorder(a, b) => { DlCols.reorder(a, b); }
+                            toggle(i) => { DlCols.toggle(i); }
+                            reset => { DlCols.reset(); }
                         }
                         if root.downloads.length == 0: Rectangle {
                             vertical-stretch: 1;
@@ -1941,7 +1963,9 @@ export component AppWindow inherits Window {
                     dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
                 }
                 if root.properties-panel == 1 && root.sel-kind > 0: Panel {
-                    width: root.side-w;
+                    preferred-width: root.side-w;
+                    min-width: 240px;
+                    horizontal-stretch: 0;
                     VerticalLayout {
                         padding: 16px;
                         spacing: 10px;
@@ -2086,7 +2110,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Panel {
                     horizontal-stretch: 1;
-                    min-width: 0px;
+                    min-width: 300px;
                     clip: true;
                     VerticalLayout {
                         ColsHeader {
@@ -2094,6 +2118,8 @@ export component AppWindow inherits Window {
                             resize(i, w) => { GrabCols.resize(i, w); }
                             resize-done => { GrabCols.resize-done(); }
                             reorder(a, b) => { GrabCols.reorder(a, b); }
+                            toggle(i) => { GrabCols.toggle(i); }
+                            reset => { GrabCols.reset(); }
                         }
                         if root.grabbed.length == 0: Rectangle {
                             vertical-stretch: 1;
@@ -2119,7 +2145,9 @@ export component AppWindow inherits Window {
                     dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
                 }
                 if root.properties-panel == 1 && root.pkg-selected: Panel {
-                    width: root.side-w;
+                    preferred-width: root.side-w;
+                    min-width: 240px;
+                    horizontal-stretch: 0;
                     VerticalLayout {
                         padding: 16px;
                         spacing: 8px;
@@ -2850,6 +2878,15 @@ export component AppWindow inherits Window {
         minimize => { root.win-minimize(); }
         toggle-maximize => { root.win-toggle-maximize(); }
         close => { root.win-close(); }
+    }
+    // Borde fino de toda la ventana (encima de todo, sin capturar el ratón).
+    Rectangle {
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        border-width: root.maximized ? 0px : 1px;
+        border-color: Theme.window-edge;
     }
     if !root.maximized: Rectangle {
         // 0 N, 1 NE, 2 E, 3 SE, 4 S, 5 SW, 6 W, 7 NW.

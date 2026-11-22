@@ -152,14 +152,19 @@ En **Ajustes › Automático**:
 - **Números con − y +**: haz clic, mantén pulsado para que repita, o escribe el número directamente.
 - **Columnas de la lista**: arrastra el borde de la cabecera para cambiar el
   ancho, arrastra el nombre de una columna (Nombre incluido) para cambiarla de
-  sitio, y con el botón de columnas las muestras u ocultas. Vale para las
-  descargas y para el Capturador de enlaces. Se recuerda.
+  sitio. Con **clic derecho en una cabecera** puedes ocultar esa columna, ver la
+  lista de columnas con sus tics para mostrar u ocultar cualquiera, o
+  restablecerlas. La columna Nombre se estira sola para llenar la
+  tabla. Vale para las descargas y para el Capturador de enlaces. Se recuerda.
 - **Tamaño de letra** (pequeña, normal o grande), **escala de la interfaz** y
   **desenfoque del cristal** en Ajustes › Apariencia.
 - **Límite de velocidad**: elige uno de la lista o escribe el tuyo («700 KB/s»,
   «3 MB/s»).
-- Paneles que se pueden ensanchar arrastrando su borde, y ventana con barra de
-  título propia y tamaño libre.
+- Paneles que se pueden ensanchar arrastrando su borde, y ventana con borde
+  fino, barra de título propia y tamaño libre.
+- **Win+D** y la barra de tareas funcionan como en cualquier programa: la
+  ventana se minimiza y vuelve. Solo el botón de minimizar de OmniLoad la
+  esconde en la bandeja.
 - Fluida incluso con **10.000 descargas** en la lista.
 
 ### Apariencia

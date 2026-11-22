@@ -417,14 +417,6 @@ impl App {
             self.show_window();
             self.open_args(args);
         }
-        // Minimizar = esconder en la bandeja, si así se eligió.
-        if !self.hidden.get()
-            && self.settings.borrow().minimize_to_tray
-            && self.tray_available()
-            && self.ui().is_some_and(|ui| ui.window().is_minimized())
-        {
-            self.hide_to_tray();
-        }
     }
 
     /// El botón de cerrar de la ventana.
@@ -901,6 +893,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = ui.hide();
     let _ = app.popup.hide();
 
+    // Red de seguridad: si algo se atasca al cerrar (un hilo del sistema, el
+    // servicio que no contesta), el proceso se termina igualmente a los 8 s
+    // en vez de quedarse en segundo plano.
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(8));
+        tracing::warn!("el cierre tardó demasiado; se termina el proceso");
+        std::process::exit(0);
+    });
+
     // Al salir: pausar todo (salvo "Seguir descargando al salir") y dar
     // tiempo al motor a guardar el progreso.
     drop(timer);
@@ -911,7 +912,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let keep = app.settings.borrow().keep_downloading;
     rt.block_on(manager.close(keep));
     rt.shutdown_timeout(Duration::from_secs(1));
-    Ok(())
+    // Salir ya, sin esperar a hilos sueltos (bandeja, avisos…).
+    std::process::exit(0);
 }
 
 /// Lee los enlaces de un archivo `.txt`, `.html`…
@@ -1430,7 +1432,27 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
     });
     // Columnas: arrastrar el borde, mostrar/ocultar y cambiar el orden.
     macro_rules! table_cols {
-        ($global:ident, $rows:ident) => {
+        ($global:ident, $rows:ident, $table:expr) => {
+            ui.global::<$global>().on_toggle({
+                let app = app.clone();
+                move |i| {
+                    if let Some(mut c) = app.$rows.row_data(i as usize) {
+                        // «Nombre» siempre se ve.
+                        if c.id != 0 {
+                            c.shown = !c.shown;
+                            app.$rows.set_row_data(i as usize, c);
+                            app.save_columns();
+                        }
+                    }
+                }
+            });
+            ui.global::<$global>().on_reset({
+                let app = app.clone();
+                move || {
+                    fill_columns($table, &app.$rows, &settings::default_columns($table));
+                    app.save_columns();
+                }
+            });
             ui.global::<$global>().on_resize({
                 let app = app.clone();
                 move |i, width| {
@@ -1476,45 +1498,8 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             });
         };
     }
-    table_cols!(DlCols, col_rows);
-    table_cols!(GrabCols, grab_col_rows);
-    ui.on_col_toggle({
-        let app = app.clone();
-        move |i| {
-            let i = i as usize;
-            if let Some(mut c) = app.col_rows.row_data(i) {
-                c.shown = !c.shown;
-                app.col_rows.set_row_data(i, c);
-                app.save_columns();
-            }
-        }
-    });
-    ui.on_col_move({
-        let app = app.clone();
-        move |i, dir| {
-            let (i, j) = (i as usize, i + dir);
-            if j < 0 || j as usize >= app.col_rows.row_count() {
-                return;
-            }
-            let j = j as usize;
-            if let (Some(a), Some(b)) = (app.col_rows.row_data(i), app.col_rows.row_data(j)) {
-                app.col_rows.set_row_data(i, b);
-                app.col_rows.set_row_data(j, a);
-                app.save_columns();
-            }
-        }
-    });
-    ui.on_col_reset({
-        let app = app.clone();
-        move || {
-            fill_columns(
-                Table::Downloads,
-                &app.col_rows,
-                &settings::default_columns(Table::Downloads),
-            );
-            app.save_columns();
-        }
-    });
+    table_cols!(DlCols, col_rows, Table::Downloads);
+    table_cols!(GrabCols, grab_col_rows, Table::Grabber);
     // Barra de título propia: mover, redimensionar, minimizar, maximizar, cerrar.
     ui.on_win_drag({
         let app = app.clone();
@@ -1551,7 +1536,15 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
         let app = app.clone();
         move || {
             if let Some(ui) = app.ui() {
-                ui.window().set_minimized(true);
+                // Solo el botón de la propia barra esconde en la bandeja. Una
+                // minimización de fuera (Win+D, la barra de tareas) deja la
+                // ventana minimizada de verdad, para que el sistema pueda
+                // restaurarla.
+                if app.settings.borrow().minimize_to_tray && app.tray_available() {
+                    app.hide_to_tray();
+                } else {
+                    ui.window().set_minimized(true);
+                }
             }
         }
     });
