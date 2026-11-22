@@ -669,3 +669,43 @@ async fn server_limit_is_learned_and_shared() {
         server.rejected() - before
     );
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn download_through_two_bound_networks() {
+    use omni_core::NetInterface;
+    let data = pseudo_random_bytes((2 * MIB + 7) as usize, 9);
+    let server = TestServer::start(data.clone(), ServerConfig::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let lo = NetInterface {
+        name: "lo".into(),
+        ip: "127.0.0.1".parse().unwrap(),
+    };
+    let nets = vec![
+        Network::bound(NetworkId(0), &lo).unwrap(),
+        Network::bound(NetworkId(1), &lo).unwrap(),
+    ];
+    let opts = DownloadOptions {
+        networks: nets,
+        connections_per_network: 2,
+        ..fast_opts()
+    };
+    let dl = Download::new(
+        &server.url("dos.bin"),
+        Destination::Dir(dir.path().into()),
+        opts,
+    )
+    .unwrap();
+    let out = dl.run(CancellationToken::new()).await.unwrap();
+    assert_eq!(read(&out.path), data);
+}
+
+#[test]
+fn interfaces_have_no_loopback() {
+    for i in omni_core::interfaces() {
+        assert!(!i.ip.is_loopback() && !i.ip.is_unspecified());
+    }
+    // Un nombre que no existe no da redes (= la del sistema).
+    assert!(omni_core::networks_for(&["no-existe-0".into()]).is_empty());
+    assert!(omni_core::networks_for(&[]).is_empty());
+}

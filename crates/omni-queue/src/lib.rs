@@ -23,4 +23,4 @@ pub use resolver::{
     CustomDownload, DirectLinks, ExternalJob, ResolveFuture, ResolvedLink, Resolver, RunFuture,
 };
 pub use schedule::{ALL_DAYS, Schedule, local_now};
-pub use types::{JobInfo, NewJob, Priority, QueueSettings, State};
+pub use types::{ExtractSettings, JobInfo, NewJob, Priority, QueueSettings, State};

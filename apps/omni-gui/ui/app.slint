@@ -175,6 +175,13 @@ export struct ColState {
     shown: bool,
 }
 
+// Una interfaz de red en Ajustes › General.
+struct NetRow {
+    name: string,
+    ip: string,
+    on: bool,
+}
+
 // Una regla por tipo de archivo en Ajustes › Automático.
 struct RuleRow {
     exts: string,
@@ -1605,6 +1612,9 @@ export component AppWindow inherits Window {
     in property <bool> update-busy: false;
     in-out property <bool> check-updates: true;
     // Automático: horario, reglas por tipo, acción al terminar, inicio con el sistema.
+    in-out property <bool> extract-enabled: true;
+    in-out property <bool> extract-delete: false;
+    in-out property <string> extract-passwords;
     in-out property <bool> schedule-enabled: false;
     // Días del horario: bit 0 lunes … bit 6 domingo.
     in-out property <int> schedule-days: 127;
@@ -1614,6 +1624,9 @@ export component AppWindow inherits Window {
     in property <bool> schedule-error: false;
     callback schedule-day-toggled(int);
     in-out property <[RuleRow]> rules;
+    in-out property <[NetRow]> nets;
+    callback net-toggled(int);
+    callback nets-refresh();
     callback rule-add();
     callback rule-remove(int);
     callback rule-exts-edited(int, string);
@@ -2402,6 +2415,16 @@ export component AppWindow inherits Window {
                         }
                     }
                     SettingRow {
+                        title: "Descargar por varias redes a la vez";
+                        subtitle: "Marca dos o más para sumar su velocidad (por ejemplo, wifi y cable, o el móvil por USB). Con una o ninguna se usa la red normal del sistema. Cada red abre sus propias conexiones por archivo. Solo cuentan las descargas que se empiecen después de cambiarlo.";
+                        Btn { text: "Buscar de nuevo"; clicked => { root.nets-refresh(); } }
+                    }
+                    for n[i] in root.nets: Check {
+                        checked: n.on;
+                        label: n.name + "  (" + n.ip + ")";
+                        toggled => { root.net-toggled(i); }
+                    }
+                    SettingRow {
                         title: "Cerrar a la bandeja";
                         subtitle: root.tray-available
                             ? "La X de la ventana la esconde junto al reloj y las descargas siguen. Para salir del todo: «Salir» en el menú del icono."
@@ -2546,6 +2569,41 @@ export component AppWindow inherits Window {
                             model: ["No hacer nada", "Cerrar OmniLoad", "Suspender el equipo", "Apagar el equipo"];
                             current-index <=> root.finish-action;
                             selected => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Descomprimir al terminar";
+                        subtitle: "Cuando un paquete termina, abre los .zip, .7z y .rar que traiga en una carpeta con su nombre. Los .rar necesitan 7-Zip, WinRAR o unrar instalado. Si el archivo tiene contraseña, prueba las de la lista.";
+                        Check {
+                            checked <=> root.extract-enabled;
+                            label: "Descomprimir al terminar";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Borrar el comprimido después";
+                        subtitle: "Si se abrió bien, se borran el archivo y todas sus partes. Si falla, no se toca nada.";
+                        opacity: root.extract-enabled ? 1 : 0.5;
+                        Check {
+                            checked <=> root.extract-delete;
+                            enabled: root.extract-enabled;
+                            label: "Borrar el comprimido después";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Contraseñas para descomprimir";
+                        subtitle: "Una por línea. Se prueba primero sin contraseña y luego con cada una.";
+                        opacity: root.extract-enabled ? 1 : 0.5;
+                        VerticalLayout {
+                            spacing: 6px;
+                            TextEdit {
+                                width: 360px;
+                                height: 90px;
+                                text <=> root.extract-passwords;
+                                placeholder-text: "una contraseña por línea";
+                            }
+                            Btn { text: "Aplicar"; enabled: root.extract-enabled; clicked => { root.settings-changed(); } }
                         }
                     }
                     SettingRow {

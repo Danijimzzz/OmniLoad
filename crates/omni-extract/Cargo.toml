@@ -1,0 +1,17 @@
+[package]
+name = "omni-extract"
+description = "Descomprime archivos descargados (ZIP, 7z, RAR) con contraseñas"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sevenz-rust2 = "0.20.2"
+thiserror.workspace = true
+tracing.workspace = true
+zip = "9.7.3"
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -487,3 +487,62 @@ async fn accepts_magnets_and_torrent_files_but_not_other_schemes() {
     assert!(q.add(job("file:///tmp/a.torrent")).is_ok());
     assert!(q.add(job("ftp://a.com/x.zip")).is_err());
 }
+
+fn zip_bytes(password: Option<&str>) -> Vec<u8> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    let mut w = zip::ZipWriter::new(&mut buf);
+    let mut opts = SimpleFileOptions::default();
+    if let Some(pw) = password {
+        opts = opts.with_aes_encryption(zip::AesMode::Aes256, pw);
+    }
+    w.start_file("dentro.txt", opts).unwrap();
+    w.write_all(b"contenido").unwrap();
+    w.finish().unwrap();
+    buf.into_inner()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn finished_zip_is_extracted_with_password_and_deleted() {
+    let server = TestServer::start(zip_bytes(Some("secreto")), ServerConfig::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let q = memory_queue();
+    q.update_settings(|s| {
+        s.extract.passwords = vec!["mala".into(), "secreto".into()];
+        s.extract.delete_archives = true;
+    });
+    let id = q
+        .add(new(server.url("datos.zip"), dir.path(), true))
+        .unwrap();
+    wait_for(&q, id, State::Done).await;
+    let out = dir.path().join("datos").join("dentro.txt");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !out.exists() {
+        assert!(Instant::now() < deadline, "no se descomprimió");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(std::fs::read(&out).unwrap(), b"contenido");
+    // El comprimido se borra y la fila cuenta lo que pasó.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while dir.path().join("datos.zip").exists() {
+        assert!(Instant::now() < deadline, "no se borró el comprimido");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(row(&q, id).detail.contains("Descomprimido"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn extraction_off_leaves_the_zip_alone() {
+    let server = TestServer::start(zip_bytes(None), ServerConfig::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let q = memory_queue();
+    q.update_settings(|s| s.extract.enabled = false);
+    let id = q
+        .add(new(server.url("datos.zip"), dir.path(), true))
+        .unwrap();
+    wait_for(&q, id, State::Done).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(dir.path().join("datos.zip").exists());
+    assert!(!dir.path().join("datos").exists());
+}

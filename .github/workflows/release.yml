@@ -1,12 +1,15 @@
 name: Instaladores
 
-# Al subir una etiqueta `vX.Y.Z` se crean los instaladores de Windows, macOS y
-# Linux y se publican en Releases junto con sus sumas SHA-256 (la actualización
-# dentro de la app las comprueba). En los PR que tocan los instaladores se
-# construyen igualmente, sin publicar nada, para ver que funcionan.
+# Al fusionar en main una versión nueva (sin sufijo -prN), o al subir una
+# etiqueta `vX.Y.Z`, se crean los instaladores de Windows, macOS y Linux y se
+# publican en Releases junto con sus sumas SHA-256 (la actualización dentro de
+# la app las comprueba). Si la etiqueta no existe, se crea sola. En los PR que
+# tocan los instaladores se construyen igualmente, sin publicar nada, para ver
+# que funcionan.
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   pull_request:
     paths:
@@ -23,8 +26,42 @@ permissions:
   contents: read
 
 jobs:
+  plan:
+    name: Qué hacer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      build: ${{ steps.p.outputs.build }}
+      publish: ${{ steps.p.outputs.publish }}
+      tag: ${{ steps.p.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: p
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          tag="v$ver"
+          build=true; publish=false
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then tag="${GITHUB_REF_NAME}"; fi
+            publish=true
+            # Versión de un PR sin aprobar: nunca se publica.
+            if [[ "$ver" == *-* ]]; then build=false; publish=false; fi
+            # Ya publicada con sus archivos: no se repite.
+            n="$(gh release view "$tag" --json assets --jq '.assets | length' 2>/dev/null || echo 0)"
+            if [ "$n" != "0" ]; then build=false; publish=false; fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "plan: build=$build publish=$publish tag=$tag"
+
   windows:
     name: Windows (instalador y portable)
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -53,6 +90,8 @@ jobs:
           path: dist/*
 
   linux:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     name: Linux (.deb, .AppImage y .tar.gz)
     runs-on: ubuntu-22.04
     steps:
@@ -73,6 +112,8 @@ jobs:
           path: dist/*
 
   macos:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     name: macOS (${{ matrix.arch }})
     runs-on: macos-latest
     strategy:
@@ -105,8 +146,8 @@ jobs:
 
   publicar:
     name: Publicar en Releases
-    needs: [windows, linux, macos]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [plan, windows, linux, macos]
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -117,15 +158,24 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Comprobar que la etiqueta coincide con la versión
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
           ver="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
-          test "v$ver" = "${GITHUB_REF_NAME}" || { echo "La etiqueta ${GITHUB_REF_NAME} no es la versión $ver"; exit 1; }
+          test "v$ver" = "$TAG" || { echo "La etiqueta $TAG no es la versión $ver"; exit 1; }
       - name: Sumas SHA-256
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Publicar
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --title "OmniLoad ${GITHUB_REF_NAME#v}" --generate-notes --verify-tag
+          # Si la release ya existe (creada a mano en la web), solo se suben
+          # los archivos.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --target "${GITHUB_SHA}" \
+              --title "OmniLoad ${TAG#v}" --generate-notes
+          fi

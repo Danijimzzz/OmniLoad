@@ -150,6 +150,32 @@ pub struct QueueSettings {
     pub held: bool,
     /// Días y horas en que se permite descargar.
     pub schedule: Schedule,
+    /// Descomprimir lo descargado.
+    pub extract: ExtractSettings,
+    /// Interfaces por las que descargar a la vez (vacío = la del sistema).
+    pub networks: Vec<String>,
+}
+
+/// Qué hacer con los archivos comprimidos que se terminan de descargar.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtractSettings {
+    /// Descomprimir solo al terminar un paquete.
+    pub enabled: bool,
+    /// Borrar los archivos comprimidos tras descomprimirlos bien.
+    pub delete_archives: bool,
+    /// Contraseñas a probar, una por elemento.
+    pub passwords: Vec<String>,
+}
+
+impl Default for ExtractSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            delete_archives: false,
+            passwords: Vec::new(),
+        }
+    }
 }
 
 impl Default for QueueSettings {
@@ -161,6 +187,8 @@ impl Default for QueueSettings {
             max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK,
             held: false,
             schedule: Schedule::default(),
+            extract: ExtractSettings::default(),
+            networks: Vec::new(),
         }
     }
 }

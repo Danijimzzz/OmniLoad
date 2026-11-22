@@ -39,7 +39,7 @@ mod state;
 
 pub use download::{Destination, Download, DownloadOptions, DownloadOutcome};
 pub use error::{Error, Result};
-pub use network::{Network, NetworkId};
+pub use network::{NetInterface, Network, NetworkId, interfaces, networks_for};
 pub use probe::{RemoteInfo, info_from_response, probe, probe_with};
 pub use progress::{NetworkStats, Progress};
 pub use rate::RateLimit;

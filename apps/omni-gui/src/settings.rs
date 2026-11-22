@@ -33,6 +33,14 @@ pub struct Settings {
     /// Conexiones como mucho a un mismo servidor (0 = sin tope).
     pub max_per_server: i32,
     pub watch_clipboard: bool,
+    /// Descomprimir lo descargado al terminar el paquete.
+    /// Interfaces de red por las que descargar a la vez (vacío = sistema).
+    pub networks: Vec<String>,
+    pub extract_enabled: bool,
+    /// Borrar los comprimidos tras descomprimirlos bien.
+    pub extract_delete: bool,
+    /// Contraseñas a probar, una por línea.
+    pub extract_passwords: String,
     /// Cerrar la ventana la esconde en la bandeja (si hay bandeja).
     pub close_to_tray: bool,
     /// Minimizar la ventana también la esconde en la bandeja.
@@ -197,6 +205,18 @@ pub struct RuleCfg {
     pub folder: PathBuf,
 }
 
+impl Settings {
+    /// Las contraseñas, una por línea y sin líneas vacías.
+    pub fn passwords(&self) -> Vec<String> {
+        self.extract_passwords
+            .lines()
+            .map(|l| l.trim_end_matches('\r'))
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -213,6 +233,10 @@ impl Default for Settings {
             connections: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
+            networks: Vec::new(),
+            extract_enabled: true,
+            extract_delete: false,
+            extract_passwords: String::new(),
             close_to_tray: true,
             minimize_to_tray: true,
             notify_done: true,
@@ -384,6 +408,8 @@ mod tests {
         assert_eq!(s.clip_popup, 1);
         assert!(s.clip_popup_autoclose);
         assert_eq!(s.max_per_server, 8);
+        assert!(s.extract_enabled);
+        assert!(!s.extract_delete);
         assert!(s.close_to_tray);
         assert!(s.minimize_to_tray);
         assert!(s.notify_done);

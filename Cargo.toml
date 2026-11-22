@@ -4,6 +4,7 @@ members = [
     "crates/omni-core",
     "crates/omni-grab",
     "crates/omni-hosts",
+    "crates/omni-extract",
     "crates/omni-api",
     "crates/omni-store",
     "crates/omni-queue",
@@ -14,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
@@ -25,6 +26,7 @@ omni-api = { path = "crates/omni-api" }
 omni-core = { path = "crates/omni-core" }
 omni-grab = { path = "crates/omni-grab" }
 omni-hosts = { path = "crates/omni-hosts" }
+omni-extract = { path = "crates/omni-extract" }
 omni-queue = { path = "crates/omni-queue" }
 omni-store = { path = "crates/omni-store" }
 omni-testserver = { path = "crates/omni-testserver" }

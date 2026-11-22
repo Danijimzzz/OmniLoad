@@ -160,11 +160,26 @@ En **Ajustes › Automático**:
 - **Horario de descargas.** Elige los días y las horas en que se puede
   descargar (por ejemplo, de 23:00 a 07:00). Fuera de ese horario todo queda en
   pausa, con el progreso guardado, y sigue solo cuando llega la hora.
+- **Descomprimir al terminar.** Cuando un paquete acaba de bajarse, abre los
+  `.zip`, `.7z` y `.rar` que traiga en una carpeta con su nombre (de un `.rar`
+  en varias partes abre el conjunto entero). Si el archivo tiene contraseña,
+  prueba las de tu lista (una por línea). Puedes pedir que borre los
+  comprimidos si todo salió bien. Para los `.rar` hace falta tener instalado
+  7-Zip, WinRAR o unrar.
 - **Carpeta según el tipo de archivo.** Vídeos a una carpeta, `.zip` a otra,
   lo que quieras: escribes las extensiones y eliges la carpeta.
 - **Al terminar todas las descargas**: no hacer nada, cerrar OmniLoad,
   suspender o apagar el equipo (con 60 segundos para cancelar).
 - **Iniciar con el sistema**, escondido en la bandeja.
+
+### Varias conexiones a internet a la vez
+
+En **Ajustes › General** puedes marcar dos o más redes del equipo (por
+ejemplo, wifi y cable, o el móvil por USB) y OmniLoad descarga por todas a la
+vez, sumando su velocidad. Con una o ninguna usa la red normal del sistema.
+En Windows depende de cómo reparta el sistema el tráfico entre interfaces; en
+Linux y macOS cada red sale siempre por su interfaz. Desde la terminal:
+`omni redes`.
 
 ### Hecho a tu gusto
 
@@ -225,12 +240,6 @@ En Linux necesitas además `libfontconfig-dev` y `libxkbcommon-dev`
 (`sudo apt install libfontconfig-dev libxkbcommon-dev` en Debian/Ubuntu). En
 GNOME, el icono de la bandeja necesita la extensión «AppIndicator» (Ubuntu ya
 la trae); el resto de escritorios lo muestran sin más.
-
-## Próximamente
-
-- Descomprimir automáticamente, con contraseñas.
-- Descargar usando varias conexiones a internet a la vez (por ejemplo, wifi y
-  cable juntos).
 
 ## Para desarrolladores
 

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::net::IpAddr;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,17 @@ impl Network {
             "sistema",
             default_client_builder().build()?,
         ))
+    }
+
+    /// Una red atada a una interfaz: todas sus conexiones salen por la
+    /// dirección de esa interfaz (por ejemplo, el wifi o el cable).
+    pub fn bound(id: NetworkId, iface: &NetInterface) -> Result<Self> {
+        let builder = default_client_builder().local_address(iface.ip);
+        // En Linux y macOS además se ata el socket a la interfaz, para que
+        // la ruta no dependa de la tabla de rutas.
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let builder = builder.interface(&iface.name);
+        Ok(Self::with_client(id, iface.name.clone(), builder.build()?))
     }
 
     /// Una red con un cliente HTTP ya construido (útil en pruebas).
@@ -84,4 +96,54 @@ pub fn default_client_builder() -> reqwest::ClientBuilder {
         .user_agent(concat!("OmniLoad/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(30))
+}
+
+/// Una interfaz de red del equipo con la que se puede descargar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetInterface {
+    pub name: String,
+    pub ip: IpAddr,
+}
+
+/// Las interfaces activas con dirección propia (sin la de bucle local ni las
+/// de enlace local). Una por interfaz: prefiere IPv4.
+pub fn interfaces() -> Vec<NetInterface> {
+    let Ok(all) = if_addrs::get_if_addrs() else {
+        return Vec::new();
+    };
+    let mut out: Vec<NetInterface> = Vec::new();
+    for i in all {
+        let ip = i.ip();
+        let usable = match ip {
+            IpAddr::V4(v4) => !v4.is_loopback() && !v4.is_link_local() && !v4.is_unspecified(),
+            IpAddr::V6(v6) => {
+                !v6.is_loopback() && !v6.is_unspecified() && (v6.segments()[0] & 0xffc0) != 0xfe80
+            }
+        };
+        if !usable {
+            continue;
+        }
+        match out.iter_mut().find(|n| n.name == i.name) {
+            Some(n) if n.ip.is_ipv6() && ip.is_ipv4() => n.ip = ip,
+            Some(_) => {}
+            None => out.push(NetInterface { name: i.name, ip }),
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// Las redes pedidas por nombre de interfaz. Las que ya no existen se
+/// saltan; si no queda ninguna, vacío (= la red del sistema).
+pub fn networks_for(names: &[String]) -> Vec<Network> {
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let present = interfaces();
+    names
+        .iter()
+        .filter_map(|n| present.iter().find(|i| &i.name == n))
+        .enumerate()
+        .filter_map(|(k, i)| Network::bound(NetworkId(k as u32), i).ok())
+        .collect()
 }
