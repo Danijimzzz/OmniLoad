@@ -80,6 +80,16 @@ enum Command {
         #[arg(required = true, value_name = "URL_O_ARCHIVO")]
         links: Vec<String>,
     },
+    /// Diagnóstico de BitTorrent: añade un magnet o un .torrent y cuenta
+    /// durante unos segundos pares, velocidad y errores. Baja datos de verdad
+    /// (un trozo del primer archivo) a una carpeta temporal que se borra.
+    TorrentDebug {
+        #[arg(value_name = "MAGNET_O_ARCHIVO_TORRENT")]
+        source: String,
+        /// Cuánto tiempo mirar, en segundos.
+        #[arg(long, default_value_t = 60)]
+        segundos: u64,
+    },
     /// El servicio en segundo plano.
     Service {
         #[command(subcommand)]
@@ -186,7 +196,7 @@ fn init_logging(verbose: bool) {
     let default = if verbose {
         "info,omni_core=debug"
     } else {
-        "warn"
+        "warn,librqbit=info"
     };
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default));
@@ -202,6 +212,7 @@ async fn run(cli: Cli) -> Result<ExitCode> {
         Command::Get(args) => get(args).await,
         Command::Service { action } => service(action).await,
         Command::Check { links } => check(&links).await,
+        Command::TorrentDebug { source, segundos } => torrent_debug(&source, segundos).await,
         cmd => {
             let c = connect().await?;
             remote(&c, cmd).await?;
@@ -294,7 +305,10 @@ async fn remote(c: &Client, cmd: Command) -> Result<()> {
                 added.added
             );
         }
-        Command::Get(_) | Command::Service { .. } | Command::Check { .. } => unreachable!(),
+        Command::Get(_)
+        | Command::Service { .. }
+        | Command::Check { .. }
+        | Command::TorrentDebug { .. } => unreachable!(),
     }
     Ok(())
 }
@@ -325,6 +339,20 @@ fn links_text(args: &[String]) -> Result<String> {
 }
 
 /// `omni check`: comprueba enlaces aquí mismo, sin servicio.
+async fn torrent_debug(source: &str, seconds: u64) -> Result<ExitCode> {
+    let text = links_text(&[source.to_owned()])?;
+    let url = omni_grab::extract_urls(&text)
+        .into_iter()
+        .next()
+        .context("no es un magnet ni un archivo .torrent")?;
+    let net = omni_core::Network::system_default()?;
+    println!("enlace: {url}");
+    omni_hosts::Torrents::new()
+        .debug(net.client(), &url, seconds, |l| println!("{l}"))
+        .await?;
+    Ok(ExitCode::SUCCESS)
+}
+
 async fn check(links: &[String]) -> Result<ExitCode> {
     let text = links_text(links)?;
     let net = omni_core::Network::system_default()?;

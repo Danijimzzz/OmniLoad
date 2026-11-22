@@ -166,6 +166,83 @@ impl Torrents {
     }
 }
 
+impl Torrents {
+    /// Diagnóstico: añade el torrent y, durante `seconds`, cuenta lo que
+    /// pasa (pares, velocidad, errores) con `say`. Baja datos de verdad (solo
+    /// el primer archivo) a una carpeta temporal que se borra al terminar.
+    pub async fn debug(
+        &self,
+        client: &reqwest::Client,
+        url: &Url,
+        seconds: u64,
+        mut say: impl FnMut(String),
+    ) -> omni_core::Result<()> {
+        let source = Self::source(client, url).await?;
+        match &source {
+            Source::Magnet(_) => say("origen: magnet".into()),
+            Source::File(b) => say(format!("origen: archivo .torrent de {} bytes", b.len())),
+        }
+        let session = self.session().await?;
+        say("sesión de BitTorrent iniciada".into());
+        let dir =
+            std::env::temp_dir().join(format!("omniload-torrent-debug-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let added = session
+            .add_torrent(
+                source.add(),
+                Some(AddTorrentOptions {
+                    overwrite: true,
+                    only_files: Some(vec![0]),
+                    output_folder: Some(dir.to_string_lossy().into_owned()),
+                    initial_peers: self.initial_peers(),
+                    ..AddTorrentOptions::default()
+                }),
+            )
+            .await
+            .map_err(|e| fail(format!("{e:#}")))?;
+        let (id, handle) = match added {
+            AddTorrentResponse::Added(id, h) | AddTorrentResponse::AlreadyManaged(id, h) => (id, h),
+            AddTorrentResponse::ListOnly(_) => return Err(fail("respuesta inesperada")),
+        };
+        say(format!(
+            "torrent añadido: {}",
+            handle.name().unwrap_or_else(|| "(sin nombre aún)".into())
+        ));
+        for t in 0..=(seconds / 2) {
+            let st = handle.stats();
+            let mut line = format!(
+                "[{:>3}s] estado={} bajado={} de {} bytes",
+                t * 2,
+                st.state,
+                st.progress_bytes,
+                st.total_bytes
+            );
+            if let Some(live) = &st.live {
+                let p = &live.snapshot.peer_stats;
+                line.push_str(&format!(
+                    " | velocidad={} | pares: en cola={} conectando={} vivos={} (semillas {}) vistos={} muertos={} descartados={}",
+                    live.download_speed,
+                    p.queued,
+                    p.connecting,
+                    p.live,
+                    p.live_seeders,
+                    p.seen,
+                    p.dead,
+                    p.not_needed
+                ));
+            }
+            if let Some(e) = &st.error {
+                line.push_str(&format!(" | ERROR: {e}"));
+            }
+            say(line);
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+        let _ = session.delete(TorrentIdOrHash::Id(id), true).await;
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+}
+
 impl Default for Torrents {
     fn default() -> Self {
         Self::new()
