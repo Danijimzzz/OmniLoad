@@ -100,6 +100,7 @@ struct App {
     /// Si el inicio con el sistema está puesto (se lee una vez al arrancar).
     autostart_on: Cell<bool>,
     rule_rows: Rc<VecModel<RuleRow>>,
+    net_rows: Rc<VecModel<NetRow>>,
     col_rows: Rc<VecModel<ColState>>,
     grab_col_rows: Rc<VecModel<ColState>>,
     /// Arrancó con `--minimizado` (inicio con el sistema).
@@ -869,6 +870,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fill_rules(&rule_rows, &settings.file_rules);
     ui.set_rules(ModelRc::from(rule_rows.clone()));
 
+    let net_rows: Rc<VecModel<NetRow>> = Rc::new(VecModel::default());
+    fill_nets(&net_rows, &settings.networks);
+    ui.set_nets(ModelRc::from(net_rows.clone()));
+
     let col_rows: Rc<VecModel<ColState>> = Rc::new(VecModel::default());
     settings.columns = settings::fix_columns(Table::Downloads, &settings.columns);
     fill_columns(Table::Downloads, &col_rows, &settings.columns);
@@ -909,6 +914,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         countdown: Cell::new(None),
         autostart_on: Cell::new(automation::autostart_enabled()),
         rule_rows,
+        net_rows,
         col_rows,
         grab_col_rows,
         start_hidden,
@@ -1137,6 +1143,7 @@ fn apply_queue_settings(manager: &Manager, s: &Settings) {
         q.max_active = s.max_active.max(1) as usize;
         q.connections = s.connections.max(1) as usize;
         q.max_per_server = s.max_per_server.max(0) as usize;
+        q.networks = s.networks.clone();
         q.extract.enabled = s.extract_enabled;
         q.extract.delete_archives = s.extract_delete;
         q.extract.passwords = s.passwords();
@@ -1244,6 +1251,19 @@ fn read_columns(model: &VecModel<ColState>) -> Vec<settings::ColCfg> {
 }
 
 /// Pone al día la lista de reglas de Ajustes › Automático.
+/// Las interfaces del equipo, con las elegidas marcadas.
+fn fill_nets(model: &VecModel<NetRow>, chosen: &[String]) {
+    let rows: Vec<NetRow> = omni_core::interfaces()
+        .into_iter()
+        .map(|i| NetRow {
+            on: chosen.contains(&i.name),
+            name: i.name.into(),
+            ip: i.ip.to_string().into(),
+        })
+        .collect();
+    model.set_vec(rows);
+}
+
 fn fill_rules(model: &VecModel<RuleRow>, rules: &[settings::RuleCfg]) {
     let rows: Vec<RuleRow> = rules
         .iter()
@@ -1697,6 +1717,27 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
         move |day| {
             let Some(ui) = app.ui() else { return };
             set_schedule_days(&ui, ui.get_schedule_days() ^ (1 << day));
+            app.save_settings();
+        }
+    });
+    ui.on_nets_refresh({
+        let app = app.clone();
+        move || fill_nets(&app.net_rows, &app.settings.borrow().networks)
+    });
+    ui.on_net_toggled({
+        let app = app.clone();
+        move |i| {
+            let Some(row) = app.net_rows.row_data(i as usize) else {
+                return;
+            };
+            {
+                let mut s = app.settings.borrow_mut();
+                s.networks.retain(|n| n.as_str() != row.name.as_str());
+                if !row.on {
+                    s.networks.push(row.name.to_string());
+                }
+            }
+            fill_nets(&app.net_rows, &app.settings.borrow().networks);
             app.save_settings();
         }
     });

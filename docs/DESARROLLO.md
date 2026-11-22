@@ -131,6 +131,8 @@ omni remove <id...>                              # quita de la lista (no borra a
 omni limit 2M          omni limit off            # límite global
 omni limit 500K --id 3                           # límite de una descarga
 omni grab <url o archivo.txt>...                 # al capturador de la ventana
+omni redes             omni redes wlan0 eth0     # interfaces / descargar por varias a la vez
+omni redes --sistema                             # volver a la red del sistema
 omni service status    omni service stop
 ```
 
@@ -319,21 +321,39 @@ archivo del sistema, lo baja a una carpeta temporal, comprueba su SHA-256 con
 `SHA256SUMS.txt`, lo ejecuta (instalación silenciosa en Windows) y reabre la
 app. Solo sigue enlaces de GitHub y solo con la aceptación del usuario.
 
-### Preparado para varias redes
-
-La descarga multi-red irá al final del plan, pero el motor ya trabaja con
-varias redes:
+### Varias redes (fase 7)
 
 - `DownloadOptions::networks` acepta una lista de `Network`, cada una con su
   propio cliente HTTP, y el motor abre sus conexiones en cada una.
 - La cola de bloques sabe qué red descarga cada bloque y, al competir por el
-  último trozo, prefiere ayudar a otra red.
-- El límite de conexiones y el progreso van por red.
-- La prueba `splits_blocks_between_networks` descarga con dos redes a la vez.
+  último trozo, prefiere ayudar a otra red. El límite de conexiones y el
+  progreso van por red.
+- `omni_core::interfaces()` lista las interfaces activas con dirección propia
+  (crate `if-addrs`; sin bucle local ni enlace local; una por interfaz,
+  prefiriendo IPv4). `Network::bound` construye el cliente atado a la
+  dirección (`local_address`) y, en Linux y macOS, a la interfaz
+  (`SO_BINDTODEVICE` / `IP_BOUND_IF`). En Windows solo se ata la dirección de
+  origen, así que el reparto lo decide la tabla de rutas.
+- `QueueSettings::networks` guarda los nombres de interfaz; al lanzar cada
+  descarga la cola llama a `networks_for` (las que ya no existen se saltan; si
+  no queda ninguna, la red del sistema). Se aplica a las descargas que
+  empiezan después del cambio.
+- Pruebas: `splits_blocks_between_networks` y
+  `download_through_two_bound_networks` (dos redes atadas a `lo`, solo Linux).
 
-Lo que faltará entonces es descubrir las interfaces del equipo y construir el
-cliente HTTP de cada una atado a su interfaz (en `platform/`), sin tocar la
-cola ni el motor.
+## Descomprimir (`omni-extract`)
+
+- ZIP (crate `zip`, AES y ZipCrypto) y 7z (`sevenz-rust2`) se abren por
+  dentro; RAR y cualquier otro formato con 7-Zip, WinRAR o `unrar` si están
+  instalados (`find_tool`).
+- `entry_points` elige qué abrir (de un RAR en partes, solo la primera);
+  `extract` prueba sin contraseña y luego con cada una de la lista, y deja el
+  contenido en `<carpeta>/<nombre sin extensión>/` (o `nombre (2)`). Los
+  nombres de dentro nunca salen de la carpeta de destino (`safe_join`).
+- La cola (`QueueSettings::extract`) lo lanza cuando todas las descargas del
+  mismo paquete y carpeta han terminado; no abre dos veces el mismo archivo y
+  deja el resultado en el detalle de la fila. Con `delete_archives`, borra el
+  archivo y sus partes (`parts_of`) solo si salió bien.
 
 ## Estructura
 
@@ -341,6 +361,7 @@ cola ni el motor.
 crates/
   omni-core/        motor de descarga (biblioteca)
     src/platform/   todo el código propio de cada sistema operativo
+  omni-extract/     descomprimir ZIP, 7z y RAR (con contraseñas)
   omni-grab/        capturador de enlaces: comprobación, paquetes
   omni-hosts/       plugins de hosts (Mega, Drive, torrents, yt-dlp…)
   omni-store/       base de datos SQLite (lista, ajustes, servidores)

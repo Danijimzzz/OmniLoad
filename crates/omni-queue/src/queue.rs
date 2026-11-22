@@ -700,10 +700,14 @@ impl Inner {
     /// Lanza (o relanza) una descarga.
     fn launch(self: &Arc<Self>, e: &mut Entry) {
         let run_id = self.next_run.fetch_add(1, Ordering::Relaxed) + 1;
-        let connections = self.settings().connections;
+        let (connections, nets) = {
+            let s = self.settings();
+            (s.connections, s.networks.clone())
+        };
         e.connections = connections;
         let mut opts = DownloadOptions {
             connections_per_network: connections,
+            networks: omni_core::networks_for(&nets),
             ..self.base.clone()
         };
         opts.rate_limits
@@ -864,7 +868,8 @@ impl Inner {
         for archive in archives {
             let me = Arc::clone(self);
             let cfg = cfg.clone();
-            self.rt.spawn_blocking(move || me.extract_one(&archive, &cfg));
+            self.rt
+                .spawn_blocking(move || me.extract_one(&archive, &cfg));
         }
     }
 
@@ -900,7 +905,10 @@ impl Inner {
             }
         };
         let mut entries = self.entries();
-        if let Some(e) = entries.iter_mut().find(|e| e.dir.join(&e.name) == archive.path) {
+        if let Some(e) = entries
+            .iter_mut()
+            .find(|e| e.dir.join(&e.name) == archive.path)
+        {
             e.detail = note;
             self.save(e);
         }

@@ -68,6 +68,16 @@ enum Command {
     },
     /// Límite de velocidad: global, o de unas descargas con --id.
     Limit(LimitArgs),
+    /// Redes (interfaces) por las que se descarga a la vez. Sin argumentos:
+    /// lista las que hay en este equipo y las que están en uso.
+    #[command(name = "redes")]
+    Networks {
+        /// Nombres de interfaz a usar a la vez (mira la lista).
+        names: Vec<String>,
+        /// Volver a la red del sistema.
+        #[arg(long)]
+        sistema: bool,
+    },
     /// Comprueba enlaces sin descargarlos: nombre, tamaño y si están
     /// disponibles. Acepta también archivos .txt o .html con enlaces.
     Check {
@@ -213,6 +223,10 @@ async fn run(cli: Cli) -> Result<ExitCode> {
         Command::Service { action } => service(action).await,
         Command::Check { links } => check(&links).await,
         Command::TorrentDebug { source, segundos } => torrent_debug(&source, segundos).await,
+        Command::Networks { names, sistema } if names.is_empty() && !sistema => {
+            list_networks().await;
+            Ok(ExitCode::SUCCESS)
+        }
         cmd => {
             let c = connect().await?;
             remote(&c, cmd).await?;
@@ -305,12 +319,43 @@ async fn remote(c: &Client, cmd: Command) -> Result<()> {
                 added.added
             );
         }
+        Command::Networks { names, .. } => {
+            let found = omni_core::interfaces();
+            if let Some(bad) = names.iter().find(|n| !found.iter().any(|i| &i.name == *n)) {
+                anyhow::bail!("no hay ninguna interfaz «{bad}»; mira `omni redes`");
+            }
+            let mut s = c.settings().await?;
+            s.networks = names;
+            c.set_settings(&s).await?;
+        }
         Command::Get(_)
         | Command::Service { .. }
         | Command::Check { .. }
         | Command::TorrentDebug { .. } => unreachable!(),
     }
     Ok(())
+}
+
+/// Las interfaces de este equipo y cuáles usa el servicio.
+async fn list_networks() {
+    let in_use: Vec<String> = match connect().await {
+        Ok(c) => c.settings().await.map(|s| s.networks).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let found = omni_core::interfaces();
+    if found.is_empty() {
+        println!("No se encontró ninguna interfaz de red con dirección.");
+        return;
+    }
+    for i in found {
+        let mark = if in_use.contains(&i.name) { "*" } else { " " };
+        println!("{mark} {:<24} {}", i.name, i.ip);
+    }
+    if in_use.is_empty() {
+        println!("(sin marcas: se descarga por la red del sistema)");
+    } else {
+        println!("(* = en uso)");
+    }
 }
 
 /// Los enlaces de los argumentos: URLs sueltas o archivos con enlaces.

@@ -175,6 +175,13 @@ export struct ColState {
     shown: bool,
 }
 
+// Una interfaz de red en Ajustes › General.
+struct NetRow {
+    name: string,
+    ip: string,
+    on: bool,
+}
+
 // Una regla por tipo de archivo en Ajustes › Automático.
 struct RuleRow {
     exts: string,
@@ -1617,6 +1624,9 @@ export component AppWindow inherits Window {
     in property <bool> schedule-error: false;
     callback schedule-day-toggled(int);
     in-out property <[RuleRow]> rules;
+    in-out property <[NetRow]> nets;
+    callback net-toggled(int);
+    callback nets-refresh();
     callback rule-add();
     callback rule-remove(int);
     callback rule-exts-edited(int, string);
@@ -2403,6 +2413,16 @@ export component AppWindow inherits Window {
                             maximum: 64;
                             value <=> root.max-per-server;
                         }
+                    }
+                    SettingRow {
+                        title: "Descargar por varias redes a la vez";
+                        subtitle: "Marca dos o más para sumar su velocidad (por ejemplo, wifi y cable, o el móvil por USB). Con una o ninguna se usa la red normal del sistema. Cada red abre sus propias conexiones por archivo. Solo cuentan las descargas que se empiecen después de cambiarlo.";
+                        Btn { text: "Buscar de nuevo"; clicked => { root.nets-refresh(); } }
+                    }
+                    for n[i] in root.nets: Check {
+                        checked: n.on;
+                        label: n.name + "  (" + n.ip + ")";
+                        toggled => { root.net-toggled(i); }
                     }
                     SettingRow {
                         title: "Cerrar a la bandeja";

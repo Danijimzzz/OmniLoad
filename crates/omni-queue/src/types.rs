@@ -152,6 +152,8 @@ pub struct QueueSettings {
     pub schedule: Schedule,
     /// Descomprimir lo descargado.
     pub extract: ExtractSettings,
+    /// Interfaces por las que descargar a la vez (vacío = la del sistema).
+    pub networks: Vec<String>,
 }
 
 /// Qué hacer con los archivos comprimidos que se terminan de descargar.
@@ -186,6 +188,7 @@ impl Default for QueueSettings {
             held: false,
             schedule: Schedule::default(),
             extract: ExtractSettings::default(),
+            networks: Vec::new(),
         }
     }
 }

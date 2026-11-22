@@ -34,6 +34,8 @@ pub struct Settings {
     pub max_per_server: i32,
     pub watch_clipboard: bool,
     /// Descomprimir lo descargado al terminar el paquete.
+    /// Interfaces de red por las que descargar a la vez (vacío = sistema).
+    pub networks: Vec<String>,
     pub extract_enabled: bool,
     /// Borrar los comprimidos tras descomprimirlos bien.
     pub extract_delete: bool,
@@ -231,6 +233,7 @@ impl Default for Settings {
             connections: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
+            networks: Vec::new(),
             extract_enabled: true,
             extract_delete: false,
             extract_passwords: String::new(),
