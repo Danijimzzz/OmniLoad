@@ -87,6 +87,25 @@ Puedes elegir el aviso **compacto**, el **completo** con la lista de enlaces, o
 quitarlo. Al terminar de comprobar se desvanece poco a poco (y si pasas el
 ratón por encima, se queda).
 
+### Descarga de casi cualquier sitio
+
+Pega el enlace y OmniLoad averigua solo de dónde viene. Funciona con:
+
+- **Enlaces directos** de cualquier web.
+- **Pixeldrain, Archive.org, Dropbox y Mediafire.**
+- **Google Drive** (archivos compartidos) y **Gofile**.
+- **Mega**, con su cifrado: descarga y descifra por ti.
+- **OneDrive** (enlaces compartidos) y **1fichier** en modo gratuito: espera
+  lo que pida la página y sigue solo.
+- **Vídeos de YouTube y de cientos de webs más**, con
+  [yt-dlp](https://github.com/yt-dlp/yt-dlp) (tienes que tenerlo instalado).
+- **Torrents**: enlaces `magnet:` y archivos `.torrent`, en la misma lista
+  que todo lo demás. Ojo: en BitTorrent tu dirección IP es visible para los
+  demás participantes, es así como funciona el protocolo.
+
+Todo aparece en la misma lista, con los mismos controles de pausa, prioridad y
+límite de velocidad.
+
 ### Descargas
 
 - Varias descargas a la vez, y tú decides cuántas.
@@ -126,12 +145,13 @@ del sistema, junto al reloj, y sigue descargando y vigilando lo que copias.
 - ¿Prefieres que la X cierre el programa? Desactívalo en **Ajustes ›
   General**.
 
-### Versión
+### Versión y actualizaciones
 
 En **Ajustes › Versión** ves qué versión tienes. Al abrir, OmniLoad mira en
 GitHub si hay una nueva y, si la hay, te lo dice con un botón en la barra de
-arriba. Nunca descarga ni instala nada por su cuenta: tú decides. Si no quieres
-que mire, se desactiva ahí mismo.
+arriba. Pulsas **Actualizar ahora** y OmniLoad descarga el instalador, comprueba
+que no está dañado, se actualiza y vuelve a abrirse solo. Nunca hace nada sin
+que lo aceptes. Si no quieres que mire, se desactiva ahí mismo.
 
 ### Que se haga solo
 
@@ -178,11 +198,18 @@ descargas y dónde se muestran los detalles.
 
 ## Descargar
 
-Aún no hay instaladores publicados: llegarán a la página de
-[Releases](https://github.com/Danijimzzz/OmniLoad/releases) para Windows, macOS
-y Linux.
+Ve a la página de [Releases](https://github.com/Danijimzzz/OmniLoad/releases)
+y elige el de tu sistema:
 
-Mientras tanto puedes compilarlo tú mismo en dos pasos:
+| Sistema | Archivo |
+| --- | --- |
+| **Windows** | `OmniLoad-Setup-….exe`: instalador, sin permisos de administrador |
+| **macOS** | `OmniLoad-….dmg`: arrastra OmniLoad a Aplicaciones |
+| **Linux** | `.deb` (Debian/Ubuntu), `.AppImage` o `.tar.gz` |
+
+Después, OmniLoad se actualiza solo desde dentro.
+
+### ¿Prefieres compilarlo?
 
 1. Instala [Rust](https://rustup.rs).
 2. Descarga este proyecto y, dentro de su carpeta, ejecuta:
@@ -194,9 +221,6 @@ Mientras tanto puedes compilarlo tú mismo en dos pasos:
    y abre `target/release/omniload` (`omniload.exe` en Windows). Los tres
    programas tienen que estar en la misma carpeta, como quedan al compilar.
 
-   (`cargo run --release -p omni-gui` también vale, pero sin `omnid` las
-   descargas se paran al cerrar la ventana.)
-
 En Linux necesitas además `libfontconfig-dev` y `libxkbcommon-dev`
 (`sudo apt install libfontconfig-dev libxkbcommon-dev` en Debian/Ubuntu). En
 GNOME, el icono de la bandeja necesita la extensión «AppIndicator» (Ubuntu ya
@@ -204,7 +228,6 @@ la trae); el resto de escritorios lo muestran sin más.
 
 ## Próximamente
 
-- Descargar de Mega, Gofile, Google Drive y Mediafire.
 - Descomprimir automáticamente, con contraseñas.
 - Descargar usando varias conexiones a internet a la vez (por ejemplo, wifi y
   cable juntos).
