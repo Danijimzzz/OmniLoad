@@ -1936,7 +1936,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Panel {
                     horizontal-stretch: 1;
-                    min-width: 0px;
+                    min-width: 300px;
                     clip: true;
                     VerticalLayout {
                         ColsHeader {
@@ -1970,7 +1970,9 @@ export component AppWindow inherits Window {
                     dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
                 }
                 if root.properties-panel == 1 && root.sel-kind > 0: Panel {
-                    width: min(root.side-w, max(240px, root.width - 620px));
+                    preferred-width: root.side-w;
+                    min-width: 240px;
+                    horizontal-stretch: 0;
                     VerticalLayout {
                         padding: 16px;
                         spacing: 10px;
@@ -2115,7 +2117,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Panel {
                     horizontal-stretch: 1;
-                    min-width: 0px;
+                    min-width: 300px;
                     clip: true;
                     VerticalLayout {
                         ColsHeader {
@@ -2150,7 +2152,9 @@ export component AppWindow inherits Window {
                     dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
                 }
                 if root.properties-panel == 1 && root.pkg-selected: Panel {
-                    width: min(root.side-w, max(240px, root.width - 620px));
+                    preferred-width: root.side-w;
+                    min-width: 240px;
+                    horizontal-stretch: 0;
                     VerticalLayout {
                         padding: 16px;
                         spacing: 8px;
