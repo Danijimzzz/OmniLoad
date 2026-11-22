@@ -512,7 +512,9 @@ async fn finished_zip_is_extracted_with_password_and_deleted() {
         s.extract.passwords = vec!["mala".into(), "secreto".into()];
         s.extract.delete_archives = true;
     });
-    let id = q.add(new(server.url("datos.zip"), dir.path(), true)).unwrap();
+    let id = q
+        .add(new(server.url("datos.zip"), dir.path(), true))
+        .unwrap();
     wait_for(&q, id, State::Done).await;
     let out = dir.path().join("datos").join("dentro.txt");
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -536,7 +538,9 @@ async fn extraction_off_leaves_the_zip_alone() {
     let dir = tempfile::tempdir().unwrap();
     let q = memory_queue();
     q.update_settings(|s| s.extract.enabled = false);
-    let id = q.add(new(server.url("datos.zip"), dir.path(), true)).unwrap();
+    let id = q
+        .add(new(server.url("datos.zip"), dir.path(), true))
+        .unwrap();
     wait_for(&q, id, State::Done).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(dir.path().join("datos.zip").exists());
