@@ -30,8 +30,6 @@ pub struct Settings {
     pub single_file_folders: bool,
     pub max_active: i32,
     pub connections: i32,
-    /// Límite de velocidad global: posición en [`SPEED_LIMITS`].
-    pub speed_limit: i32,
     /// Conexiones como mucho a un mismo servidor (0 = sin tope).
     pub max_per_server: i32,
     pub watch_clipboard: bool,
@@ -87,7 +85,6 @@ impl Default for Settings {
             single_file_folders: true,
             max_active: 3,
             connections: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
-            speed_limit: 0,
             max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
             keep_downloading: false,
@@ -129,8 +126,8 @@ impl Settings {
     }
 }
 
-/// Opciones del límite de velocidad global (KiB/s; 0 = sin límite). El
-/// orden coincide con el desplegable "Límite" de la ventana.
+/// Valores del desplegable «Límite» (KiB/s; 0 = sin límite). Además se puede
+/// escribir cualquier otro.
 pub const SPEED_LIMITS: [u64; 10] = [0, 256, 512, 1024, 2048, 5120, 10240, 20480, 51200, 102400];
 
 /// Límite en bytes por segundo de una posición del desplegable.
@@ -139,19 +136,46 @@ pub fn speed_limit_bytes(index: i32) -> Option<u64> {
     (kib > 0).then_some(kib * 1024)
 }
 
-/// Posición del desplegable que corresponde a un límite: la exacta o, si se
-/// puso otro valor desde la terminal, la más cercana.
-pub fn speed_limit_index(bytes_per_sec: Option<u64>) -> i32 {
-    let Some(b) = bytes_per_sec.filter(|&b| b > 0) else {
-        return 0;
+/// Lo que se escribe en el cuadro del límite: «Sin límite», «700 KB/s» o
+/// «3 MB/s».
+pub fn speed_text(limit: Option<u64>) -> String {
+    let Some(b) = limit.filter(|&b| b > 0) else {
+        return "Sin límite".into();
     };
     let kib = b / 1024;
-    SPEED_LIMITS
-        .iter()
-        .enumerate()
-        .skip(1)
-        .min_by_key(|(_, l)| l.abs_diff(kib))
-        .map_or(0, |(i, _)| i as i32)
+    if kib >= 1024 && kib % 1024 == 0 {
+        format!("{} MB/s", kib / 1024)
+    } else if kib >= 1 {
+        format!("{kib} KB/s")
+    } else {
+        format!("{b} B/s")
+    }
+}
+
+/// Entiende lo que escribe el usuario: «700», «700 KB/s», «3 mb», «1,5 M»,
+/// «0» o «sin límite». Un número solo son KB/s. `Err` si no se entiende.
+pub fn parse_speed(text: &str) -> Result<Option<u64>, ()> {
+    let t = text.trim().to_lowercase();
+    if t.is_empty() || t.starts_with("sin") || t.starts_with("no") || t == "∞" {
+        return Ok(None);
+    }
+    let t = t.trim_end_matches("/s").trim_end_matches("ps").trim();
+    let split = t
+        .find(|c: char| !(c.is_ascii_digit() || c == ',' || c == '.'))
+        .unwrap_or(t.len());
+    let (num, unit) = t.split_at(split);
+    let value: f64 = num.replace(',', ".").parse().map_err(|_| ())?;
+    let mult = match unit.trim().trim_end_matches('b').trim_end_matches('i') {
+        "" | "k" => 1024.0,
+        "m" => 1024.0 * 1024.0,
+        "g" => 1024.0 * 1024.0 * 1024.0,
+        _ => return Err(()),
+    };
+    if !value.is_finite() || value < 0.0 {
+        return Err(());
+    }
+    let bytes = (value * mult) as u64;
+    Ok((bytes > 0).then_some(bytes))
 }
 
 impl Settings {
@@ -227,7 +251,6 @@ mod tests {
         assert!(s.package_folders);
         assert_eq!(s.clip_popup, 1);
         assert!(s.clip_popup_autoclose);
-        assert_eq!(s.speed_limit, 0);
         assert_eq!(s.max_per_server, 8);
         assert!(s.close_to_tray);
         assert!(s.minimize_to_tray);
@@ -250,17 +273,24 @@ mod tests {
     }
 
     #[test]
-    fn speed_limit_options() {
+    fn speed_limit_text_round_trip() {
         assert_eq!(speed_limit_bytes(0), None);
         assert_eq!(speed_limit_bytes(3), Some(1024 * 1024));
         assert_eq!(speed_limit_bytes(99), None);
-        assert_eq!(speed_limit_bytes(-1), None);
-        assert_eq!(speed_limit_index(None), 0);
-        assert_eq!(speed_limit_index(Some(1024 * 1024)), 3);
-        // 300 KiB/s no está: se enseña la opción más cercana (256 KB/s).
-        assert_eq!(speed_limit_index(Some(300 * 1024)), 1);
-        for i in 0..SPEED_LIMITS.len() as i32 {
-            assert_eq!(speed_limit_index(speed_limit_bytes(i)), i);
+        assert_eq!(parse_speed("Sin límite"), Ok(None));
+        assert_eq!(parse_speed("0"), Ok(None));
+        assert_eq!(parse_speed("700"), Ok(Some(700 * 1024)));
+        assert_eq!(parse_speed("700 KB/s"), Ok(Some(700 * 1024)));
+        assert_eq!(parse_speed("3 mb/s"), Ok(Some(3 * 1024 * 1024)));
+        assert_eq!(parse_speed("1,5 M"), Ok(Some(1536 * 1024)));
+        assert_eq!(parse_speed("MiB"), Err(()));
+        assert_eq!(parse_speed("abc"), Err(()));
+        assert_eq!(parse_speed("5 xb"), Err(()));
+        assert_eq!(speed_text(None), "Sin límite");
+        assert_eq!(speed_text(Some(3 * 1024 * 1024)), "3 MB/s");
+        assert_eq!(speed_text(Some(700 * 1024)), "700 KB/s");
+        for l in [None, Some(700 * 1024), Some(2 * 1024 * 1024)] {
+            assert_eq!(parse_speed(&speed_text(l)), Ok(l));
         }
     }
 }

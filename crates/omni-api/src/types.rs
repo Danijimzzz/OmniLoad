@@ -100,3 +100,26 @@ pub struct TakeResponse {
     /// Archivos que no se pudieron añadir, con el motivo.
     pub errors: Vec<String>,
 }
+
+/// Lo que el servicio manda a una ventana para ponerla al día sin repetir
+/// toda la lista (con miles de descargas serían megas cada cuarto de
+/// segundo).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JobsDelta {
+    /// Los ids en orden, solo si cambiaron (altas, bajas, reordenación) o es
+    /// la primera vez.
+    pub order: Option<Vec<u64>>,
+    /// Las descargas nuevas o que cambiaron desde la última respuesta.
+    pub jobs: Vec<omni_queue::JobInfo>,
+}
+
+/// Petición de [`JobsDelta`].
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DeltaRequest {
+    /// Identifica a la ventana que pregunta (el servicio recuerda lo último
+    /// que le mandó).
+    pub client: String,
+    /// Empezar de cero: mandar todo.
+    #[serde(default)]
+    pub reset: bool,
+}

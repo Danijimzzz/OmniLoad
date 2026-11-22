@@ -677,7 +677,6 @@ impl App {
         s.properties_panel = ui.get_properties_panel();
         s.max_active = ui.get_max_active();
         s.connections = ui.get_connections();
-        s.speed_limit = ui.get_speed_limit();
         s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
         s.keep_downloading = ui.get_keep_downloading();
@@ -977,11 +976,6 @@ fn apply_queue_settings(manager: &Manager, s: &Settings) {
     manager.update_settings(|q| {
         q.max_active = s.max_active.max(1) as usize;
         q.connections = s.connections.max(1) as usize;
-        // Un límite puesto desde la terminal (por ejemplo 300K) no está en
-        // el desplegable: se respeta mientras no se elija otra opción.
-        if settings::speed_limit_index(q.speed_limit) != s.speed_limit {
-            q.speed_limit = settings::speed_limit_bytes(s.speed_limit);
-        }
         q.max_per_server = s.max_per_server.max(0) as usize;
         // Con una hora mal escrita se deja el horario como estaba.
         if let Some(schedule) = s.schedule() {
@@ -997,9 +991,10 @@ fn sync_queue_settings(ui: &AppWindow, manager: &Manager) {
         return;
     }
     let q = manager.settings();
-    let speed = settings::speed_limit_index(q.speed_limit);
-    if ui.get_speed_limit() != speed {
-        ui.set_speed_limit(speed);
+    // El límite también lo cambia la terminal; no se pisa lo que se está
+    // escribiendo.
+    if !ui.get_speed_editing() && settings::parse_speed(&ui.get_speed_text()) != Ok(q.speed_limit) {
+        ui.set_speed_text(settings::speed_text(q.speed_limit).into());
     }
     let max_active = q.max_active.min(i32::MAX as usize) as i32;
     if ui.get_max_active() != max_active {
@@ -1025,7 +1020,6 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_properties_panel(s.properties_panel);
     ui.set_max_active(s.max_active);
     ui.set_connections(s.connections);
-    ui.set_speed_limit(s.speed_limit);
     ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
     ui.set_keep_downloading(s.keep_downloading);
@@ -1332,6 +1326,36 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
     ui.on_settings_changed({
         let app = app.clone();
         move || app.save_settings()
+    });
+    ui.on_speed_text_accepted({
+        let app = app.clone();
+        move |text| {
+            let Some(ui) = app.ui() else { return };
+            match settings::parse_speed(&text) {
+                Ok(limit) => {
+                    app.manager.update_settings(|q| q.speed_limit = limit);
+                    ui.set_speed_text(settings::speed_text(limit).into());
+                    app.show("", false);
+                }
+                Err(()) => {
+                    app.show(
+                        "No entiendo ese límite. Escribe, por ejemplo, 700 KB/s, 3 MB/s o «Sin límite».",
+                        true,
+                    );
+                    let current = app.manager.settings().speed_limit;
+                    ui.set_speed_text(settings::speed_text(current).into());
+                }
+            }
+        }
+    });
+    ui.on_speed_preset({
+        let app = app.clone();
+        move |i| {
+            let Some(ui) = app.ui() else { return };
+            let limit = settings::speed_limit_bytes(i);
+            app.manager.update_settings(|q| q.speed_limit = limit);
+            ui.set_speed_text(settings::speed_text(limit).into());
+        }
     });
     ui.on_schedule_day_toggled({
         let app = app.clone();

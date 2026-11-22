@@ -266,3 +266,50 @@ fn grabber_in_the_service() {
 
     rt.block_on(service.stop());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn job_changes_only_send_what_changed() {
+    let data = pseudo_random_bytes(64 * 1024, 5);
+    let server = TestServer::start(data, ServerConfig::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::for_db(dir.path().join("datos").join("omniload.db"));
+    let _service = Service::start(&paths, fast_opts()).await.unwrap();
+    let c = Client::connect(&paths).await.unwrap();
+    let downloads = dir.path().join("descargas");
+
+    // Lo primero que se pide es todo.
+    let first = c.jobs_changes("yo", false).await.unwrap();
+    assert!(first.jobs.is_empty());
+    assert_eq!(first.order, Some(vec![]));
+
+    let mut ids = Vec::new();
+    for name in ["a.bin", "b.bin"] {
+        let mut new = NewJob::new(server.url(name), &downloads);
+        new.start = false;
+        ids.push(c.add(&new).await.unwrap());
+    }
+    let second = c.jobs_changes("yo", false).await.unwrap();
+    assert_eq!(second.order, Some(ids.clone()));
+    assert_eq!(second.jobs.len(), 2);
+
+    // Sin cambios, no manda nada.
+    let quiet = c.jobs_changes("yo", false).await.unwrap();
+    assert_eq!(quiet.order, None);
+    assert!(quiet.jobs.is_empty());
+
+    // Otra ventana recibe todo; con reset, también.
+    assert_eq!(c.jobs_changes("otra", false).await.unwrap().jobs.len(), 2);
+    assert_eq!(c.jobs_changes("yo", true).await.unwrap().jobs.len(), 2);
+
+    // Un cambio en una sola descarga: solo viaja esa.
+    c.set_priority(&ids[1..], Priority::High).await.unwrap();
+    let one = c.jobs_changes("yo", false).await.unwrap();
+    assert_eq!(one.order, None);
+    assert_eq!(one.jobs.len(), 1);
+    assert_eq!(one.jobs[0].id, ids[1]);
+
+    // Quitar una descarga cambia el orden.
+    c.remove(&ids[..1]).await.unwrap();
+    let gone = c.jobs_changes("yo", false).await.unwrap();
+    assert_eq!(gone.order, Some(ids[1..].to_vec()));
+}
