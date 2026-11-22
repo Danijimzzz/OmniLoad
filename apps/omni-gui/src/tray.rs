@@ -393,8 +393,10 @@ mod imp {
                     height: h as i32,
                     // StatusNotifierItem quiere ARGB en orden de red.
                     data: rgba
-                        .chunks_exact(4)
-                        .flat_map(|p| [p[3], p[0], p[1], p[2]])
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .flat_map(|&[r, g, b, a]| [a, r, g, b])
                         .collect(),
                 })
                 .collect();
@@ -447,7 +449,7 @@ mod tests {
         assert_eq!(big.len(), 256 * 256 * 4);
         // El centro del icono es azul y opaco (no el cuadrado de reserva:
         // el PNG se leyó bien si hay píxeles blancos de la flecha).
-        assert!(big.chunks_exact(4).any(|p| p == [255, 255, 255, 255]));
+        assert!(big.as_chunks::<4>().0.contains(&[255, 255, 255, 255]));
         assert_eq!(small[(16 * 32 + 2) * 4 + 3], 255);
     }
 
