@@ -44,13 +44,11 @@ impl Network {
     /// Una red atada a una interfaz: todas sus conexiones salen por la
     /// dirección de esa interfaz (por ejemplo, el wifi o el cable).
     pub fn bound(id: NetworkId, iface: &NetInterface) -> Result<Self> {
-        let mut builder = default_client_builder().local_address(iface.ip);
+        let builder = default_client_builder().local_address(iface.ip);
         // En Linux y macOS además se ata el socket a la interfaz, para que
         // la ruta no dependa de la tabla de rutas.
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        {
-            builder = builder.interface(&iface.name);
-        }
+        let builder = builder.interface(&iface.name);
         Ok(Self::with_client(id, iface.name.clone(), builder.build()?))
     }
 
