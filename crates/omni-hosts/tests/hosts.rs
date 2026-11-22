@@ -359,7 +359,7 @@ async fn mediafire_folder_walks_chunks_and_subfolders() {
 }
 
 #[tokio::test]
-async fn standard_set_has_the_four_hosts() {
+async fn standard_set_has_all_hosts() {
     let hosts = Hosts::standard();
     assert_eq!(
         hosts.names(),
@@ -369,10 +369,12 @@ async fn standard_set_has_the_four_hosts() {
             "Dropbox",
             "Mediafire",
             "Google Drive",
-            "Gofile"
+            "Gofile",
+            "yt-dlp",
+            "Torrent"
         ]
     );
-    assert_eq!(hosts.checkers().names().len(), 6);
+    assert_eq!(hosts.checkers().names().len(), 8);
 }
 
 // -------------------------------------------------------------- Google Drive
