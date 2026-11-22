@@ -133,6 +133,20 @@ GitHub si hay una nueva y, si la hay, te lo dice con un botón en la barra de
 arriba. Nunca descarga ni instala nada por su cuenta: tú decides. Si no quieres
 que mire, se desactiva ahí mismo.
 
+### Junto al reloj (bandeja del sistema)
+
+Cerrar o minimizar la ventana no para nada: OmniLoad se queda en la bandeja
+del sistema, junto al reloj, y sigue descargando y vigilando lo que copias.
+
+- **Un clic en el icono** y vuelve la ventana. Al pasar el ratón ves cuántas
+  descargas van y a qué velocidad.
+- Con el **botón derecho**: pausar o reanudar todo, activar o quitar la
+  vigilancia del portapapeles y **Salir** del todo.
+- Si abres OmniLoad otra vez, no se abre una segunda ventana: aparece la que ya
+  tenías.
+- ¿Prefieres que la X cierre el programa? Desactívalo en **Ajustes ›
+  General**.
+
 ### Apariencia
 
 <img src="docs/capturas/temas.png" alt="Ajustes de apariencia con los cinco temas" width="860">
