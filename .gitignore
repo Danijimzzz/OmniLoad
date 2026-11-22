@@ -2,3 +2,4 @@
 *.part
 *.part.omni
 *.part.omni.tmp
+/dist

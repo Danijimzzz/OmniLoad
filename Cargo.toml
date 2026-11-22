@@ -70,6 +70,7 @@ tracing = "0.1"
 tray-icon = { version = "0.24", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
+winresource = "0.1"
 
 [profile.release]
 lto = "thin"

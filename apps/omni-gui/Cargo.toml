@@ -46,3 +46,7 @@ tempfile.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
+
+# Icono y datos del programa dentro de omniload.exe (ver build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

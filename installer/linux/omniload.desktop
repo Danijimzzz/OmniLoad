@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OmniLoad
+GenericName=Gestor de descargas
+Comment=Descarga más rápido, con todo ordenado y sin anuncios
+Exec=omniload %U
+Icon=omniload
+Terminal=false
+Categories=Network;FileTransfer;
+MimeType=x-scheme-handler/magnet;application/x-bittorrent;
+StartupWMClass=omniload
