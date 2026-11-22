@@ -43,10 +43,33 @@ Si la ventana no encuentra `omnid` (por ejemplo, con `cargo run -p omni-gui`
 sin haberlo compilado), arranca el mismo servicio dentro de ella: todo va
 igual, pero las descargas se paran al cerrarla.
 
-Al cerrar la ventana se para el servicio (guardando el progreso) salvo que
-esté activado "Seguir descargando al cerrar la ventana". `omnid` escribe su
+Cerrar o minimizar la ventana la esconde en la bandeja del sistema (si el
+escritorio tiene bandeja) y las descargas siguen. Al salir de verdad («Salir»
+en el menú del icono, o cerrar la ventana si no hay bandeja) se para el
+servicio (guardando el progreso) salvo que esté activado "Seguir descargando
+al salir". `omnid` escribe su
 registro en `omnid.log`, junto a la base de datos; para verlo en directo,
 ejecútalo en una terminal (`RUST_LOG=debug omnid`; Ctrl+C lo para).
+
+### Bandeja, ventana única y notificaciones
+
+- `apps/omni-gui/src/tray.rs`: el icono. Windows y macOS usan `tray-icon`
+  (Win32 y AppKit); Linux y BSD, `ksni` (StatusNotifierItem por D-Bus, sin
+  GTK: lo muestran KDE, XFCE, Cinnamon, MATE, LXQt y GNOME con la extensión
+  «AppIndicator»). Si no hay bandeja, cerrar la ventana sale como antes. Si la
+  bandeja desaparece con la ventana escondida, la ventana vuelve sola.
+- `apps/omni-gui/src/single.rs`: solo una ventana. La que está en marcha
+  escucha en `127.0.0.1` y apunta puerto y token en `ventana.json`, junto a
+  `ajustes.json`; abrir `omniload` otra vez le pasa los argumentos (enlaces o
+  archivos) y la enseña.
+- `apps/omni-gui/src/notify.rs`: notificación del sistema al terminar un
+  archivo o un paquete, o si falla (con `notify-rust`), solo si la ventana no
+  está a la vista. Mientras la ventana está escondida no se pintan las tablas.
+
+Para probar la bandeja de Linux sin escritorio hace falta un
+`org.kde.StatusNotifierWatcher` en el bus de sesión (por ejemplo, uno de
+prueba hecho con `zbus`); con él, `dbus-send ... org.kde.StatusNotifierItem.Activate`
+equivale al clic y `com.canonical.dbusmenu.Event` a elegir en el menú.
 
 ## Línea de comandos (`omni`)
 
