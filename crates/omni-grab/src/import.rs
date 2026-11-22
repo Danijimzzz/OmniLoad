@@ -22,6 +22,25 @@ pub fn torrent_file_url(path: &std::path::Path) -> Option<Url> {
     is_torrent.then(|| Url::from_file_path(abs).ok()).flatten()
 }
 
+/// Cambia las rutas de archivos `.torrent` que haya en el texto (una por
+/// línea, con o sin comillas, como las copia el Explorador) por su enlace
+/// `file:///…`. Solo las que existen; el resto del texto queda igual.
+pub fn torrent_paths_to_urls(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            let path = std::path::Path::new(line.trim().trim_matches(['"', '\'']));
+            if path.is_file()
+                && let Some(url) = torrent_file_url(path)
+            {
+                url.to_string()
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Saca los enlaces de un archivo, por su nombre y contenido.
 ///
 /// - `.txt`, `.crawljob` y cualquier texto: las URLs que aparezcan.
@@ -62,6 +81,23 @@ pub fn links_from_file(name: &str, bytes: &[u8]) -> Result<Vec<Url>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn torrent_paths_become_links() {
+        let dir = std::env::temp_dir().join("omni-torrent-paths");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("mi peli.torrent");
+        std::fs::write(&f, b"x").unwrap();
+        let text = format!(
+            "\"{}\"\nhttps://a.com/x.zip\n/no/existe.torrent",
+            f.display()
+        );
+        let out = torrent_paths_to_urls(&text);
+        let mut lines = out.lines();
+        assert!(lines.next().unwrap().starts_with("file:///"));
+        assert_eq!(lines.next(), Some("https://a.com/x.zip"));
+        assert_eq!(lines.next(), Some("/no/existe.torrent"));
+    }
 
     #[test]
     fn text_and_html_files() {
