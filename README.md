@@ -149,8 +149,9 @@ En **Ajustes › Automático**:
 ### Hecho a tu gusto
 
 - **Columnas de la lista**: arrastra el borde de la cabecera para cambiar el
-  ancho, y con el botón de columnas las muestras, las ocultas o las cambias de
-  orden. Se recuerda.
+  ancho, arrastra el nombre de una columna (Nombre incluido) para cambiarla de
+  sitio, y con el botón de columnas las muestras u ocultas. Vale para las
+  descargas y para el Capturador de enlaces. Se recuerda.
 - **Tamaño de letra** (pequeña, normal o grande), **escala de la interfaz** y
   **desenfoque del cristal** en Ajustes › Apariencia.
 - **Límite de velocidad**: elige uno de la lista o escribe el tuyo («700 KB/s»,

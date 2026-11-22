@@ -349,3 +349,20 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+### Versiones por PR y columnas (PR #9)
+
+- **Regla de versiones**: cada PR sube la versión de `[workspace.package]` en
+  `Cargo.toml`. Mientras el PR no está aprobado lleva el sufijo `-prN`
+  (`0.2.0-pr9`) y Ajustes › Versión lo marca como «versión del PR sin
+  aprobar». En el último commit antes de fusionar se quita el sufijo.
+  `update.rs` trata el sufijo como versión previa, así que `0.2.0-pr9` nunca
+  se considera más nueva que `0.2.0`.
+- **Columnas**: `settings::Table` (Descargas, Capturador) y `ColCfg` con
+  `id` 0 = Nombre, que se mueve y se ajusta como las demás (no se oculta).
+  `fix_columns` repara lo guardado (añade Nombre al principio si falta). En
+  Slint, `ColsHeader` calcula el ancho con la posición absoluta del ratón (sin
+  saltos) y el arrastre de cabecera llama a `reorder(origen, destino)`.
+- **Ventana fantasma en Windows**: era la consola de `reg query` al guardar
+  ajustes; ahora se usa `CREATE_NO_WINDOW` y solo se consulta al cambiar la
+  casilla.
