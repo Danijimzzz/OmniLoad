@@ -703,6 +703,9 @@ impl App {
         s.follow_system = theme.get_follow_system();
         s.accent = theme.get_accent_index();
         s.compact = theme.get_compact();
+        s.font_level = theme.get_font_level();
+        s.blur_level = theme.get_blur_level();
+        s.ui_scale = ui.get_ui_scale();
         s.reduce_transparency = theme.get_reduce_transparency();
         s.properties_panel = ui.get_properties_panel();
         s.max_active = ui.get_max_active();
@@ -739,6 +742,14 @@ impl App {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // La escala de la interfaz elegida en Ajustes (si no se fuerza por entorno).
+    // Slint la lee al crear la ventana.
+    if std::env::var_os("SLINT_SCALE_FACTOR").is_none()
+        && let Some(f) = settings::ui_scale_factor(Settings::load().ui_scale)
+    {
+        // SAFETY: es lo primero que hace el programa, todavía con un solo hilo.
+        unsafe { std::env::set_var("SLINT_SCALE_FACTOR", f.to_string()) };
+    }
     init_logging();
 
     // Si ya hay una ventana abierta (quizá escondida en la bandeja), se le
@@ -912,6 +923,8 @@ fn copy_theme(ui: &AppWindow, popup: &ClipPopup) {
     to.set_accent_index(from.get_accent_index());
     to.set_compact(from.get_compact());
     to.set_reduce_transparency(from.get_reduce_transparency());
+    to.set_font_level(from.get_font_level());
+    to.set_blur_level(from.get_blur_level());
 }
 
 fn connect_updates(ui: &AppWindow, app: &Rc<App>) {
@@ -1054,6 +1067,9 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     theme.set_follow_system(s.follow_system);
     theme.set_accent_index(s.accent);
     theme.set_compact(s.compact);
+    theme.set_font_level(s.font_level);
+    theme.set_blur_level(s.blur_level);
+    ui.set_ui_scale(s.ui_scale);
     theme.set_reduce_transparency(s.reduce_transparency);
     ui.set_properties_panel(s.properties_panel);
     ui.set_max_active(s.max_active);

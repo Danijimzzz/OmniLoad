@@ -24,6 +24,12 @@ export global Theme {
     in-out property <int> accent-index: 0;
     in-out property <bool> compact: false;
     in-out property <bool> reduce-transparency: false;
+    // Tamaño de letra: 0 pequeño, 1 normal, 2 grande.
+    in-out property <int> font-level: 1;
+    // Desenfoque de sombras y brillos del cristal: 0 suave, 1 normal, 2 fuerte.
+    in-out property <int> blur-level: 1;
+    out property <float> fscale: [0.9, 1.0, 1.15][font-level];
+    out property <length> shadow-blur: [14px, 32px, 56px][blur-level];
 
     // Tema efectivo: con "según el sistema", cada tema pasa a su pareja
     // clara u oscura (Cristal claro ↔ Cristal oscuro, Claro ↔ Grafito).
@@ -61,8 +67,8 @@ export global Theme {
     out property <length> r: eff <= 1 ? 18px : eff == 4 ? 2px : 8px;
     out property <length> r2: eff <= 1 ? 10px : eff == 4 ? 2px : 6px;
     out property <length> lw: eff == 4 ? 2px : 1px;
-    out property <length> row-h: compact ? 26px : 34px;
-    out property <length> font: compact ? 12.5px : 13px;
+    out property <length> row-h: (compact ? 26px : 34px) * fscale;
+    out property <length> font: (compact ? 12.5px : 13px) * fscale;
 
     // Color de un estado: 0 acento, 1 bien, 2 aviso, 3 error, 4 apagado.
     public pure function tone(t: int) -> color {
@@ -138,7 +144,7 @@ component Panel inherits Rectangle {
     border-color: Theme.rim;
     border-width: Theme.lw;
     border-radius: Theme.r;
-    drop-shadow-blur: Theme.glass ? 32px : 0px;
+    drop-shadow-blur: Theme.glass ? Theme.shadow-blur : 0px;
     drop-shadow-offset-y: Theme.glass ? 12px : 0px;
     drop-shadow-color: Theme.shadow;
     @children
@@ -297,7 +303,7 @@ component Bar inherits Rectangle {
     Text {
         x: 6px;
         text: root.text;
-        font-size: 11px;
+        font-size: 11px * Theme.fscale;
         font-weight: 600;
         color: Theme.text;
         vertical-alignment: center;
@@ -323,7 +329,7 @@ component HeadCell inherits Rectangle {
         x: 10px;
         width: parent.width - 12px;
         text: root.text;
-        font-size: 11.5px;
+        font-size: 11.5px * Theme.fscale;
         font-weight: 600;
         color: Theme.muted;
         vertical-alignment: center;
@@ -542,13 +548,13 @@ component GrabLine inherits Rectangle {
 }
 
 component FieldLabel inherits Text {
-    font-size: 12px;
+    font-size: 12px * Theme.fscale;
     font-weight: 600;
     color: Theme.muted;
 }
 
 component SectionTitle inherits Text {
-    font-size: 15px;
+    font-size: 15px * Theme.fscale;
     font-weight: 700;
     color: Theme.text;
 }
@@ -578,7 +584,7 @@ component Segmented inherits Rectangle {
                 padding-right: 14px;
                 Text {
                     text: opt;
-                    font-size: 13px;
+                    font-size: 13px * Theme.fscale;
                     font-weight: 600;
                     color: Theme.text;
                     vertical-alignment: center;
@@ -605,10 +611,10 @@ component SettingRow inherits HorizontalLayout {
         horizontal-stretch: 1;
         alignment: center;
         spacing: 2px;
-        Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.text; }
+        Text { text: root.title; font-size: 14px * Theme.fscale; font-weight: 600; color: Theme.text; }
         if root.subtitle != "": Text {
             text: root.subtitle;
-            font-size: 13px;
+            font-size: 13px * Theme.fscale;
             color: Theme.muted;
             wrap: word-wrap;
         }
@@ -662,8 +668,8 @@ component ThemeCard inherits Rectangle {
                 border-radius: 3px; background: Theme.accent;
             }
         }
-        Text { text: root.title; font-size: 13px; font-weight: 600; color: Theme.text; }
-        Text { text: root.subtitle; font-size: 12px; color: Theme.muted; }
+        Text { text: root.title; font-size: 13px * Theme.fscale; font-weight: 600; color: Theme.text; }
+        Text { text: root.subtitle; font-size: 12px * Theme.fscale; color: Theme.muted; }
     }
     TouchArea {
         mouse-cursor: pointer;
@@ -708,7 +714,7 @@ component TabBtn inherits Rectangle {
         spacing: 8px;
         Text {
             text: root.text;
-            font-size: 14px;
+            font-size: 14px * Theme.fscale;
             font-weight: 600;
             color: active ? Theme.text : Theme.muted;
             vertical-alignment: center;
@@ -724,7 +730,7 @@ component TabBtn inherits Rectangle {
                 padding-right: 7px;
                 Text {
                     text: badge;
-                    font-size: 11px;
+                    font-size: 11px * Theme.fscale;
                     font-weight: 700;
                     color: Theme.on-accent;
                     vertical-alignment: center;
@@ -801,6 +807,8 @@ export component AppWindow inherits Window {
     // 0 nada, 1 cerrar OmniLoad, 2 suspender, 3 apagar.
     in-out property <int> finish-action: 0;
     in-out property <bool> autostart: false;
+    // Escala de la interfaz: 0 automática, 1 100 %, 2 125 %… (al reabrir).
+    in-out property <int> ui-scale: 0;
     // Cuenta atrás de la acción al terminar (vacío = no hay).
     in property <string> finish-text;
     callback finish-cancel();
@@ -935,7 +943,7 @@ export component AppWindow inherits Window {
                 }
                 Text {
                     text: "OmniLoad";
-                    font-size: 15px;
+                    font-size: 15px * Theme.fscale;
                     font-weight: 700;
                     color: Theme.text;
                     vertical-alignment: center;
@@ -969,7 +977,7 @@ export component AppWindow inherits Window {
                 Text {
                     text: root.header-speed;
                     min-width: 90px;
-                    font-size: 13px;
+                    font-size: 13px * Theme.fscale;
                     font-weight: 700;
                     color: Theme.text;
                     vertical-alignment: center;
@@ -1002,7 +1010,7 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                     text: root.finish-text;
                     wrap: word-wrap;
-                    font-size: 13px;
+                    font-size: 13px * Theme.fscale;
                     font-weight: 600;
                     color: Theme.warn;
                     vertical-alignment: center;
@@ -1014,7 +1022,7 @@ export component AppWindow inherits Window {
         if root.message != "": Text {
             text: root.message;
             wrap: word-wrap;
-            font-size: 13px;
+            font-size: 13px * Theme.fscale;
             color: root.message-is-error ? Theme.err : Theme.muted;
         }
 
@@ -1121,7 +1129,7 @@ export component AppWindow inherits Window {
                                 VerticalLayout {
                                     padding: 6px;
                                     spacing: 2px;
-                                    Text { text: "Columnas (Nombre siempre se ve)"; font-size: 12px; color: Theme.muted; }
+                                    Text { text: "Columnas (Nombre siempre se ve)"; font-size: 12px * Theme.fscale; color: Theme.muted; }
                                     for c[i] in DlCols.cols: HorizontalLayout {
                                         height: 30px;
                                         spacing: 6px;
@@ -1196,7 +1204,7 @@ export component AppWindow inherits Window {
                         spacing: 10px;
                         Text {
                             text: root.sel-title;
-                            font-size: 14px;
+                            font-size: 14px * Theme.fscale;
                             font-weight: 700;
                             color: Theme.text;
                             wrap: word-wrap;
@@ -1204,7 +1212,7 @@ export component AppWindow inherits Window {
                         for l in root.sel-lines: VerticalLayout {
                             spacing: 2px;
                             FieldLabel { text: l.label; }
-                            Text { text: l.value; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+                            Text { text: l.value; color: Theme.text; font-size: 13px * Theme.fscale; wrap: word-wrap; }
                         }
                         FieldLabel { text: "Prioridad"; }
                         ComboBox {
@@ -1249,7 +1257,7 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         Text {
                             text: (root.sel-kind == 1 ? "Paquete: " : "Archivo: ") + root.sel-title;
-                            font-size: 13px;
+                            font-size: 13px * Theme.fscale;
                             font-weight: 700;
                             color: Theme.text;
                             overflow: elide;
@@ -1285,7 +1293,7 @@ export component AppWindow inherits Window {
                             spacing: 2px;
                             horizontal-stretch: l.label == "Enlace" || l.label == "Carpeta" || l.label == "Detalle" ? 2 : 1;
                             FieldLabel { text: l.label; }
-                            Text { text: l.value; color: Theme.text; font-size: 13px; overflow: elide; }
+                            Text { text: l.value; color: Theme.text; font-size: 13px * Theme.fscale; overflow: elide; }
                         }
                     }
                 }
@@ -1300,14 +1308,14 @@ export component AppWindow inherits Window {
                     spacing: 24px;
                     for t in root.totals: VerticalLayout {
                         spacing: 2px;
-                        Text { text: t.label; font-size: 12px; color: Theme.muted; }
-                        Text { text: t.value; font-size: 14px; font-weight: 700; color: Theme.text; }
+                        Text { text: t.label; font-size: 12px * Theme.fscale; color: Theme.muted; }
+                        Text { text: t.value; font-size: 14px * Theme.fscale; font-weight: 700; color: Theme.text; }
                     }
                     VerticalLayout {
                         horizontal-stretch: 1;
                         min-width: 200px;
                         spacing: 4px;
-                        Text { text: "Redes en uso"; font-size: 12px; color: Theme.muted; }
+                        Text { text: "Redes en uso"; font-size: 12px * Theme.fscale; color: Theme.muted; }
                         Rectangle {
                             height: 14px;
                             border-radius: 5px;
@@ -1319,7 +1327,7 @@ export component AppWindow inherits Window {
                                 background: Theme.accent;
                             }
                         }
-                        Text { text: root.net-text; font-size: 12.5px; color: Theme.text; }
+                        Text { text: root.net-text; font-size: 12.5px * Theme.fscale; color: Theme.text; }
                     }
                 }
             }
@@ -1364,7 +1372,7 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         Text {
                             text: "Propiedades del paquete";
-                            font-size: 14px;
+                            font-size: 14px * Theme.fscale;
                             font-weight: 700;
                             color: Theme.text;
                         }
@@ -1399,7 +1407,7 @@ export component AppWindow inherits Window {
                     spacing: 10px;
                     Text {
                         text: "Propiedades del paquete: " + root.pkg-title;
-                        font-size: 13px;
+                        font-size: 13px * Theme.fscale;
                         font-weight: 700;
                         color: Theme.text;
                         overflow: elide;
@@ -1505,7 +1513,7 @@ export component AppWindow inherits Window {
                     alignment: start;
                     Text {
                         text: "Ajustes";
-                        font-size: 20px;
+                        font-size: 20px * Theme.fscale;
                         font-weight: 700;
                         color: Theme.text;
                     }
@@ -1521,7 +1529,7 @@ export component AppWindow inherits Window {
                         Text {
                             x: 12px;
                             text: s;
-                            font-size: 13px;
+                            font-size: 13px * Theme.fscale;
                             font-weight: 600;
                             color: Theme.text;
                             vertical-alignment: center;
@@ -1542,7 +1550,7 @@ export component AppWindow inherits Window {
                     padding: 28px;
                     spacing: 6px;
                     alignment: start;
-                    Text { text: "General"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                    Text { text: "General"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
                     SettingRow {
                         title: "Carpeta de descargas";
                         subtitle: "Donde se guarda todo lo que descargas.";
@@ -1643,7 +1651,7 @@ export component AppWindow inherits Window {
                     padding: 28px;
                     spacing: 6px;
                     alignment: start;
-                    Text { text: "Automático"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                    Text { text: "Automático"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
                     SettingRow {
                         title: "Horario de descargas";
                         subtitle: "Solo descarga en los días y las horas que elijas. Fuera de ellas todo queda en pausa (con el progreso guardado) y sigue solo al llegar la hora. Si la hora de fin es menor que la de inicio, el tramo acaba al día siguiente (por ejemplo, de 23:00 a 07:00).";
@@ -1666,7 +1674,7 @@ export component AppWindow inherits Window {
                             accessible-label: d;
                             Text {
                                 text: d;
-                                font-size: 13px;
+                                font-size: 13px * Theme.fscale;
                                 font-weight: 600;
                                 color: root.schedule-day-on[i] ? Theme.on-accent : Theme.text;
                                 horizontal-alignment: center;
@@ -1679,7 +1687,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         Rectangle { width: 16px; }
-                        Text { text: "De"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
+                        Text { text: "De"; color: Theme.muted; font-size: 13px * Theme.fscale; vertical-alignment: center; }
                         LineEdit {
                             width: 80px;
                             enabled: root.schedule-enabled;
@@ -1687,7 +1695,7 @@ export component AppWindow inherits Window {
                             placeholder-text: "00:00";
                             accepted => { root.settings-changed(); }
                         }
-                        Text { text: "a"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
+                        Text { text: "a"; color: Theme.muted; font-size: 13px * Theme.fscale; vertical-alignment: center; }
                         LineEdit {
                             width: 80px;
                             enabled: root.schedule-enabled;
@@ -1700,7 +1708,7 @@ export component AppWindow inherits Window {
                     if root.schedule-error: Text {
                         text: "Escribe las horas como HH:MM, por ejemplo 23:30.";
                         color: Theme.err;
-                        font-size: 13px;
+                        font-size: 13px * Theme.fscale;
                     }
                     SettingRow {
                         title: "Carpeta según el tipo de archivo";
@@ -1724,7 +1732,7 @@ export component AppWindow inherits Window {
                             color: r.folder == "" ? Theme.muted : Theme.text;
                             overflow: elide;
                             vertical-alignment: center;
-                            font-size: 13px;
+                            font-size: 13px * Theme.fscale;
                         }
                         Btn { text: "Elegir…"; clicked => { root.rule-choose(i); } }
                         Btn { text: "Quitar"; clicked => { root.rule-remove(i); } }
@@ -1755,7 +1763,7 @@ export component AppWindow inherits Window {
                     padding: 28px;
                     spacing: 6px;
                     alignment: start;
-                    Text { text: "Versión"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                    Text { text: "Versión"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
                     SettingRow {
                         title: "OmniLoad " + root.app-version;
                         subtitle: root.update-text;
@@ -1790,10 +1798,10 @@ export component AppWindow inherits Window {
                         alignment: start;
                         VerticalLayout {
                             spacing: 6px;
-                            Text { text: "Apariencia"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                            Text { text: "Apariencia"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
                             Text {
                                 text: "Los cambios se aplican al momento.";
-                                font-size: 14px;
+                                font-size: 14px * Theme.fscale;
                                 color: Theme.muted;
                             }
                         }
@@ -1862,6 +1870,25 @@ export component AppWindow inherits Window {
                                 }
                             }
                             SettingRow {
+                                title: "Tamaño de letra";
+                                subtitle: "Para leer mejor o para ver más cosas a la vez";
+                                Segmented {
+                                    options: ["Pequeña", "Normal", "Grande"];
+                                    current: Theme.font-level;
+                                    changed-by-user(i) => { Theme.font-level = i; root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Escala de la interfaz";
+                                subtitle: "Agranda o reduce toda la ventana. Automática sigue la escala de Windows. Se aplica al volver a abrir OmniLoad.";
+                                ComboBox {
+                                    width: 140px;
+                                    model: ["Automática", "100 %", "125 %", "150 %", "175 %", "200 %"];
+                                    current-index <=> root.ui-scale;
+                                    selected => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
                                 title: "Color de acento";
                                 subtitle: "Botones, barras de progreso y selección";
                                 HorizontalLayout {
@@ -1892,6 +1919,16 @@ export component AppWindow inherits Window {
                                     checked: Theme.reduce-transparency;
                                     label: "Reducir transparencia";
                                     toggled(v) => { Theme.reduce-transparency = v; root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Intensidad del desenfoque";
+                                subtitle: "Cuánto se difuminan las sombras y los brillos de los paneles de cristal";
+                                opacity: Theme.glass ? 1 : 0.5;
+                                Segmented {
+                                    options: ["Suave", "Normal", "Fuerte"];
+                                    current: Theme.blur-level;
+                                    changed-by-user(i) => { Theme.blur-level = i; root.settings-changed(); }
                                 }
                             }
                         }
@@ -1937,7 +1974,7 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 20px;
                 spacing: 12px;
-                Text { text: "Quitar descargas"; font-size: 18px; font-weight: 700; color: Theme.text; }
+                Text { text: "Quitar descargas"; font-size: 18px * Theme.fscale; font-weight: 700; color: Theme.text; }
                 Text {
                     text: "«" + root.sel-title + "»";
                     color: Theme.text;
@@ -1986,7 +2023,7 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 20px;
                 spacing: 12px;
-                Text { text: "Añadir enlaces"; font-size: 18px; font-weight: 700; color: Theme.text; }
+                Text { text: "Añadir enlaces"; font-size: 18px * Theme.fscale; font-weight: 700; color: Theme.text; }
                 Text {
                     text: "Pega uno o varios enlaces, sueltos o dentro de un texto. También sirven páginas con enlaces a archivos, o una lista guardada en un archivo .txt o .html.";
                     wrap: word-wrap;
@@ -2139,14 +2176,14 @@ export component ClipPopup inherits Window {
                 spacing: 2px;
                 Text {
                     text: root.total == 1 ? "1 enlace copiado" : root.total + " enlaces copiados";
-                    font-size: 14px;
+                    font-size: 14px * Theme.fscale;
                     font-weight: 600;
                     color: Theme.text;
                     overflow: elide;
                 }
                 Text {
                     text: root.time-text;
-                    font-size: 12px;
+                    font-size: 12px * Theme.fscale;
                     color: Theme.muted;
                     overflow: elide;
                 }
@@ -2220,7 +2257,7 @@ export component ClipPopup inherits Window {
                         text: (root.total == 1 ? "1 enlace copiado" : root.total + " enlaces copiados")
                             + " · " + root.ok + " disponibles"
                             + (root.bad == 1 ? " · 1 caído" : root.bad > 1 ? " · " + root.bad + " caídos" : "");
-                        font-size: 14px;
+                        font-size: 14px * Theme.fscale;
                         font-weight: 600;
                         color: Theme.text;
                         overflow: elide;
@@ -2280,20 +2317,20 @@ export component ClipPopup inherits Window {
                                 spacing: 1px;
                                 Text {
                                     text: row.name;
-                                    font-size: 13px;
+                                    font-size: 13px * Theme.fscale;
                                     color: Theme.text;
                                     overflow: elide;
                                 }
                                 Text {
                                     text: row.host + (row.size == "" ? "" : " · " + row.size);
-                                    font-size: 11px;
+                                    font-size: 11px * Theme.fscale;
                                     color: Theme.muted;
                                     overflow: elide;
                                 }
                             }
                             Text {
                                 text: row.status;
-                                font-size: 12px;
+                                font-size: 12px * Theme.fscale;
                                 font-weight: 600;
                                 color: Theme.tone(row.tone);
                                 vertical-alignment: center;
@@ -2316,7 +2353,7 @@ export component ClipPopup inherits Window {
                 Rectangle { horizontal-stretch: 1; }
                 Text {
                     text: root.time-text;
-                    font-size: 12px;
+                    font-size: 12px * Theme.fscale;
                     color: Theme.muted;
                     vertical-alignment: center;
                 }

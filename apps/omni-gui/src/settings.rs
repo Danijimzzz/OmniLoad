@@ -63,6 +63,26 @@ pub struct Settings {
     pub finish_action: i32,
     /// Columnas de la tabla de descargas, en el orden en que se ven.
     pub columns: Vec<ColCfg>,
+    /// Tamaño de letra: 0 pequeño, 1 normal, 2 grande.
+    pub font_level: i32,
+    /// Desenfoque del cristal: 0 suave, 1 normal, 2 fuerte.
+    pub blur_level: i32,
+    /// Escala de la interfaz: 0 automática, 1 100 %, 2 125 %, 3 150 %,
+    /// 4 175 %, 5 200 %.
+    pub ui_scale: i32,
+}
+
+/// Factor de escala de una opción de [`Settings::ui_scale`] (`None` =
+/// automática, la del sistema).
+pub fn ui_scale_factor(option: i32) -> Option<f32> {
+    match option {
+        1 => Some(1.0),
+        2 => Some(1.25),
+        3 => Some(1.5),
+        4 => Some(1.75),
+        5 => Some(2.0),
+        _ => None,
+    }
 }
 
 /// Una columna de la tabla de descargas.
@@ -174,6 +194,9 @@ impl Default for Settings {
             schedule_to: "07:00".into(),
             finish_action: 0,
             columns: default_columns(),
+            font_level: 1,
+            blur_level: 1,
+            ui_scale: 0,
         }
     }
 }
