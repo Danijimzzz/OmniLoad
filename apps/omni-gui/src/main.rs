@@ -54,7 +54,7 @@ use automation::{FinishAction, FinishWatch};
 use manager::{Manager, Priority};
 use omni_api::{RemoteGrabber, TakeResponse};
 use omni_grab::{Check, Dest, GrabCommand, Pick};
-use settings::Settings;
+use settings::{Settings, Table};
 use tray::{Tray, TrayEvent, TrayStatus};
 use views::{DlSelection, UiState};
 
@@ -96,6 +96,7 @@ struct App {
     autostart_on: Cell<bool>,
     rule_rows: Rc<VecModel<RuleRow>>,
     col_rows: Rc<VecModel<ColState>>,
+    grab_col_rows: Rc<VecModel<ColState>>,
     /// Arrancó con `--minimizado` (inicio con el sistema).
     start_hidden: bool,
 }
@@ -189,6 +190,7 @@ impl App {
     fn save_columns(&self) {
         let mut s = self.settings.borrow_mut();
         s.columns = read_columns(&self.col_rows);
+        s.grab_columns = read_columns(&self.grab_col_rows);
         s.save();
     }
 
@@ -805,10 +807,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_rules(ModelRc::from(rule_rows.clone()));
 
     let col_rows: Rc<VecModel<ColState>> = Rc::new(VecModel::default());
-    settings.columns = settings::fix_columns(&settings.columns);
-    fill_columns(&col_rows, &settings.columns);
+    settings.columns = settings::fix_columns(Table::Downloads, &settings.columns);
+    fill_columns(Table::Downloads, &col_rows, &settings.columns);
     ui.global::<DlCols>()
         .set_cols(ModelRc::from(col_rows.clone()));
+    let grab_col_rows: Rc<VecModel<ColState>> = Rc::new(VecModel::default());
+    settings.grab_columns = settings::fix_columns(Table::Grabber, &settings.grab_columns);
+    fill_columns(Table::Grabber, &grab_col_rows, &settings.grab_columns);
+    ui.global::<GrabCols>()
+        .set_cols(ModelRc::from(grab_col_rows.clone()));
 
     let (tray_tx, tray_rx) = mpsc::channel();
     let app = Rc::new(App {
@@ -837,6 +844,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         autostart_on: Cell::new(automation::autostart_enabled()),
         rule_rows,
         col_rows,
+        grab_col_rows,
         start_hidden,
     });
 
@@ -1115,12 +1123,12 @@ fn set_schedule_days(ui: &AppWindow, mask: i32) {
 }
 
 /// Pone las columnas guardadas en el modelo de la tabla.
-fn fill_columns(model: &VecModel<ColState>, cols: &[settings::ColCfg]) {
+fn fill_columns(table: Table, model: &VecModel<ColState>, cols: &[settings::ColCfg]) {
     model.set_vec(
         cols.iter()
             .map(|c| ColState {
                 id: c.id,
-                name: settings::column_name(c.id).into(),
+                name: settings::column_name(table, c.id).into(),
                 width: c.width,
                 shown: c.shown,
             })
@@ -1421,20 +1429,40 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
         move || app.save_settings()
     });
     // Columnas: arrastrar el borde, mostrar/ocultar y cambiar el orden.
-    ui.global::<DlCols>().on_resize({
-        let app = app.clone();
-        move |i, delta| {
-            let i = i as usize;
-            if let Some(mut c) = app.col_rows.row_data(i) {
-                c.width = (c.width + delta).max(settings::MIN_COL_WIDTH);
-                app.col_rows.set_row_data(i, c);
-            }
-        }
-    });
-    ui.global::<DlCols>().on_resize_done({
-        let app = app.clone();
-        move || app.save_columns()
-    });
+    macro_rules! table_cols {
+        ($global:ident, $rows:ident) => {
+            ui.global::<$global>().on_resize({
+                let app = app.clone();
+                move |i, width| {
+                    if let Some(mut c) = app.$rows.row_data(i as usize) {
+                        c.width = width.max(settings::MIN_COL_WIDTH);
+                        app.$rows.set_row_data(i as usize, c);
+                    }
+                }
+            });
+            ui.global::<$global>().on_resize_done({
+                let app = app.clone();
+                move || app.save_columns()
+            });
+            ui.global::<$global>().on_reorder({
+                let app = app.clone();
+                move |from, to| {
+                    let (from, to) = (from as usize, to as usize);
+                    let n = app.$rows.row_count();
+                    if from >= n || to >= n || from == to {
+                        return;
+                    }
+                    let mut all: Vec<ColState> = app.$rows.iter().collect();
+                    let c = all.remove(from);
+                    all.insert(to, c);
+                    app.$rows.set_vec(all);
+                    app.save_columns();
+                }
+            });
+        };
+    }
+    table_cols!(DlCols, col_rows);
+    table_cols!(GrabCols, grab_col_rows);
     ui.on_col_toggle({
         let app = app.clone();
         move |i| {
@@ -1464,7 +1492,11 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
     ui.on_col_reset({
         let app = app.clone();
         move || {
-            fill_columns(&app.col_rows, &settings::default_columns());
+            fill_columns(
+                Table::Downloads,
+                &app.col_rows,
+                &settings::default_columns(Table::Downloads),
+            );
             app.save_columns();
         }
     });

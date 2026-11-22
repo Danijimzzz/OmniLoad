@@ -63,6 +63,8 @@ pub struct Settings {
     pub finish_action: i32,
     /// Columnas de la tabla de descargas, en el orden en que se ven.
     pub columns: Vec<ColCfg>,
+    /// Columnas de la tabla del Capturador de enlaces.
+    pub grab_columns: Vec<ColCfg>,
     /// Tamaño de letra: 0 pequeño, 1 normal, 2 grande.
     pub font_level: i32,
     /// Desenfoque del cristal: 0 suave, 1 normal, 2 fuerte.
@@ -88,70 +90,102 @@ pub fn ui_scale_factor(option: i32) -> Option<f32> {
     }
 }
 
-/// Una columna de la tabla de descargas.
+/// Una columna de una tabla.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColCfg {
-    /// 1 Host, 2 Tamaño, 3 Progreso, 4 Velocidad, 5 Restante, 6 Prioridad,
-    /// 7 Estado.
+    /// Descargas: 0 Nombre, 1 Host, 2 Tamaño, 3 Progreso, 4 Velocidad,
+    /// 5 Restante, 6 Prioridad, 7 Estado. Capturador: 0 Nombre, 1 Host,
+    /// 2 Tamaño, 3 Disponibilidad, 4 Prioridad, 5 Guardar en.
     pub id: i32,
     pub width: f32,
     pub shown: bool,
 }
 
+/// Las dos tablas con columnas ajustables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Table {
+    Downloads,
+    Grabber,
+}
+
 /// Nombre de cada columna según su número.
-pub fn column_name(id: i32) -> &'static str {
-    match id {
-        1 => "Host",
-        2 => "Tamaño",
-        3 => "Progreso",
-        4 => "Velocidad",
-        5 => "Restante",
-        6 => "Prioridad",
-        _ => "Estado",
+pub fn column_name(table: Table, id: i32) -> &'static str {
+    match (table, id) {
+        (_, 0) => "Nombre",
+        (_, 1) => "Host",
+        (_, 2) => "Tamaño",
+        (Table::Downloads, 3) => "Progreso",
+        (Table::Downloads, 4) => "Velocidad",
+        (Table::Downloads, 5) => "Restante",
+        (Table::Downloads, 6) => "Prioridad",
+        (Table::Downloads, _) => "Estado",
+        (Table::Grabber, 3) => "Disponibilidad",
+        (Table::Grabber, 4) => "Prioridad",
+        (Table::Grabber, _) => "Guardar en",
     }
 }
 
 /// Ancho menor al que no se deja encoger una columna.
 pub const MIN_COL_WIDTH: f32 = 48.0;
 
-pub fn default_columns() -> Vec<ColCfg> {
-    [
-        (1, 150.0),
-        (2, 90.0),
-        (3, 170.0),
-        (4, 95.0),
-        (5, 95.0),
-        (6, 75.0),
-        (7, 210.0),
-    ]
-    .into_iter()
-    .map(|(id, width)| ColCfg {
-        id,
-        width,
-        shown: true,
-    })
-    .collect()
+pub fn default_columns(table: Table) -> Vec<ColCfg> {
+    let widths: &[(i32, f32)] = match table {
+        Table::Downloads => &[
+            (0, 320.0),
+            (1, 150.0),
+            (2, 90.0),
+            (3, 170.0),
+            (4, 95.0),
+            (5, 95.0),
+            (6, 75.0),
+            (7, 210.0),
+        ],
+        Table::Grabber => &[
+            (0, 340.0),
+            (1, 150.0),
+            (2, 90.0),
+            (3, 130.0),
+            (4, 90.0),
+            (5, 240.0),
+        ],
+    };
+    widths
+        .iter()
+        .map(|&(id, width)| ColCfg {
+            id,
+            width,
+            shown: true,
+        })
+        .collect()
 }
 
 /// Deja las columnas guardadas completas y válidas: sin repetidas ni
-/// desconocidas, con las que falten al final y anchos razonables.
-pub fn fix_columns(saved: &[ColCfg]) -> Vec<ColCfg> {
+/// desconocidas, con las que falten (Nombre al principio, las demás al
+/// final) y anchos razonables.
+pub fn fix_columns(table: Table, saved: &[ColCfg]) -> Vec<ColCfg> {
+    let defaults = default_columns(table);
     let mut out: Vec<ColCfg> = Vec::new();
     for c in saved {
-        if (1..=7).contains(&c.id) && !out.iter().any(|o| o.id == c.id) {
+        if defaults.iter().any(|d| d.id == c.id) && !out.iter().any(|o| o.id == c.id) {
             out.push(ColCfg {
                 width: if c.width.is_finite() {
                     c.width.clamp(MIN_COL_WIDTH, 1200.0)
                 } else {
                     MIN_COL_WIDTH
                 },
+                // Nombre no se puede ocultar.
+                shown: c.shown || c.id == 0,
                 ..*c
             });
         }
     }
-    for d in default_columns() {
+    for d in defaults {
         if !out.iter().any(|o| o.id == d.id) {
-            out.push(d);
+            if d.id == 0 {
+                out.insert(0, d);
+            } else {
+                out.push(d);
+            }
         }
     }
     out
@@ -196,7 +230,8 @@ impl Default for Settings {
             schedule_from: "00:00".into(),
             schedule_to: "07:00".into(),
             finish_action: 0,
-            columns: default_columns(),
+            columns: default_columns(Table::Downloads),
+            grab_columns: default_columns(Table::Grabber),
             font_level: 1,
             blur_level: 1,
             ui_scale: 0,
@@ -383,16 +418,32 @@ mod tests {
                 shown: true,
             },
         ];
-        let fixed = fix_columns(&saved);
-        assert_eq!(fixed.len(), 7);
-        assert_eq!(fixed[0].id, 4);
-        assert_eq!(fixed[0].width, MIN_COL_WIDTH);
-        assert!(!fixed[0].shown);
-        assert_eq!(fixed[1].id, 1);
+        let fixed = fix_columns(Table::Downloads, &saved);
+        assert_eq!(fixed.len(), 8);
+        // Nombre (que no estaba guardado) se añade al principio.
+        assert_eq!(fixed[0].id, 0);
+        assert_eq!(fixed[1].id, 4);
+        assert_eq!(fixed[1].width, MIN_COL_WIDTH);
+        assert!(!fixed[1].shown);
+        assert_eq!(fixed[2].id, 1);
         let mut ids: Vec<i32> = fixed.iter().map(|c| c.id).collect();
         ids.sort_unstable();
-        assert_eq!(ids, [1, 2, 3, 4, 5, 6, 7]);
-        assert_eq!(fix_columns(&[]), default_columns());
+        assert_eq!(ids, [0, 1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(
+            fix_columns(Table::Downloads, &[]),
+            default_columns(Table::Downloads)
+        );
+        assert_eq!(fix_columns(Table::Grabber, &[]).len(), 6);
+    }
+
+    #[test]
+    fn name_column_is_always_shown() {
+        let hidden = [ColCfg {
+            id: 0,
+            width: 200.0,
+            shown: false,
+        }];
+        assert!(fix_columns(Table::Grabber, &hidden)[0].shown);
     }
 
     #[test]

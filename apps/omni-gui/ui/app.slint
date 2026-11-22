@@ -10,7 +10,7 @@ import "fonts/Inter-Regular.otf";
 import "fonts/Inter-Medium.otf";
 import "fonts/Inter-SemiBold.otf";
 import "fonts/Inter-Bold.otf";
-import { LineEdit, ListView, Palette, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { ListView, Palette, ScrollView } from "std-widgets.slint";
 
 // ---------------------------------------------------------------- Tema ----
 
@@ -64,6 +64,17 @@ export global Theme {
     out property <color> warn: eff == 4 ? #ffd400 : dark ? #f3b860 : #93560a;
     out property <color> err: eff == 4 ? #ff7b7b : dark ? #ff8a80 : #b3261e;
 
+    // Capas de estado (pasar el ratón, pulsar) que funcionan en cualquier tema:
+    // una película del color del texto sobre lo que haya debajo.
+    out property <color> hover: text.with-alpha(eff == 4 ? 0.22 : 0.07);
+    out property <color> press: text.with-alpha(eff == 4 ? 0.34 : 0.13);
+    // Cuadros de texto y selectores: algo más hundidos que el panel.
+    out property <color> field: [#ffffffb3, #0f1424a6, #ffffff, #181b20, #000000][pal];
+    // Barra de título: se funde con la ventana en cada tema.
+    out property <color> bar: [#ffffff40, #ffffff0a, #f3f4f7, #1a1d22, #000000][eff];
+    out property <color> bar-line: [#141e3c14, #ffffff14, #d9dde4, #2b3039, #ffffff][eff];
+    // Anillo de foco (teclado) y halo del campo enfocado.
+    out property <color> ring: accent.with-alpha(0.55);
     // Fondo (opaco) de los menús desplegables.
     out property <color> menu-bg: eff == 4 ? #000000 : eff == 1 ? #1c2236 : eff == 3 ? #22262d : #ffffff;
     out property <length> r: eff <= 1 ? 18px : eff == 4 ? 2px : 8px;
@@ -159,10 +170,11 @@ component Panel inherits Rectangle {
     }
 }
 
-// Una columna de la tabla de descargas (el orden del modelo es el orden en
-// pantalla). El nombre va siempre primero y no está en la lista.
+// Una columna de una tabla (el orden del modelo es el orden en pantalla).
 export struct ColState {
-    // 1 Host, 2 Tamaño, 3 Progreso, 4 Velocidad, 5 Restante, 6 Prioridad, 7 Estado.
+    // Descargas: 0 Nombre, 1 Host, 2 Tamaño, 3 Progreso, 4 Velocidad,
+    // 5 Restante, 6 Prioridad, 7 Estado. Capturador: 0 Nombre, 1 Host,
+    // 2 Tamaño, 3 Disponibilidad, 4 Prioridad, 5 Guardar en.
     id: int,
     name: string,
     width: length,
@@ -173,6 +185,133 @@ export struct ColState {
 struct RuleRow {
     exts: string,
     folder: string,
+}
+
+// Cuadro de texto propio (de una línea). Misma interfaz que el LineEdit
+// estándar: `text`, `placeholder-text`, `edited`, `accepted`, `has-focus`.
+component LineEdit inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <bool> enabled: true;
+    // Botón × para vaciarlo.
+    in property <bool> clearable: false;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+    callback accepted(string);
+    forward-focus: input;
+    height: (Theme.compact ? 30px : 34px) * Theme.fscale;
+    min-width: 60px;
+    horizontal-stretch: 1;
+    border-radius: Theme.r2;
+    border-width: input.has-focus ? 1.5px : Theme.lw;
+    border-color: input.has-focus ? Theme.accent : area.has-hover ? Theme.text.with-alpha(0.22) : Theme.rim;
+    background: Theme.field;
+    opacity: enabled ? 1 : 0.5;
+    drop-shadow-blur: input.has-focus ? 8px : 0px;
+    drop-shadow-color: Theme.accent.with-alpha(0.35);
+    animate border-color { duration: 100ms; }
+    area := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 8px;
+        spacing: 6px;
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+            if input.text == "" && root.placeholder-text != "": Text {
+                text: root.placeholder-text;
+                font-size: Theme.font;
+                color: Theme.muted.with-alpha(0.75);
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            input := TextInput {
+                width: parent.width;
+                height: parent.height;
+                single-line: true;
+                enabled: root.enabled;
+                font-size: Theme.font;
+                color: Theme.text;
+                vertical-alignment: center;
+                selection-background-color: Theme.accent.with-alpha(0.35);
+                selection-foreground-color: Theme.text;
+                edited => { root.edited(self.text); }
+                accepted => { root.accepted(self.text); }
+            }
+        }
+        if root.clearable && input.text != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: clear.has-hover ? Theme.press : transparent;
+                accessible-role: button;
+                accessible-label: "Borrar";
+                Icon {
+                    size: 11px;
+                    x: 4.5px;
+                    y: 4.5px;
+                    commands: "M6 6l12 12M18 6L6 18";
+                    ink: Theme.muted;
+                    stroke-width: 2.6px;
+                }
+                clear := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        input.text = "";
+                        root.edited("");
+                        input.focus();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Cuadro de texto de varias líneas (como el LineEdit, para pegar enlaces).
+component TextEdit inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <TextWrap> wrap: word-wrap;
+    forward-focus: input;
+    border-radius: Theme.r2;
+    border-width: input.has-focus ? 1.5px : Theme.lw;
+    border-color: input.has-focus ? Theme.accent : Theme.rim;
+    background: Theme.field;
+    drop-shadow-blur: input.has-focus ? 8px : 0px;
+    drop-shadow-color: Theme.accent.with-alpha(0.35);
+    animate border-color { duration: 100ms; }
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+    Flickable {
+        interactive: false;
+        viewport-height: max(self.height, input.preferred-height + 24px);
+        if input.text == "" && root.placeholder-text != "": Text {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            text: root.placeholder-text;
+            wrap: word-wrap;
+            font-size: Theme.font;
+            color: Theme.muted.with-alpha(0.75);
+        }
+        input := TextInput {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            wrap: root.wrap;
+            font-size: Theme.font;
+            color: Theme.text;
+            selection-background-color: Theme.accent.with-alpha(0.35);
+            selection-foreground-color: Theme.text;
+        }
+    }
 }
 
 component Btn inherits Rectangle {
@@ -188,24 +327,45 @@ component Btn inherits Rectangle {
     accessible-role: button;
     accessible-label: label;
     accessible-action-default => { if enabled { clicked(); } }
-    height: Theme.compact ? 30px : 34px;
+    forward-focus: focus;
+    height: (Theme.compact ? 30px : 34px) * Theme.fscale;
     min-width: max(self.height, content.min-width);
     horizontal-stretch: 0;
     border-radius: Theme.r2;
     border-width: Theme.lw;
-    border-color: primary ? Theme.accent : Theme.rim;
-    background: primary ? Theme.accent : touch.has-hover ? Theme.head : Theme.panel2;
+    border-color: primary ? Theme.accent : touch.has-hover ? Theme.text.with-alpha(0.22) : Theme.rim;
+    background: primary ? Theme.accent : Theme.panel2;
     opacity: enabled ? 1 : 0.45;
+    // Capa de hover/pulsado.
+    Rectangle {
+        border-radius: parent.border-radius;
+        background: !root.enabled ? transparent
+            : touch.pressed ? (root.primary ? #00000030 : Theme.press)
+            : touch.has-hover ? (root.primary ? #ffffff26 : Theme.hover)
+            : transparent;
+        animate background { duration: 90ms; }
+    }
+    // Anillo de foco con teclado.
+    if focus.has-focus: Rectangle {
+        x: -2px; y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: Theme.r2 + 2px;
+        border-width: 2px;
+        border-color: Theme.ring;
+    }
     content := HorizontalLayout {
-        padding-left: text == "" ? 0px : 12px;
-        padding-right: text == "" ? 0px : 12px;
-        spacing: 6px;
+        padding-left: text == "" ? 0px : 14px;
+        padding-right: text == "" ? 0px : 14px;
+        spacing: 7px;
         alignment: center;
-        if icon != "": Icon {
-            y: (parent.height - self.height) / 2;
-            commands: icon;
-            filled: icon-filled;
-            ink: icon-color;
+        if icon != "": VerticalLayout {
+            alignment: center;
+            Icon {
+                commands: icon;
+                filled: icon-filled;
+                ink: icon-color;
+            }
         }
         if text != "": Text {
             text: root.text;
@@ -215,10 +375,20 @@ component Btn inherits Rectangle {
             vertical-alignment: center;
         }
     }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == " " || e.text == "\n" {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => { focus.focus(); root.clicked(); }
     }
 }
 
@@ -231,25 +401,49 @@ component Check inherits Rectangle {
     accessible-checkable: true;
     accessible-checked: checked;
     accessible-label: label;
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
+    forward-focus: focus;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
     border-width: checked ? 0px : 1.5px;
-    border-color: Theme.muted;
-    background: checked ? Theme.accent : transparent;
+    border-color: touch.has-hover ? Theme.text : Theme.muted;
+    background: checked ? Theme.accent : touch.has-hover ? Theme.hover : transparent;
     opacity: enabled ? 1 : 0.4;
-    if checked: Icon {
+    animate background { duration: 120ms; }
+    if focus.has-focus: Rectangle {
+        x: -3px; y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: Theme.ring;
+    }
+    Icon {
         size: 12px;
-        x: 2px;
-        y: 2px;
+        x: 3px;
+        y: 3px;
         commands: "M5 12l5 5 9-10";
         ink: Theme.on-accent;
         stroke-width: 3px;
+        opacity: checked ? 1 : 0;
+        animate opacity { duration: 120ms; }
     }
-    TouchArea {
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == " " {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => {
+            focus.focus();
             root.checked = !root.checked;
             root.toggled(root.checked);
         }
@@ -292,21 +486,22 @@ component Bar inherits Rectangle {
     in property <float> fraction;
     in property <string> text;
     in property <color> fill: Theme.accent;
-    height: 16px;
-    border-radius: 5px;
+    height: 18px;
+    border-radius: 9px;
     background: Theme.track;
     clip: true;
     Rectangle {
         x: 0;
         width: parent.width * max(0, root.fraction);
-        background: root.fill;
-        opacity: 0.85;
+        background: @linear-gradient(90deg, root.fill.darker(0.15) 0%, root.fill 100%);
+        border-radius: 9px;
+        animate width { duration: 250ms; easing: ease-out; }
     }
     Text {
-        x: 6px;
+        x: 8px;
         text: root.text;
         font-size: 11px * Theme.fscale;
-        font-weight: 600;
+        font-weight: 700;
         color: Theme.text;
         vertical-alignment: center;
     }
@@ -319,43 +514,158 @@ component Cell inherits Text {
     overflow: elide;
 }
 
-component HeadCell inherits Rectangle {
-    in property <string> text;
-    // Se puede cambiar el ancho arrastrando el borde derecho.
-    in property <bool> resizable: false;
-    // Cuánto se arrastró desde el último aviso (el ancho actual ya lo incluye).
-    callback resized(length);
+// Hueco de una columna: ancho propio, sin estirarse (un ancho de columna no
+// afecta a las demás; lo que sobra queda a la derecha).
+component ColSlot inherits Rectangle {
+    in property <ColState> spec;
+    visible: spec.shown;
+    min-width: spec.shown ? spec.width : 0px;
+    max-width: spec.shown ? spec.width : 0px;
+    preferred-width: spec.shown ? spec.width : 0px;
+    horizontal-stretch: 0;
+}
+
+// Cabecera de una tabla: arrastrar el borde derecho cambia el ancho y
+// arrastrar el nombre de una columna la cambia de sitio.
+component ColsHeader inherits Rectangle {
+    in property <[ColState]> cols;
+    // Nuevo ancho (absoluto) de la columna `i` mientras se arrastra su borde.
+    callback resize(int, length);
     callback resize-done();
-    border-width: 0;
-    Text {
-        x: 10px;
-        width: parent.width - 12px;
-        text: root.text;
-        font-size: 11.5px * Theme.fscale;
-        font-weight: 600;
-        color: Theme.muted;
-        vertical-alignment: center;
-        overflow: elide;
+    callback reorder(int, int);
+    in-out property <int> dragging: -1;
+    in-out property <int> drop-from: -1;
+    in-out property <length> pointer-x;
+    in-out property <int> drop-seq: 0;
+    height: 34px;
+    background: Theme.head;
+    HorizontalLayout {
+        for c[i] in root.cols: ColSlot {
+            spec: c;
+            property <int> seq: root.drop-seq;
+            property <bool> hot: root.dragging >= 0 && root.dragging != i
+                && root.pointer-x >= self.absolute-position.x
+                && root.pointer-x < self.absolute-position.x + self.width;
+            property <length> press-x;
+            property <bool> pressing: false;
+            property <length> w0;
+            property <length> x0;
+            property <bool> sizing: false;
+            changed seq => {
+                if root.drop-from >= 0 && root.drop-from != i
+                    && root.pointer-x >= self.absolute-position.x
+                    && root.pointer-x < self.absolute-position.x + self.width {
+                    root.reorder(root.drop-from, i);
+                }
+            }
+            Rectangle {
+                background: root.dragging == i ? Theme.accent.with-alpha(0.28)
+                    : hot ? Theme.accent.with-alpha(0.16)
+                    : grab.has-hover ? Theme.hover : transparent;
+                animate background { duration: 90ms; }
+            }
+            Text {
+                x: 12px;
+                width: parent.width - 16px;
+                text: c.name;
+                font-size: 11.5px * Theme.fscale;
+                font-weight: 700;
+                color: root.dragging == i ? Theme.text : Theme.muted;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if hot: Rectangle {
+                x: 0;
+                width: 3px;
+                background: Theme.accent;
+            }
+            Rectangle {
+                x: parent.width - 1px;
+                y: 8px;
+                width: 1px;
+                height: parent.height - 16px;
+                background: Theme.rim;
+            }
+            grab := TouchArea {
+                mouse-cursor: pointer;
+                pointer-event(e) => {
+                    if e.button == PointerEventButton.left {
+                        if e.kind == PointerEventKind.down {
+                            pressing = true;
+                            press-x = self.absolute-position.x + self.mouse-x;
+                        } else if e.kind == PointerEventKind.up {
+                            if root.dragging == i {
+                                root.drop-from = i;
+                                root.dragging = -1;
+                                root.drop-seq += 1;
+                            }
+                            pressing = false;
+                        }
+                    }
+                }
+                moved => {
+                    if pressing {
+                        root.pointer-x = self.absolute-position.x + self.mouse-x;
+                        if root.dragging == i || abs(root.pointer-x - press-x) > 6px {
+                            root.dragging = i;
+                        }
+                    }
+                }
+            }
+            // Asa para el ancho, siempre encima.
+            TouchArea {
+                x: parent.width - 6px;
+                width: 12px;
+                mouse-cursor: col-resize;
+                Rectangle {
+                    x: 5px;
+                    width: 2px;
+                    background: parent.has-hover || parent.pressed ? Theme.accent : transparent;
+                }
+                pointer-event(e) => {
+                    if e.button == PointerEventButton.left {
+                        if e.kind == PointerEventKind.down {
+                            sizing = true;
+                            w0 = c.width;
+                            x0 = self.absolute-position.x + self.mouse-x;
+                        } else if e.kind == PointerEventKind.up {
+                            sizing = false;
+                            root.resize-done();
+                        }
+                    }
+                }
+                moved => {
+                    if sizing {
+                        root.resize(i, max(48px, w0 + (self.absolute-position.x + self.mouse-x - x0)));
+                    }
+                }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+    // Lo que se arrastra, siguiendo al ratón.
+    if root.dragging >= 0: Rectangle {
+        x: root.pointer-x - root.absolute-position.x - 44px;
+        y: 4px;
+        width: 88px;
+        height: parent.height - 8px;
+        border-radius: Theme.r2;
+        background: Theme.accent;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000050;
+        Text {
+            text: root.cols[root.dragging].name;
+            font-size: 11.5px * Theme.fscale;
+            font-weight: 700;
+            color: Theme.on-accent;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
     Rectangle {
-        x: parent.width - 1px;
-        width: 1px;
-        background: Theme.line;
-    }
-    if root.resizable: TouchArea {
-        x: parent.width - 5px;
-        width: 10px;
-        mouse-cursor: col-resize;
-        moved => {
-            if self.pressed {
-                root.resized(self.mouse-x - self.pressed-x);
-            }
-        }
-        pointer-event(e) => {
-            if e.kind == PointerEventKind.up {
-                root.resize-done();
-            }
-        }
+        y: parent.height - Theme.lw;
+        height: Theme.lw;
+        background: Theme.rim;
     }
 }
 
@@ -387,78 +697,72 @@ component FolderIcon inherits Icon {
     stroke-width: 2px;
 }
 
-// Columnas de la tabla de descargas: las pone Rust (ajustes guardados).
+// Columnas de las tablas: las pone Rust (ajustes guardados).
 export global DlCols {
     in-out property <[ColState]> cols;
     callback resize(int, length);
     callback resize-done();
+    callback reorder(int, int);
 }
 
-component DlHeader inherits Rectangle {
-    height: 32px;
-    background: Theme.head;
-    HorizontalLayout {
-        HeadCell { text: "Nombre"; horizontal-stretch: 1; }
-        for c[i] in DlCols.cols: HeadCell {
-            visible: c.shown;
-            width: c.shown ? c.width : 0px;
-            text: c.name;
-            resizable: true;
-            resized(d) => { DlCols.resize(i, d); }
-            resize-done => { DlCols.resize-done(); }
-        }
-    }
-    Rectangle {
-        y: parent.height - Theme.lw;
-        height: Theme.lw;
-        background: Theme.rim;
-    }
+export global GrabCols {
+    in-out property <[ColState]> cols;
+    callback resize(int, length);
+    callback resize-done();
+    callback reorder(int, int);
 }
 
 component DlLine inherits Rectangle {
     in property <DlRow> item;
+    in property <[ColState]> cols;
     callback clicked();
     callback toggle();
     height: Theme.row-h;
-    background: item.selected ? Theme.selbg : item.is-package ? Theme.panel2 : transparent;
-    TouchArea { clicked => { root.clicked(); } }
+    background: item.selected ? Theme.selbg : touch.has-hover ? Theme.hover : item.is-package ? Theme.panel2 : transparent;
+    animate background { duration: 70ms; }
+    touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
-        HorizontalLayout {
-            horizontal-stretch: 1;
-            padding-left: item.is-package ? 6px : 58px;
-            padding-right: 8px;
-            spacing: 6px;
-            if item.is-package: Expander {
-                y: (parent.height - self.height) / 2;
-                expanded: item.expanded;
-                toggle => { root.toggle(); }
+        for c in root.cols: ColSlot {
+            spec: c;
+            if c.id == 0: HorizontalLayout {
+                padding-left: item.is-package ? 8px : 36px;
+                padding-right: 8px;
+                spacing: 6px;
+                if item.is-package: VerticalLayout {
+                    alignment: center;
+                    Expander {
+                        expanded: item.expanded;
+                        toggle => { root.toggle(); }
+                    }
+                }
+                if item.is-package: VerticalLayout {
+                    alignment: center;
+                    FolderIcon { }
+                }
+                Cell {
+                    text: item.name;
+                    font-weight: item.is-package ? 600 : 400;
+                    horizontal-stretch: 1;
+                }
             }
-            if item.is-package: FolderIcon { y: (parent.height - self.height) / 2; }
-            Cell {
-                text: item.name;
-                font-weight: item.is-package ? 600 : 400;
-                horizontal-stretch: 1;
+            if c.id == 1: Cell { x: 12px; width: parent.width - 16px; text: item.host; color: Theme.muted; }
+            if c.id == 2: Cell { x: 12px; width: parent.width - 16px; text: item.size; }
+            if c.id == 3: VerticalLayout {
+                alignment: center;
+                padding-left: 12px;
+                padding-right: 12px;
+                Bar {
+                    fraction: item.fraction;
+                    text: item.progress;
+                    fill: Theme.tone(item.tone);
+                }
             }
-        }
-        for c in DlCols.cols: Rectangle {
-            visible: c.shown;
-            width: c.shown ? c.width : 0px;
-            if c.id == 1: Cell { x: 10px; width: parent.width - 12px; text: item.host; color: Theme.muted; }
-            if c.id == 2: Cell { x: 10px; width: parent.width - 12px; text: item.size; }
-            if c.id == 3: Bar {
-                x: 10px;
-                width: parent.width - 20px;
-                y: (parent.height - self.height) / 2;
-                fraction: item.fraction;
-                text: item.progress;
-                fill: Theme.tone(item.tone);
-            }
-            if c.id == 4: Cell { x: 10px; width: parent.width - 12px; text: item.speed; }
-            if c.id == 5: Cell { x: 10px; width: parent.width - 12px; text: item.eta; }
-            if c.id == 6: Cell { x: 10px; width: parent.width - 12px; text: item.priority; }
+            if c.id == 4: Cell { x: 12px; width: parent.width - 16px; text: item.speed; }
+            if c.id == 5: Cell { x: 12px; width: parent.width - 16px; text: item.eta; }
+            if c.id == 6: Cell { x: 12px; width: parent.width - 16px; text: item.priority; }
             if c.id == 7: Cell {
-                x: 10px;
-                width: parent.width - 12px;
+                x: 12px;
+                width: parent.width - 16px;
                 text: item.status;
                 color: Theme.tone(item.tone);
                 font-weight: 600;
@@ -472,80 +776,178 @@ component DlLine inherits Rectangle {
     }
 }
 
-global GrabCols {
-    out property <length> host: 160px;
-    out property <length> size: 90px;
-    out property <length> avail: 230px;
-    out property <length> prio: 75px;
-    out property <length> dest: 240px;
-}
-
-component GrabHeader inherits Rectangle {
-    height: 32px;
-    background: Theme.head;
-    HorizontalLayout {
-        HeadCell { text: "Nombre"; horizontal-stretch: 1; }
-        HeadCell { text: "Host"; width: GrabCols.host; }
-        HeadCell { text: "Tamaño"; width: GrabCols.size; }
-        HeadCell { text: "Disponibilidad"; width: GrabCols.avail; }
-        HeadCell { text: "Prioridad"; width: GrabCols.prio; }
-        HeadCell { text: "Guardar en"; width: GrabCols.dest; }
-    }
-    Rectangle {
-        y: parent.height - Theme.lw;
-        height: Theme.lw;
-        background: Theme.rim;
-    }
-}
-
 component GrabLine inherits Rectangle {
     in property <GrabTreeRow> item;
+    in property <[ColState]> cols;
     callback clicked();
     callback toggle();
     callback check(bool);
     height: Theme.row-h;
-    background: item.selected ? Theme.selbg : item.is-package ? Theme.panel2 : transparent;
-    TouchArea { clicked => { root.clicked(); } }
+    background: item.selected ? Theme.selbg : touch.has-hover ? Theme.hover : item.is-package ? Theme.panel2 : transparent;
+    animate background { duration: 70ms; }
+    touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
-        HorizontalLayout {
-            horizontal-stretch: 1;
-            padding-left: item.is-package ? 6px : 38px;
-            padding-right: 8px;
-            spacing: 8px;
-            if item.is-package: Expander {
-                y: (parent.height - self.height) / 2;
-                expanded: item.expanded;
-                toggle => { root.toggle(); }
+        for c in root.cols: ColSlot {
+            spec: c;
+            if c.id == 0: HorizontalLayout {
+                padding-left: item.is-package ? 8px : 28px;
+                padding-right: 8px;
+                spacing: 8px;
+                if item.is-package: VerticalLayout {
+                    alignment: center;
+                    Expander {
+                        expanded: item.expanded;
+                        toggle => { root.toggle(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Check {
+                        checked: item.checked;
+                        label: "Incluir " + item.name;
+                        toggled(v) => { root.check(v); }
+                    }
+                }
+                if item.is-package: VerticalLayout {
+                    alignment: center;
+                    FolderIcon { }
+                }
+                Cell {
+                    text: item.name;
+                    font-weight: item.is-package ? 600 : 400;
+                    opacity: item.dim ? 0.55 : 1;
+                    horizontal-stretch: 1;
+                }
             }
-            Check {
-                y: (parent.height - self.height) / 2;
-                checked: item.checked;
-                label: "Incluir " + item.name;
-                toggled(v) => { root.check(v); }
+            if c.id == 1: Cell { x: 12px; width: parent.width - 16px; text: item.host; color: Theme.muted; }
+            if c.id == 2: Cell { x: 12px; width: parent.width - 16px; text: item.size; }
+            if c.id == 3: Cell {
+                x: 12px;
+                width: parent.width - 16px;
+                text: item.avail;
+                color: Theme.tone(item.tone);
+                font-weight: 600;
             }
-            if item.is-package: FolderIcon { y: (parent.height - self.height) / 2; }
-            Cell {
-                text: item.name;
-                font-weight: item.is-package ? 600 : 400;
-                opacity: item.dim ? 0.55 : 1;
-                horizontal-stretch: 1;
-            }
+            if c.id == 4: Cell { x: 12px; width: parent.width - 16px; text: item.priority; }
+            if c.id == 5: Cell { x: 12px; width: parent.width - 16px; text: item.dest; color: Theme.muted; }
         }
-        Cell { text: item.host; color: Theme.muted; width: GrabCols.host; }
-        Cell { text: item.size; width: GrabCols.size; }
-        Cell {
-            text: item.avail;
-            width: GrabCols.avail;
-            color: Theme.tone(item.tone);
-            font-weight: 600;
-        }
-        Cell { text: item.priority; width: GrabCols.prio; }
-        Cell { text: item.dest; color: Theme.muted; width: GrabCols.dest; }
     }
     Rectangle {
         y: parent.height - 1px;
         height: 1px;
         background: Theme.line;
+    }
+}
+
+// Botón «Columnas» con el menú para mostrar, ocultar y ordenar columnas.
+component ColsMenu inherits Btn {
+    in property <[ColState]> cols;
+    callback toggle(int);
+    callback move(int, int);
+    callback reset();
+    label: "Columnas";
+    icon: "M5 5v14M12 5v14M19 5v14";
+    text: "";
+    clicked => { menu.show(); }
+    menu := PopupWindow {
+        x: parent.width - 250px;
+        y: parent.height + 4px;
+        width: 250px;
+        Rectangle {
+            background: Theme.menu-bg;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.rim;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000055;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 2px;
+                Text {
+                    text: "Columnas";
+                    font-size: 13px * Theme.fscale;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+                Text {
+                    text: "Marca las que quieres ver. También puedes arrastrar las cabeceras para cambiarlas de sitio.";
+                    font-size: 11.5px * Theme.fscale;
+                    color: Theme.muted;
+                    wrap: word-wrap;
+                }
+                Rectangle { height: 6px; }
+                for c[i] in root.cols: Rectangle {
+                    height: 34px;
+                    border-radius: 8px;
+                    background: row-ta.has-hover ? Theme.hover : transparent;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 4px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 18px;
+                                height: 18px;
+                                border-radius: 5px;
+                                border-width: c.shown ? 0px : 1.5px;
+                                border-color: Theme.muted;
+                                background: c.shown ? Theme.accent : transparent;
+                                opacity: c.id == 0 ? 0.55 : 1;
+                                accessible-role: checkbox;
+                                accessible-checkable: true;
+                                accessible-checked: c.shown;
+                                accessible-label: c.name;
+                                if c.shown: Icon { size: 12px; x: 3px; y: 3px; commands: "M5 12l5 5 9-10"; ink: Theme.on-accent; stroke-width: 3px; }
+                            }
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: c.name;
+                            font-size: Theme.font;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 26px;
+                                height: 26px;
+                                border-radius: 7px;
+                                opacity: i > 0 ? 1 : 0.3;
+                                background: up.has-hover && i > 0 ? Theme.press : transparent;
+                                Icon { size: 14px; x: 6px; y: 6px; commands: "M6 15l6-6 6 6"; ink: Theme.muted; }
+                                accessible-role: button;
+                                accessible-label: "Subir " + c.name;
+                                up := TouchArea { enabled: i > 0; mouse-cursor: pointer; clicked => { root.move(i, -1); } }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 26px;
+                                height: 26px;
+                                border-radius: 7px;
+                                opacity: i < root.cols.length - 1 ? 1 : 0.3;
+                                background: down.has-hover && i < root.cols.length - 1 ? Theme.press : transparent;
+                                Icon { size: 14px; x: 6px; y: 6px; commands: "M6 9l6 6 6-6"; ink: Theme.muted; }
+                                accessible-role: button;
+                                accessible-label: "Bajar " + c.name;
+                                down := TouchArea { enabled: i < root.cols.length - 1; mouse-cursor: pointer; clicked => { root.move(i, 1); } }
+                            }
+                        }
+                    }
+                    row-ta := TouchArea {
+                        width: parent.width - 70px;
+                        mouse-cursor: c.id == 0 ? MouseCursor.default : MouseCursor.pointer;
+                        clicked => { if c.id != 0 { root.toggle(i); } }
+                    }
+                }
+                Rectangle { height: 6px; }
+                Btn { text: "Restablecer columnas"; clicked => { root.reset(); } }
+            }
+        }
     }
 }
 
@@ -555,10 +957,34 @@ component FieldLabel inherits Text {
     color: Theme.muted;
 }
 
-component SectionTitle inherits Text {
-    font-size: 15px * Theme.fscale;
-    font-weight: 700;
-    color: Theme.text;
+// Título de sección de Ajustes: grande, con una raya de acento y una línea
+// que lo separa de lo anterior, para que se vea dónde empieza cada grupo.
+component SectionTitle inherits VerticalLayout {
+    in property <string> text;
+    in property <bool> first: false;
+    padding-top: first ? 4px : 22px;
+    padding-bottom: 6px;
+    spacing: 12px;
+    if !first: Rectangle {
+        height: 1px;
+        background: Theme.line;
+    }
+    HorizontalLayout {
+        spacing: 10px;
+        Rectangle {
+            width: 4px;
+            height: 20px;
+            border-radius: 2px;
+            background: Theme.accent;
+        }
+        Text {
+            text: root.text;
+            font-size: 19px * Theme.fscale;
+            font-weight: 700;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+    }
 }
 
 // Botones de opción en fila ("Abajo | A la derecha | Oculto").
@@ -576,9 +1002,10 @@ component Segmented inherits Rectangle {
         for opt[i] in options: Rectangle {
             height: 32px;
             border-radius: Theme.r2 - 2px;
-            background: i == root.current ? Theme.panel : transparent;
+            background: i == root.current ? Theme.panel : segta.has-hover ? Theme.hover : transparent;
             border-width: i == root.current ? Theme.lw : 0px;
             border-color: Theme.rim;
+            animate background { duration: 90ms; }
             accessible-role: button;
             accessible-label: opt;
             HorizontalLayout {
@@ -592,7 +1019,7 @@ component Segmented inherits Rectangle {
                     vertical-alignment: center;
                 }
             }
-            TouchArea {
+            segta := TouchArea {
                 mouse-cursor: pointer;
                 clicked => {
                     root.current = i;
@@ -709,7 +1136,8 @@ component TabBtn inherits Rectangle {
     border-radius: Theme.r2;
     border-width: active ? Theme.lw : 0px;
     border-color: Theme.rim;
-    background: active ? Theme.panel2 : transparent;
+    background: active ? Theme.panel2 : tabta.has-hover ? Theme.hover : transparent;
+    animate background { duration: 90ms; }
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
@@ -741,7 +1169,7 @@ component TabBtn inherits Rectangle {
             }
         }
     }
-    TouchArea {
+    tabta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
@@ -917,7 +1345,8 @@ component WinBtn inherits Rectangle {
     accessible-role: button;
     accessible-label: label;
     accessible-action-default => { clicked(); }
-    background: ta.has-hover ? (danger ? #e5484d : Theme.head) : transparent;
+    background: ta.pressed ? (danger ? #c93a3f : Theme.press) : ta.has-hover ? (danger ? #e5484d : Theme.text.with-alpha(0.14)) : transparent;
+    animate background { duration: 80ms; }
     Icon {
         size: 14px;
         x: (parent.width - self.width) / 2;
@@ -938,7 +1367,12 @@ component TitleBar inherits Rectangle {
     callback toggle-maximize();
     callback close();
     height: 36px;
-    background: Theme.glass ? transparent : Theme.head;
+    background: Theme.bar;
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.bar-line;
+    }
     drag-area := TouchArea {
         double-clicked => { root.toggle-maximize(); }
         pointer-event(e) => {
@@ -1357,52 +1791,11 @@ export component AppWindow inherits Window {
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    Btn {
-                        label: "Columnas";
-                        icon: "M4 4h16v16H4zM9 4v16M15 4v16";
-                        clicked => { col-menu.show(); }
-                        col-menu := PopupWindow {
-                            x: parent.width - 230px;
-                            y: parent.height + 2px;
-                            width: 230px;
-                            Rectangle {
-                                background: Theme.menu-bg;
-                                border-radius: Theme.r2;
-                                border-width: 1px;
-                                border-color: Theme.rim;
-                                VerticalLayout {
-                                    padding: 6px;
-                                    spacing: 2px;
-                                    Text { text: "Columnas (Nombre siempre se ve)"; font-size: 12px * Theme.fscale; color: Theme.muted; }
-                                    for c[i] in DlCols.cols: HorizontalLayout {
-                                        height: 30px;
-                                        spacing: 6px;
-                                        Rectangle {
-                                            width: 16px;
-                                            Rectangle {
-                                                y: (parent.height - self.height) / 2;
-                                                width: 16px;
-                                                height: 16px;
-                                                border-radius: 4px;
-                                                border-width: c.shown ? 0px : 1.5px;
-                                                border-color: Theme.muted;
-                                                background: c.shown ? Theme.accent : transparent;
-                                                accessible-role: checkbox;
-                                                accessible-checkable: true;
-                                                accessible-checked: c.shown;
-                                                accessible-label: c.name;
-                                                if c.shown: Icon { size: 12px; x: 2px; y: 2px; commands: "M5 12l5 5 5-10"; ink: Theme.on-accent; stroke-width: 3px; }
-                                                TouchArea { mouse-cursor: pointer; clicked => { root.col-toggle(i); } }
-                                            }
-                                        }
-                                        Text { horizontal-stretch: 1; text: c.name; color: Theme.text; vertical-alignment: center; }
-                                        Btn { label: "Subir " + c.name; icon: "M6 15l6-6 6 6"; enabled: i > 0; clicked => { root.col-move(i, -1); } }
-                                        Btn { label: "Bajar " + c.name; icon: "M6 9l6 6 6-6"; enabled: i < DlCols.cols.length - 1; clicked => { root.col-move(i, 1); } }
-                                    }
-                                    Btn { text: "Restablecer"; clicked => { root.col-reset(); } }
-                                }
-                            }
-                        }
+                    ColsMenu {
+                        cols: DlCols.cols;
+                        toggle(i) => { root.col-toggle(i); }
+                        move(i, d) => { root.col-move(i, d); }
+                        reset => { root.col-reset(); }
                     }
                     LineEdit {
                         // Se encoge antes de salirse de la barra en ventanas estrechas.
@@ -1410,6 +1803,7 @@ export component AppWindow inherits Window {
                         min-width: 110px;
                         horizontal-stretch: 0;
                         placeholder-text: "Buscar paquetes o archivos";
+                        clearable: true;
                         edited(t) => { root.dl-search(t); }
                     }
                 }
@@ -1422,7 +1816,12 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                     clip: true;
                     VerticalLayout {
-                        DlHeader { }
+                        ColsHeader {
+                            cols: DlCols.cols;
+                            resize(i, w) => { DlCols.resize(i, w); }
+                            resize-done => { DlCols.resize-done(); }
+                            reorder(a, b) => { DlCols.reorder(a, b); }
+                        }
                         if root.downloads.length == 0: Rectangle {
                             vertical-stretch: 1;
                             Text {
@@ -1435,6 +1834,7 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
                             for row in root.downloads: DlLine {
                                 item: row;
+                                cols: DlCols.cols;
                                 clicked => { root.dl-click(row.key, row.is-package); }
                                 toggle => { root.dl-toggle(row.key); }
                             }
@@ -1592,7 +1992,12 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                     clip: true;
                     VerticalLayout {
-                        GrabHeader { }
+                        ColsHeader {
+                            cols: GrabCols.cols;
+                            resize(i, w) => { GrabCols.resize(i, w); }
+                            resize-done => { GrabCols.resize-done(); }
+                            reorder(a, b) => { GrabCols.reorder(a, b); }
+                        }
                         if root.grabbed.length == 0: Rectangle {
                             vertical-stretch: 1;
                             Text {
@@ -1605,6 +2010,7 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
                             for row in root.grabbed: GrabLine {
                                 item: row;
+                                cols: GrabCols.cols;
                                 clicked => { root.grab-click(row.key, row.is-package); }
                                 toggle => { root.grab-toggle(row.key); }
                                 check(v) => { root.grab-check(row.key, row.is-package, v); }
