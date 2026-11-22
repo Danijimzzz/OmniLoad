@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::schedule::Schedule;
+
 /// En qué punto está una descarga.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -146,6 +148,8 @@ pub struct QueueSettings {
     pub max_per_server: usize,
     /// Pausa global: no arranca nada de la cola.
     pub held: bool,
+    /// Días y horas en que se permite descargar.
+    pub schedule: Schedule,
 }
 
 impl Default for QueueSettings {
@@ -156,6 +160,7 @@ impl Default for QueueSettings {
             speed_limit: None,
             max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK,
             held: false,
+            schedule: Schedule::default(),
         }
     }
 }

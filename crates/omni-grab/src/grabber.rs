@@ -50,9 +50,50 @@ pub struct Dest {
     pub per_package: bool,
     /// También cuando el paquete tiene un solo archivo.
     pub single_file_too: bool,
+    /// Reglas por tipo de archivo: si la extensión de un archivo coincide
+    /// con una, va a la carpeta de la regla (salvo que el paquete tenga una
+    /// carpeta elegida a mano). La primera que coincida manda.
+    #[serde(default)]
+    pub rules: Vec<FileRule>,
+}
+
+/// «Los archivos .mp4 y .mkv van a esta carpeta».
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileRule {
+    /// Extensiones sin punto y en minúsculas (`mp4`, `mkv`).
+    pub extensions: Vec<String>,
+    pub folder: PathBuf,
+}
+
+impl FileRule {
+    /// Una regla a partir de texto como `.mp4, MKV avi`.
+    pub fn parse(extensions: &str, folder: impl Into<PathBuf>) -> Option<Self> {
+        let extensions: Vec<String> = extensions
+            .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+            .map(|e| e.trim().trim_start_matches(['.', '*']).to_lowercase())
+            .filter(|e| !e.is_empty())
+            .collect();
+        let folder = folder.into();
+        (!extensions.is_empty() && !folder.as_os_str().is_empty())
+            .then_some(Self { extensions, folder })
+    }
+
+    pub fn matches(&self, file_name: &str) -> bool {
+        file_name
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| self.extensions.iter().any(|e| e.eq_ignore_ascii_case(ext)))
+    }
 }
 
 impl Dest {
+    /// La carpeta de la primera regla que coincida con el nombre de archivo.
+    pub fn rule_folder(&self, file_name: &str) -> Option<&PathBuf> {
+        self.rules
+            .iter()
+            .find(|r| r.matches(file_name))
+            .map(|r| &r.folder)
+    }
+
     /// La carpeta por defecto de un paquete con `files` archivos. El nombre
     /// se limpia de caracteres que Windows, Linux o macOS no admiten.
     pub fn folder(&self, package: &str, files: usize) -> PathBuf {
@@ -726,7 +767,7 @@ impl Grabber {
     fn take_where(&self, dest: &Dest, pick: impl Fn(&Item) -> bool) -> Vec<Picked> {
         let mut st = self.shared.state();
         let mut picked = Vec::new();
-        let packages: Vec<(u64, String, PathBuf, Priority)> = st
+        let packages: Vec<(u64, String, PathBuf, Priority, bool)> = st
             .packages
             .iter()
             .map(|p| {
@@ -735,6 +776,7 @@ impl Grabber {
                     p.name.clone(),
                     folder_of(p, &st.items, dest),
                     p.priority,
+                    p.folder.is_some(),
                 )
             })
             .collect();
@@ -742,12 +784,19 @@ impl Grabber {
             if !pick(i) {
                 return true;
             }
-            if let Some((_, name, folder, prio)) = packages.iter().find(|p| p.0 == i.package) {
+            if let Some((_, name, folder, prio, custom)) =
+                packages.iter().find(|p| p.0 == i.package)
+            {
+                // Una carpeta elegida a mano para el paquete gana a las reglas.
+                let folder = match dest.rule_folder(&i.name) {
+                    Some(rule) if !custom => rule.clone(),
+                    _ => folder.clone(),
+                };
                 picked.push(Picked {
                     url: i.url.to_string(),
                     name: i.name.clone(),
                     package: name.clone(),
-                    folder: folder.clone(),
+                    folder,
                     priority: *prio,
                     size: i.size,
                 });

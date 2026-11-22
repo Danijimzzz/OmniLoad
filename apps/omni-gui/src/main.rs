@@ -26,6 +26,7 @@
 // Sin ventana de consola en Windows (solo en release, para poder depurar).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod automation;
 mod clipboard;
 mod format;
 mod manager;
@@ -49,10 +50,11 @@ use std::time::{Duration, Instant};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
+use automation::{FinishAction, FinishWatch};
 use manager::{Manager, Priority};
 use omni_api::{RemoteGrabber, TakeResponse};
 use omni_grab::{Check, Dest, GrabCommand, Pick};
-use settings::Settings;
+use settings::{Settings, Table};
 use tray::{Tray, TrayEvent, TrayStatus};
 use views::{DlSelection, UiState};
 
@@ -84,7 +86,23 @@ struct App {
     /// La ventana está escondida en la bandeja.
     hidden: Cell<bool>,
     notes: RefCell<notify::Tracker>,
+    finish: RefCell<FinishWatch>,
+    /// Lo último que se pintó: si la cola no cambió no se repinta (con miles
+    /// de filas, rehacer la tabla cuatro veces por segundo es mucho trabajo).
+    last_rows: RefCell<Vec<manager::RowInfo>>,
+    /// Cuenta atrás de suspender o apagar: cuándo y qué.
+    countdown: Cell<Option<(Instant, FinishAction)>>,
+    /// Si el inicio con el sistema está puesto (se lee una vez al arrancar).
+    autostart_on: Cell<bool>,
+    rule_rows: Rc<VecModel<RuleRow>>,
+    col_rows: Rc<VecModel<ColState>>,
+    grab_col_rows: Rc<VecModel<ColState>>,
+    /// Arrancó con `--minimizado` (inicio con el sistema).
+    start_hidden: bool,
 }
+
+/// Segundos que se dan para cancelar suspender o apagar.
+const COUNTDOWN: Duration = Duration::from_secs(60);
 
 impl App {
     fn ui(&self) -> Option<AppWindow> {
@@ -98,6 +116,11 @@ impl App {
             base: s.download_dir.clone(),
             per_package: s.package_folders,
             single_file_too: s.single_file_folders,
+            rules: s
+                .file_rules
+                .iter()
+                .filter_map(|r| omni_grab::FileRule::parse(&r.extensions, r.folder.clone()))
+                .collect(),
         }
     }
 
@@ -112,21 +135,42 @@ impl App {
     fn refresh(&self) {
         let Some(ui) = self.ui() else { return };
         let rows = self.manager.snapshot();
-        self.notify_finished(&ui, &rows);
-        self.update_tray(&ui, &rows);
+        self.repaint(&ui, rows, true);
+    }
+
+    /// Cada cuarto de segundo: la tabla de descargas solo se rehace si la cola
+    /// cambió.
+    fn tick(&self) {
+        let rows = self.manager.snapshot();
+        let changed = *self.last_rows.borrow() != rows || self.hidden.get();
+        if let Some(ui) = self.ui() {
+            self.repaint(&ui, rows, changed);
+        }
+    }
+
+    fn repaint(&self, ui: &AppWindow, rows: Vec<manager::RowInfo>, changed: bool) {
+        if changed {
+            self.notify_finished(ui, &rows);
+            self.watch_finish(&rows);
+            self.update_tray(ui, &rows);
+        }
         if self.hidden.get() {
             // Escondida en la bandeja: no hace falta pintar las tablas (con
             // miles de filas se notaría), pero el aviso de enlaces sigue.
             self.refresh_popup();
+            *self.last_rows.borrow_mut() = rows;
             return;
         }
         let grabbed = self.grabber.snapshot();
         let dest = self.dest();
         let mut st = self.state.borrow_mut();
-        views::fill_downloads(&ui, &self.dl_rows, &rows, &mut st);
-        views::fill_grabber(&ui, &self.grab_rows, &grabbed, &dest, &mut st);
+        if changed {
+            views::fill_downloads(ui, &self.dl_rows, &rows, &mut st);
+        }
+        views::fill_grabber(ui, &self.grab_rows, &grabbed, &dest, &mut st);
         drop(st);
-        sync_queue_settings(&ui, &self.manager);
+        *self.last_rows.borrow_mut() = rows;
+        sync_queue_settings(ui, &self.manager);
         self.refresh_popup();
 
         let notes = self.grabber.take_notes();
@@ -140,6 +184,73 @@ impl App {
                 .any(|i| i.check == Check::Checking)
         {
             self.show("", false);
+        }
+    }
+
+    fn save_columns(&self) {
+        let mut s = self.settings.borrow_mut();
+        s.columns = read_columns(&self.col_rows);
+        s.grab_columns = read_columns(&self.grab_col_rows);
+        s.save();
+    }
+
+    /// Al terminar todas las descargas, hace lo que se eligió en Ajustes.
+    fn watch_finish(&self, rows: &[manager::RowInfo]) {
+        if !self.finish.borrow_mut().update(rows) {
+            return;
+        }
+        let action = FinishAction::from_index(self.settings.borrow().finish_action);
+        match action {
+            FinishAction::Nothing => {}
+            FinishAction::Quit => {
+                self.close_popup();
+                let _ = slint::quit_event_loop();
+            }
+            FinishAction::Suspend | FinishAction::Shutdown => {
+                self.countdown
+                    .set(Some((Instant::now() + COUNTDOWN, action)));
+                notify::send(
+                    &self.rt,
+                    notify::Note {
+                        title: "Descargas terminadas".into(),
+                        body: format!(
+                            "Se va a {} en 60 segundos. Abre OmniLoad para cancelar.",
+                            action.describe()
+                        ),
+                    },
+                );
+            }
+        }
+    }
+
+    /// Lleva la cuenta atrás y la enseña en la ventana.
+    fn tick_countdown(&self) {
+        let Some((until, action)) = self.countdown.get() else {
+            return;
+        };
+        let left = until.saturating_duration_since(Instant::now()).as_secs();
+        if Instant::now() >= until {
+            self.countdown.set(None);
+            if let Some(ui) = self.ui() {
+                ui.set_finish_text("".into());
+            }
+            automation::run_action(action);
+        } else if let Some(ui) = self.ui() {
+            ui.set_finish_text(
+                format!(
+                    "Descargas terminadas: se va a {} en {} s.",
+                    action.describe(),
+                    left + 1
+                )
+                .into(),
+            );
+        }
+    }
+
+    fn cancel_countdown(&self) {
+        self.countdown.set(None);
+        if let Some(ui) = self.ui() {
+            ui.set_finish_text("".into());
         }
     }
 
@@ -285,6 +396,7 @@ impl App {
 
     /// Lo pedido desde el icono de la bandeja o desde otra ventana.
     fn handle_events(&self) {
+        self.tick_countdown();
         while let Ok(ev) = self.tray_rx.try_recv() {
             match ev {
                 TrayEvent::Show => self.show_window(),
@@ -334,6 +446,14 @@ impl App {
         }
         if let Some(ui) = self.ui() {
             ui.set_tray_available(self.tray.borrow().is_some());
+        }
+        if self.start_hidden {
+            if self.tray.borrow().is_some() {
+                self.hidden.set(true);
+            } else {
+                // Sin bandeja no habría forma de llegar a la ventana.
+                self.show_window();
+            }
         }
         self.refresh();
     }
@@ -587,11 +707,15 @@ impl App {
         s.follow_system = theme.get_follow_system();
         s.accent = theme.get_accent_index();
         s.compact = theme.get_compact();
+        s.font_level = theme.get_font_level();
+        s.blur_level = theme.get_blur_level();
+        s.ui_scale = ui.get_ui_scale();
+        s.side_width = ui.get_side_w();
+        s.nav_width = ui.get_nav_w();
         s.reduce_transparency = theme.get_reduce_transparency();
         s.properties_panel = ui.get_properties_panel();
         s.max_active = ui.get_max_active();
         s.connections = ui.get_connections();
-        s.speed_limit = ui.get_speed_limit();
         s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
         s.keep_downloading = ui.get_keep_downloading();
@@ -605,17 +729,46 @@ impl App {
         s.download_dir = PathBuf::from(ui.get_download_dir().as_str());
         s.package_folders = ui.get_package_folders();
         s.single_file_folders = ui.get_single_file_folders();
+        s.schedule_enabled = ui.get_schedule_enabled();
+        s.schedule_days = ui.get_schedule_days();
+        s.schedule_from = ui.get_schedule_from().to_string();
+        s.schedule_to = ui.get_schedule_to().to_string();
+        s.finish_action = ui.get_finish_action();
+        ui.set_schedule_error(s.schedule().is_none());
+        // Solo se toca el sistema cuando la casilla cambió (consultar el
+        // registro en cada ajuste sería lento e innecesario).
+        let autostart = ui.get_autostart();
+        if autostart != self.autostart_on.get() {
+            match automation::set_autostart(autostart) {
+                Ok(()) => self.autostart_on.set(autostart),
+                Err(e) => {
+                    tracing::warn!("no se pudo cambiar el inicio con el sistema: {e}");
+                    ui.set_autostart(self.autostart_on.get());
+                }
+            }
+        }
         s.save();
         apply_queue_settings(&self.manager, &s);
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // La escala de la interfaz elegida en Ajustes (si no se fuerza por entorno).
+    // Slint la lee al crear la ventana.
+    if std::env::var_os("SLINT_SCALE_FACTOR").is_none()
+        && let Some(f) = settings::ui_scale_factor(Settings::load().ui_scale)
+    {
+        // SAFETY: es lo primero que hace el programa, todavía con un solo hilo.
+        unsafe { std::env::set_var("SLINT_SCALE_FACTOR", f.to_string()) };
+    }
     init_logging();
 
     // Si ya hay una ventana abierta (quizá escondida en la bandeja), se le
     // pasan los argumentos y esta termina.
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Al iniciar con el sistema arranca escondida en la bandeja.
+    let start_hidden = args.iter().any(|a| a == automation::AUTOSTART_FLAG);
+    args.retain(|a| a != automation::AUTOSTART_FLAG);
     let (instance_tx, instance_rx) = mpsc::channel();
     let _instance = match settings::instance_path() {
         Some(path) => match single::claim(&path, &args, instance_tx) {
@@ -629,7 +782,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .thread_name("omni-motor")
         .build()?;
-    let settings = Settings::load();
+    let mut settings = Settings::load();
     let manager = Arc::new(manager::open(rt.handle().clone()));
     if manager.in_process() {
         tracing::info!("el servicio corre dentro de la ventana");
@@ -648,6 +801,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_downloads(ModelRc::from(dl_rows.clone()));
     let grab_rows: Rc<VecModel<GrabTreeRow>> = Rc::new(VecModel::default());
     ui.set_grabbed(ModelRc::from(grab_rows.clone()));
+
+    let rule_rows: Rc<VecModel<RuleRow>> = Rc::new(VecModel::default());
+    fill_rules(&rule_rows, &settings.file_rules);
+    ui.set_rules(ModelRc::from(rule_rows.clone()));
+
+    let col_rows: Rc<VecModel<ColState>> = Rc::new(VecModel::default());
+    settings.columns = settings::fix_columns(Table::Downloads, &settings.columns);
+    fill_columns(Table::Downloads, &col_rows, &settings.columns);
+    ui.global::<DlCols>()
+        .set_cols(ModelRc::from(col_rows.clone()));
+    let grab_col_rows: Rc<VecModel<ColState>> = Rc::new(VecModel::default());
+    settings.grab_columns = settings::fix_columns(Table::Grabber, &settings.grab_columns);
+    fill_columns(Table::Grabber, &grab_col_rows, &settings.grab_columns);
+    ui.global::<GrabCols>()
+        .set_cols(ModelRc::from(grab_col_rows.clone()));
 
     let (tray_tx, tray_rx) = mpsc::channel();
     let app = Rc::new(App {
@@ -670,6 +838,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         instance_rx,
         hidden: Cell::new(false),
         notes: RefCell::default(),
+        finish: RefCell::default(),
+        last_rows: RefCell::default(),
+        countdown: Cell::new(None),
+        autostart_on: Cell::new(automation::autostart_enabled()),
+        rule_rows,
+        col_rows,
+        grab_col_rows,
+        start_hidden,
     });
 
     let timer = Timer::default();
@@ -677,7 +853,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let app = app.clone();
         move || {
             app.handle_events();
-            app.refresh();
+            app.tick();
         }
     });
 
@@ -701,7 +877,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     connect_settings(&ui, &app);
     connect_popup(&ui, &app);
     connect_updates(&ui, &app);
-    ui.set_app_version(update::CURRENT.into());
+    ui.set_app_version(update::base_version(update::CURRENT).into());
+    ui.set_app_pr(update::pr_number(update::CURRENT).map_or(0, |n| n as i32));
     if app.settings.borrow().check_updates {
         app.check_updates(true);
     }
@@ -717,7 +894,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // El programa sigue con la ventana escondida en la bandeja: el bucle
     // termina con «Salir» o al cerrar la ventana si no hay bandeja.
-    ui.show()?;
+    if !start_hidden {
+        ui.show()?;
+    }
     slint::run_event_loop_until_quit()?;
     let _ = ui.hide();
     let _ = app.popup.hide();
@@ -763,6 +942,8 @@ fn copy_theme(ui: &AppWindow, popup: &ClipPopup) {
     to.set_accent_index(from.get_accent_index());
     to.set_compact(from.get_compact());
     to.set_reduce_transparency(from.get_reduce_transparency());
+    to.set_font_level(from.get_font_level());
+    to.set_blur_level(from.get_blur_level());
 }
 
 fn connect_updates(ui: &AppWindow, app: &Rc<App>) {
@@ -865,12 +1046,11 @@ fn apply_queue_settings(manager: &Manager, s: &Settings) {
     manager.update_settings(|q| {
         q.max_active = s.max_active.max(1) as usize;
         q.connections = s.connections.max(1) as usize;
-        // Un límite puesto desde la terminal (por ejemplo 300K) no está en
-        // el desplegable: se respeta mientras no se elija otra opción.
-        if settings::speed_limit_index(q.speed_limit) != s.speed_limit {
-            q.speed_limit = settings::speed_limit_bytes(s.speed_limit);
-        }
         q.max_per_server = s.max_per_server.max(0) as usize;
+        // Con una hora mal escrita se deja el horario como estaba.
+        if let Some(schedule) = s.schedule() {
+            q.schedule = schedule;
+        }
     });
 }
 
@@ -881,9 +1061,10 @@ fn sync_queue_settings(ui: &AppWindow, manager: &Manager) {
         return;
     }
     let q = manager.settings();
-    let speed = settings::speed_limit_index(q.speed_limit);
-    if ui.get_speed_limit() != speed {
-        ui.set_speed_limit(speed);
+    // El límite también lo cambia la terminal; no se pisa lo que se está
+    // escribiendo.
+    if !ui.get_speed_editing() && settings::parse_speed(&ui.get_speed_text()) != Ok(q.speed_limit) {
+        ui.set_speed_text(settings::speed_text(q.speed_limit).into());
     }
     let max_active = q.max_active.min(i32::MAX as usize) as i32;
     if ui.get_max_active() != max_active {
@@ -905,11 +1086,15 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     theme.set_follow_system(s.follow_system);
     theme.set_accent_index(s.accent);
     theme.set_compact(s.compact);
+    theme.set_font_level(s.font_level);
+    theme.set_blur_level(s.blur_level);
+    ui.set_ui_scale(s.ui_scale);
+    ui.set_side_w(s.side_width.clamp(240.0, 720.0));
+    ui.set_nav_w(s.nav_width.clamp(180.0, 420.0));
     theme.set_reduce_transparency(s.reduce_transparency);
     ui.set_properties_panel(s.properties_panel);
     ui.set_max_active(s.max_active);
     ui.set_connections(s.connections);
-    ui.set_speed_limit(s.speed_limit);
     ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
     ui.set_keep_downloading(s.keep_downloading);
@@ -922,6 +1107,57 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_download_dir(s.download_dir.display().to_string().into());
     ui.set_package_folders(s.package_folders);
     ui.set_single_file_folders(s.single_file_folders);
+    ui.set_schedule_enabled(s.schedule_enabled);
+    set_schedule_days(ui, s.schedule_days);
+    ui.set_schedule_from(s.schedule_from.clone().into());
+    ui.set_schedule_to(s.schedule_to.clone().into());
+    ui.set_finish_action(s.finish_action);
+    ui.set_autostart(automation::autostart_enabled());
+}
+
+/// Los días del horario: el número y las siete casillas que se ven.
+fn set_schedule_days(ui: &AppWindow, mask: i32) {
+    ui.set_schedule_days(mask);
+    let on: Vec<bool> = (0..7).map(|d| mask & (1 << d) != 0).collect();
+    ui.set_schedule_day_on(ModelRc::from(Rc::new(VecModel::from(on))));
+}
+
+/// Pone las columnas guardadas en el modelo de la tabla.
+fn fill_columns(table: Table, model: &VecModel<ColState>, cols: &[settings::ColCfg]) {
+    model.set_vec(
+        cols.iter()
+            .map(|c| ColState {
+                id: c.id,
+                name: settings::column_name(table, c.id).into(),
+                width: c.width,
+                shown: c.shown,
+            })
+            .collect::<Vec<_>>(),
+    );
+}
+
+/// Lo que hay ahora en el modelo, para guardarlo.
+fn read_columns(model: &VecModel<ColState>) -> Vec<settings::ColCfg> {
+    model
+        .iter()
+        .map(|c| settings::ColCfg {
+            id: c.id,
+            width: c.width,
+            shown: c.shown,
+        })
+        .collect()
+}
+
+/// Pone al día la lista de reglas de Ajustes › Automático.
+fn fill_rules(model: &VecModel<RuleRow>, rules: &[settings::RuleCfg]) {
+    let rows: Vec<RuleRow> = rules
+        .iter()
+        .map(|r| RuleRow {
+            exts: r.extensions.as_str().into(),
+            folder: r.folder.display().to_string().into(),
+        })
+        .collect();
+    model.set_vec(rows);
 }
 
 /// Elige carpeta con el diálogo nativo del sistema.
@@ -1191,6 +1427,241 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
     ui.on_settings_changed({
         let app = app.clone();
         move || app.save_settings()
+    });
+    // Columnas: arrastrar el borde, mostrar/ocultar y cambiar el orden.
+    macro_rules! table_cols {
+        ($global:ident, $rows:ident) => {
+            ui.global::<$global>().on_resize({
+                let app = app.clone();
+                move |i, width| {
+                    if let Some(mut c) = app.$rows.row_data(i as usize) {
+                        c.width = width.max(settings::MIN_COL_WIDTH);
+                        app.$rows.set_row_data(i as usize, c);
+                    }
+                }
+            });
+            ui.global::<$global>().on_resize_done({
+                let app = app.clone();
+                move || app.save_columns()
+            });
+            ui.global::<$global>().on_reorder({
+                let app = app.clone();
+                move |from, x| {
+                    let from = from as usize;
+                    let mut all: Vec<ColState> = app.$rows.iter().collect();
+                    if from >= all.len() {
+                        return;
+                    }
+                    // Destino: la columna visible sobre la que se suelta.
+                    let mut edge = 0.0;
+                    let mut to = None;
+                    for (i, c) in all.iter().enumerate() {
+                        if c.shown {
+                            edge += c.width;
+                            if x < edge {
+                                to = Some(i);
+                                break;
+                            }
+                        }
+                    }
+                    let to = to.unwrap_or_else(|| all.iter().rposition(|c| c.shown).unwrap_or(0));
+                    if to == from {
+                        return;
+                    }
+                    let c = all.remove(from);
+                    all.insert(to, c);
+                    app.$rows.set_vec(all);
+                    app.save_columns();
+                }
+            });
+        };
+    }
+    table_cols!(DlCols, col_rows);
+    table_cols!(GrabCols, grab_col_rows);
+    ui.on_col_toggle({
+        let app = app.clone();
+        move |i| {
+            let i = i as usize;
+            if let Some(mut c) = app.col_rows.row_data(i) {
+                c.shown = !c.shown;
+                app.col_rows.set_row_data(i, c);
+                app.save_columns();
+            }
+        }
+    });
+    ui.on_col_move({
+        let app = app.clone();
+        move |i, dir| {
+            let (i, j) = (i as usize, i + dir);
+            if j < 0 || j as usize >= app.col_rows.row_count() {
+                return;
+            }
+            let j = j as usize;
+            if let (Some(a), Some(b)) = (app.col_rows.row_data(i), app.col_rows.row_data(j)) {
+                app.col_rows.set_row_data(i, b);
+                app.col_rows.set_row_data(j, a);
+                app.save_columns();
+            }
+        }
+    });
+    ui.on_col_reset({
+        let app = app.clone();
+        move || {
+            fill_columns(
+                Table::Downloads,
+                &app.col_rows,
+                &settings::default_columns(Table::Downloads),
+            );
+            app.save_columns();
+        }
+    });
+    // Barra de título propia: mover, redimensionar, minimizar, maximizar, cerrar.
+    ui.on_win_drag({
+        let app = app.clone();
+        move || {
+            if let Some(ui) = app.ui() {
+                ui.window().with_winit_window(|w| {
+                    let _ = w.drag_window();
+                });
+            }
+        }
+    });
+    ui.on_win_resize({
+        let app = app.clone();
+        move |edge| {
+            use slint::winit_030::winit::window::ResizeDirection as D;
+            let dir = match edge {
+                0 => D::North,
+                1 => D::NorthEast,
+                2 => D::East,
+                3 => D::SouthEast,
+                4 => D::South,
+                5 => D::SouthWest,
+                6 => D::West,
+                _ => D::NorthWest,
+            };
+            if let Some(ui) = app.ui() {
+                ui.window().with_winit_window(|w| {
+                    let _ = w.drag_resize_window(dir);
+                });
+            }
+        }
+    });
+    ui.on_win_minimize({
+        let app = app.clone();
+        move || {
+            if let Some(ui) = app.ui() {
+                ui.window().set_minimized(true);
+            }
+        }
+    });
+    ui.on_win_toggle_maximize({
+        let app = app.clone();
+        move || {
+            if let Some(ui) = app.ui() {
+                let w = ui.window();
+                w.set_maximized(!w.is_maximized());
+                ui.set_maximized(w.is_maximized());
+            }
+        }
+    });
+    ui.on_win_close({
+        let app = app.clone();
+        move || app.close_requested()
+    });
+    ui.on_speed_text_accepted({
+        let app = app.clone();
+        move |text| {
+            let Some(ui) = app.ui() else { return };
+            match settings::parse_speed(&text) {
+                Ok(limit) => {
+                    app.manager.update_settings(|q| q.speed_limit = limit);
+                    ui.set_speed_text(settings::speed_text(limit).into());
+                    app.show("", false);
+                }
+                Err(()) => {
+                    app.show(
+                        "No entiendo ese límite. Escribe, por ejemplo, 700 KB/s, 3 MB/s o «Sin límite».",
+                        true,
+                    );
+                    let current = app.manager.settings().speed_limit;
+                    ui.set_speed_text(settings::speed_text(current).into());
+                }
+            }
+        }
+    });
+    ui.on_speed_preset({
+        let app = app.clone();
+        move |i| {
+            let Some(ui) = app.ui() else { return };
+            let limit = settings::speed_limit_bytes(i);
+            app.manager.update_settings(|q| q.speed_limit = limit);
+            ui.set_speed_text(settings::speed_text(limit).into());
+        }
+    });
+    ui.on_schedule_day_toggled({
+        let app = app.clone();
+        move |day| {
+            let Some(ui) = app.ui() else { return };
+            set_schedule_days(&ui, ui.get_schedule_days() ^ (1 << day));
+            app.save_settings();
+        }
+    });
+    ui.on_rule_add({
+        let app = app.clone();
+        move || {
+            app.settings
+                .borrow_mut()
+                .file_rules
+                .push(settings::RuleCfg::default());
+            fill_rules(&app.rule_rows, &app.settings.borrow().file_rules);
+        }
+    });
+    ui.on_rule_remove({
+        let app = app.clone();
+        move |i| {
+            let mut s = app.settings.borrow_mut();
+            if (i as usize) < s.file_rules.len() {
+                s.file_rules.remove(i as usize);
+            }
+            s.save();
+            fill_rules(&app.rule_rows, &s.file_rules);
+        }
+    });
+    ui.on_rule_exts_edited({
+        let app = app.clone();
+        move |i, text| {
+            // La fila de la lista no se rehace: así no se pierde el cursor.
+            let mut s = app.settings.borrow_mut();
+            if let Some(r) = s.file_rules.get_mut(i as usize) {
+                r.extensions = text.to_string();
+            }
+            s.save();
+        }
+    });
+    ui.on_rule_choose({
+        let app = app.clone();
+        move |i| {
+            let current = app
+                .settings
+                .borrow()
+                .file_rules
+                .get(i as usize)
+                .map(|r| r.folder.display().to_string())
+                .unwrap_or_default();
+            if let Some(dir) = pick_folder(&current) {
+                let mut s = app.settings.borrow_mut();
+                if let Some(r) = s.file_rules.get_mut(i as usize) {
+                    r.folder = dir;
+                }
+                s.save();
+                fill_rules(&app.rule_rows, &s.file_rules);
+            }
+        }
+    });
+    ui.on_finish_cancel({
+        let app = app.clone();
+        move || app.cancel_countdown()
     });
     ui.on_choose_download_dir({
         let app = app.clone();

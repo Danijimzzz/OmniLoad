@@ -4,7 +4,13 @@
 //
 // La lógica vive en Rust (src/); aquí solo está la presentación.
 
-import { ComboBox, LineEdit, ListView, Palette, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+// Tipografía propia (Inter, licencia OFL): así las letras se ven igual en
+// todos los equipos y no dependen de las fuentes ni del suavizado del sistema.
+import "fonts/Inter-Regular.otf";
+import "fonts/Inter-Medium.otf";
+import "fonts/Inter-SemiBold.otf";
+import "fonts/Inter-Bold.otf";
+import { ListView, Palette, ScrollView } from "std-widgets.slint";
 
 // ---------------------------------------------------------------- Tema ----
 
@@ -18,6 +24,12 @@ export global Theme {
     in-out property <int> accent-index: 0;
     in-out property <bool> compact: false;
     in-out property <bool> reduce-transparency: false;
+    // Tamaño de letra: 0 pequeño, 1 normal, 2 grande.
+    in-out property <int> font-level: 1;
+    // Desenfoque de sombras y brillos del cristal: 0 suave, 1 normal, 2 fuerte.
+    in-out property <int> blur-level: 1;
+    out property <float> fscale: [0.9, 1.0, 1.15][font-level];
+    out property <length> shadow-blur: [14px, 32px, 56px][blur-level];
 
     // Tema efectivo: con "según el sistema", cada tema pasa a su pareja
     // clara u oscura (Cristal claro ↔ Cristal oscuro, Claro ↔ Grafito).
@@ -52,11 +64,24 @@ export global Theme {
     out property <color> warn: eff == 4 ? #ffd400 : dark ? #f3b860 : #93560a;
     out property <color> err: eff == 4 ? #ff7b7b : dark ? #ff8a80 : #b3261e;
 
+    // Capas de estado (pasar el ratón, pulsar) que funcionan en cualquier tema:
+    // una película del color del texto sobre lo que haya debajo.
+    out property <color> hover: text.with-alpha(eff == 4 ? 0.22 : 0.07);
+    out property <color> press: text.with-alpha(eff == 4 ? 0.34 : 0.13);
+    // Cuadros de texto y selectores: algo más hundidos que el panel.
+    out property <color> field: [#ffffffb3, #0f1424a6, #ffffff, #181b20, #000000][pal];
+    // Barra de título: se funde con la ventana en cada tema.
+    out property <color> bar: [#ffffffb3, #1c2236b0, #f3f4f7, #1a1d22, #000000][eff];
+    out property <color> bar-line: [#141e3c24, #ffffff1f, #d9dde4, #2b3039, #ffffff][eff];
+    // Anillo de foco (teclado) y halo del campo enfocado.
+    out property <color> ring: accent.with-alpha(0.55);
+    // Fondo (opaco) de los menús desplegables.
+    out property <color> menu-bg: eff == 4 ? #000000 : eff == 1 ? #1c2236 : eff == 3 ? #22262d : #ffffff;
     out property <length> r: eff <= 1 ? 18px : eff == 4 ? 2px : 8px;
     out property <length> r2: eff <= 1 ? 10px : eff == 4 ? 2px : 6px;
     out property <length> lw: eff == 4 ? 2px : 1px;
-    out property <length> row-h: compact ? 26px : 34px;
-    out property <length> font: compact ? 12.5px : 13px;
+    out property <length> row-h: (compact ? 26px : 34px) * fscale;
+    out property <length> font: (compact ? 12.5px : 13px) * fscale;
 
     // Color de un estado: 0 acento, 1 bien, 2 aviso, 3 error, 4 apagado.
     public pure function tone(t: int) -> color {
@@ -132,7 +157,7 @@ component Panel inherits Rectangle {
     border-color: Theme.rim;
     border-width: Theme.lw;
     border-radius: Theme.r;
-    drop-shadow-blur: Theme.glass ? 32px : 0px;
+    drop-shadow-blur: Theme.glass ? Theme.shadow-blur : 0px;
     drop-shadow-offset-y: Theme.glass ? 12px : 0px;
     drop-shadow-color: Theme.shadow;
     @children
@@ -142,6 +167,166 @@ component Panel inherits Rectangle {
         width: max(0px, parent.width - 2 * Theme.r);
         height: 1px;
         background: Theme.spec;
+    }
+}
+
+// Una columna de una tabla (el orden del modelo es el orden en pantalla).
+export struct ColState {
+    // Descargas: 0 Nombre, 1 Host, 2 Tamaño, 3 Progreso, 4 Velocidad,
+    // 5 Restante, 6 Prioridad, 7 Estado. Capturador: 0 Nombre, 1 Host,
+    // 2 Tamaño, 3 Disponibilidad, 4 Prioridad, 5 Guardar en.
+    id: int,
+    name: string,
+    width: length,
+    shown: bool,
+}
+
+// Una regla por tipo de archivo en Ajustes › Automático.
+struct RuleRow {
+    exts: string,
+    folder: string,
+}
+
+// Cuadro de texto propio (de una línea). Misma interfaz que el LineEdit
+// estándar: `text`, `placeholder-text`, `edited`, `accepted`, `has-focus`.
+component LineEdit inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <bool> enabled: true;
+    // Botón × para vaciarlo.
+    in property <bool> clearable: false;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+    callback accepted(string);
+    forward-focus: input;
+    height: (Theme.compact ? 30px : 34px) * Theme.fscale;
+    min-width: 60px;
+    horizontal-stretch: 1;
+    border-radius: Theme.r2;
+    border-width: input.has-focus ? 1.5px : Theme.lw;
+    border-color: input.has-focus ? Theme.accent : area.has-hover ? Theme.text.with-alpha(0.22) : Theme.rim;
+    background: Theme.field;
+    opacity: enabled ? 1 : 0.5;
+    drop-shadow-blur: input.has-focus ? 8px : 0px;
+    drop-shadow-color: Theme.accent.with-alpha(0.35);
+    animate border-color { duration: 100ms; }
+    area := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 8px;
+        spacing: 6px;
+        Rectangle {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            clip: true;
+            if input.text == "" && root.placeholder-text != "": Text {
+                text: root.placeholder-text;
+                font-size: Theme.font;
+                color: Theme.muted.with-alpha(0.75);
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            // El texto largo se desplaza dentro de la caja (no se sale de ella).
+            flick := Flickable {
+                interactive: false;
+                viewport-width: input.width;
+                viewport-height: self.height;
+                input := TextInput {
+                    x: 0px;
+                    y: 0px;
+                    width: max(flick.width, self.preferred-width + 2px);
+                    height: flick.height;
+                    single-line: true;
+                    enabled: root.enabled;
+                    font-size: Theme.font;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                    selection-background-color: Theme.accent.with-alpha(0.35);
+                    selection-foreground-color: Theme.text;
+                    edited => { root.edited(self.text); }
+                    accepted => { root.accepted(self.text); }
+                    cursor-position-changed(p) => {
+                        if p.x + flick.viewport-x < 0px {
+                            flick.viewport-x = -p.x;
+                        } else if p.x + flick.viewport-x > flick.width - 3px {
+                            flick.viewport-x = -(p.x - flick.width + 3px);
+                        }
+                    }
+                }
+            }
+        }
+        if root.clearable && input.text != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: clear.has-hover ? Theme.press : transparent;
+                accessible-role: button;
+                accessible-label: "Borrar";
+                Icon {
+                    size: 11px;
+                    x: 4.5px;
+                    y: 4.5px;
+                    commands: "M6 6l12 12M18 6L6 18";
+                    ink: Theme.muted;
+                    stroke-width: 2.6px;
+                }
+                clear := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        input.text = "";
+                        root.edited("");
+                        input.focus();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Cuadro de texto de varias líneas (como el LineEdit, para pegar enlaces).
+component TextEdit inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <TextWrap> wrap: word-wrap;
+    forward-focus: input;
+    border-radius: Theme.r2;
+    border-width: input.has-focus ? 1.5px : Theme.lw;
+    border-color: input.has-focus ? Theme.accent : Theme.rim;
+    background: Theme.field;
+    drop-shadow-blur: input.has-focus ? 8px : 0px;
+    drop-shadow-color: Theme.accent.with-alpha(0.35);
+    animate border-color { duration: 100ms; }
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+    Flickable {
+        interactive: false;
+        viewport-height: max(self.height, input.preferred-height + 24px);
+        if input.text == "" && root.placeholder-text != "": Text {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            text: root.placeholder-text;
+            wrap: word-wrap;
+            font-size: Theme.font;
+            color: Theme.muted.with-alpha(0.75);
+        }
+        input := TextInput {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            wrap: root.wrap;
+            font-size: Theme.font;
+            color: Theme.text;
+            selection-background-color: Theme.accent.with-alpha(0.35);
+            selection-foreground-color: Theme.text;
+        }
     }
 }
 
@@ -158,24 +343,45 @@ component Btn inherits Rectangle {
     accessible-role: button;
     accessible-label: label;
     accessible-action-default => { if enabled { clicked(); } }
-    height: Theme.compact ? 30px : 34px;
+    forward-focus: focus;
+    height: (Theme.compact ? 30px : 34px) * Theme.fscale;
     min-width: max(self.height, content.min-width);
     horizontal-stretch: 0;
     border-radius: Theme.r2;
     border-width: Theme.lw;
-    border-color: primary ? Theme.accent : Theme.rim;
-    background: primary ? Theme.accent : touch.has-hover ? Theme.head : Theme.panel2;
+    border-color: primary ? Theme.accent : touch.has-hover ? Theme.text.with-alpha(0.22) : Theme.rim;
+    background: primary ? Theme.accent : Theme.panel2;
     opacity: enabled ? 1 : 0.45;
+    // Capa de hover/pulsado.
+    Rectangle {
+        border-radius: parent.border-radius;
+        background: !root.enabled ? transparent
+            : touch.pressed ? (root.primary ? #00000030 : Theme.press)
+            : touch.has-hover ? (root.primary ? #ffffff26 : Theme.hover)
+            : transparent;
+        animate background { duration: 90ms; }
+    }
+    // Anillo de foco con teclado.
+    if focus.has-focus: Rectangle {
+        x: -2px; y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: Theme.r2 + 2px;
+        border-width: 2px;
+        border-color: Theme.ring;
+    }
     content := HorizontalLayout {
-        padding-left: text == "" ? 0px : 12px;
-        padding-right: text == "" ? 0px : 12px;
-        spacing: 6px;
+        padding-left: text == "" ? 0px : 14px;
+        padding-right: text == "" ? 0px : 14px;
+        spacing: 7px;
         alignment: center;
-        if icon != "": Icon {
-            y: (parent.height - self.height) / 2;
-            commands: icon;
-            filled: icon-filled;
-            ink: icon-color;
+        if icon != "": VerticalLayout {
+            alignment: center;
+            Icon {
+                commands: icon;
+                filled: icon-filled;
+                ink: icon-color;
+            }
         }
         if text != "": Text {
             text: root.text;
@@ -185,10 +391,20 @@ component Btn inherits Rectangle {
             vertical-alignment: center;
         }
     }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == " " || e.text == "\n" {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => { focus.focus(); root.clicked(); }
     }
 }
 
@@ -201,25 +417,49 @@ component Check inherits Rectangle {
     accessible-checkable: true;
     accessible-checked: checked;
     accessible-label: label;
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
+    forward-focus: focus;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
     border-width: checked ? 0px : 1.5px;
-    border-color: Theme.muted;
-    background: checked ? Theme.accent : transparent;
+    border-color: touch.has-hover ? Theme.text : Theme.muted;
+    background: checked ? Theme.accent : touch.has-hover ? Theme.hover : transparent;
     opacity: enabled ? 1 : 0.4;
-    if checked: Icon {
+    animate background { duration: 120ms; }
+    if focus.has-focus: Rectangle {
+        x: -3px; y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: Theme.ring;
+    }
+    Icon {
         size: 12px;
-        x: 2px;
-        y: 2px;
+        x: 3px;
+        y: 3px;
         commands: "M5 12l5 5 9-10";
         ink: Theme.on-accent;
         stroke-width: 3px;
+        opacity: checked ? 1 : 0;
+        animate opacity { duration: 120ms; }
     }
-    TouchArea {
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == " " {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => {
+            focus.focus();
             root.checked = !root.checked;
             root.toggled(root.checked);
         }
@@ -262,21 +502,22 @@ component Bar inherits Rectangle {
     in property <float> fraction;
     in property <string> text;
     in property <color> fill: Theme.accent;
-    height: 16px;
-    border-radius: 5px;
+    height: 18px;
+    border-radius: 9px;
     background: Theme.track;
     clip: true;
     Rectangle {
         x: 0;
         width: parent.width * max(0, root.fraction);
-        background: root.fill;
-        opacity: 0.85;
+        background: @linear-gradient(90deg, root.fill.darker(0.15) 0%, root.fill 100%);
+        border-radius: 9px;
+        animate width { duration: 250ms; easing: ease-out; }
     }
     Text {
-        x: 6px;
+        x: 8px;
         text: root.text;
-        font-size: 11px;
-        font-weight: 600;
+        font-size: 11px * Theme.fscale;
+        font-weight: 700;
         color: Theme.text;
         vertical-alignment: center;
     }
@@ -289,23 +530,148 @@ component Cell inherits Text {
     overflow: elide;
 }
 
-component HeadCell inherits Rectangle {
-    in property <string> text;
-    border-width: 0;
-    Text {
-        x: 10px;
-        width: parent.width - 12px;
-        text: root.text;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: Theme.muted;
-        vertical-alignment: center;
-        overflow: elide;
+// Hueco de una columna: ancho propio, sin estirarse (un ancho de columna no
+// afecta a las demás; lo que sobra queda a la derecha).
+component ColSlot inherits Rectangle {
+    in property <ColState> spec;
+    visible: spec.shown;
+    min-width: spec.shown ? spec.width : 0px;
+    max-width: spec.shown ? spec.width : 0px;
+    preferred-width: spec.shown ? spec.width : 0px;
+    horizontal-stretch: 0;
+}
+
+// Cabecera de una tabla: arrastrar el borde derecho cambia el ancho y
+// arrastrar el nombre de una columna la cambia de sitio.
+component ColsHeader inherits Rectangle {
+    in property <[ColState]> cols;
+    // Nuevo ancho (absoluto) de la columna `i` mientras se arrastra su borde.
+    callback resize(int, length);
+    callback resize-done();
+    // Columna que se suelta y posición del ratón dentro de la cabecera.
+    callback reorder(int, length);
+    in-out property <int> dragging: -1;
+    in-out property <length> pointer-x;
+    height: 34px;
+    background: Theme.head;
+    HorizontalLayout {
+        for c[i] in root.cols: ColSlot {
+            spec: c;
+            property <bool> hot: root.dragging >= 0 && root.dragging != i
+                && root.pointer-x >= self.absolute-position.x
+                && root.pointer-x < self.absolute-position.x + self.width;
+            property <length> press-x;
+            property <bool> pressing: false;
+            property <length> w0;
+            property <length> x0;
+            property <bool> sizing: false;
+            Rectangle {
+                background: root.dragging == i ? Theme.accent.with-alpha(0.28)
+                    : hot ? Theme.accent.with-alpha(0.16)
+                    : grab.has-hover ? Theme.hover : transparent;
+                animate background { duration: 90ms; }
+            }
+            Text {
+                x: 12px;
+                width: parent.width - 16px;
+                text: c.name;
+                font-size: 11.5px * Theme.fscale;
+                font-weight: 700;
+                color: root.dragging == i ? Theme.text : Theme.muted;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if hot: Rectangle {
+                x: 0;
+                width: 3px;
+                background: Theme.accent;
+            }
+            Rectangle {
+                x: parent.width - 1px;
+                y: 8px;
+                width: 1px;
+                height: parent.height - 16px;
+                background: Theme.rim;
+            }
+            grab := TouchArea {
+                mouse-cursor: pointer;
+                pointer-event(e) => {
+                    if e.button == PointerEventButton.left {
+                        if e.kind == PointerEventKind.down {
+                            pressing = true;
+                            press-x = self.absolute-position.x + self.mouse-x;
+                        } else if e.kind == PointerEventKind.up {
+                            if root.dragging == i {
+                                root.dragging = -1;
+                                root.reorder(i, root.pointer-x - root.absolute-position.x);
+                            }
+                            pressing = false;
+                        }
+                    }
+                }
+                moved => {
+                    if pressing {
+                        root.pointer-x = self.absolute-position.x + self.mouse-x;
+                        if root.dragging == i || abs(root.pointer-x - press-x) > 6px {
+                            root.dragging = i;
+                        }
+                    }
+                }
+            }
+            // Asa para el ancho, siempre encima.
+            TouchArea {
+                x: parent.width - 6px;
+                width: 12px;
+                mouse-cursor: col-resize;
+                Rectangle {
+                    x: 5px;
+                    width: 2px;
+                    background: parent.has-hover || parent.pressed ? Theme.accent : transparent;
+                }
+                pointer-event(e) => {
+                    if e.button == PointerEventButton.left {
+                        if e.kind == PointerEventKind.down {
+                            sizing = true;
+                            w0 = c.width;
+                            x0 = self.absolute-position.x + self.mouse-x;
+                        } else if e.kind == PointerEventKind.up {
+                            sizing = false;
+                            root.resize-done();
+                        }
+                    }
+                }
+                moved => {
+                    if sizing {
+                        root.resize(i, max(48px, w0 + (self.absolute-position.x + self.mouse-x - x0)));
+                    }
+                }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+    // Lo que se arrastra, siguiendo al ratón.
+    if root.dragging >= 0: Rectangle {
+        x: root.pointer-x - root.absolute-position.x - 44px;
+        y: 4px;
+        width: 88px;
+        height: parent.height - 8px;
+        border-radius: Theme.r2;
+        background: Theme.accent;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000050;
+        Text {
+            text: root.cols[root.dragging].name;
+            font-size: 11.5px * Theme.fscale;
+            font-weight: 700;
+            color: Theme.on-accent;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
     Rectangle {
-        x: parent.width - 1px;
-        width: 1px;
-        background: Theme.line;
+        y: parent.height - Theme.lw;
+        height: Theme.lw;
+        background: Theme.rim;
     }
 }
 
@@ -337,161 +703,140 @@ component FolderIcon inherits Icon {
     stroke-width: 2px;
 }
 
-// Columnas de la tabla de descargas.
-global DlCols {
-    out property <length> host: 150px;
-    out property <length> size: 90px;
-    out property <length> progress: 170px;
-    out property <length> speed: 95px;
-    out property <length> eta: 95px;
-    out property <length> prio: 75px;
-    out property <length> status: 210px;
+// Columnas de las tablas: las pone Rust (ajustes guardados).
+export global DlCols {
+    in-out property <[ColState]> cols;
+    callback resize(int, length);
+    callback resize-done();
+    callback reorder(int, length);
 }
 
-component DlHeader inherits Rectangle {
-    height: 32px;
-    background: Theme.head;
-    HorizontalLayout {
-        HeadCell { text: "Nombre"; horizontal-stretch: 1; }
-        HeadCell { text: "Host"; width: DlCols.host; }
-        HeadCell { text: "Tamaño"; width: DlCols.size; }
-        HeadCell { text: "Progreso"; width: DlCols.progress; }
-        HeadCell { text: "Velocidad"; width: DlCols.speed; }
-        HeadCell { text: "Restante"; width: DlCols.eta; }
-        HeadCell { text: "Prioridad"; width: DlCols.prio; }
-        HeadCell { text: "Estado"; width: DlCols.status; }
-    }
-    Rectangle {
-        y: parent.height - Theme.lw;
-        height: Theme.lw;
-        background: Theme.rim;
-    }
+export global GrabCols {
+    in-out property <[ColState]> cols;
+    callback resize(int, length);
+    callback resize-done();
+    callback reorder(int, length);
 }
 
 component DlLine inherits Rectangle {
     in property <DlRow> item;
+    in property <[ColState]> cols;
     callback clicked();
     callback toggle();
     height: Theme.row-h;
-    background: item.selected ? Theme.selbg : item.is-package ? Theme.panel2 : transparent;
-    TouchArea { clicked => { root.clicked(); } }
+    background: item.selected ? Theme.selbg : touch.has-hover ? Theme.hover : item.is-package ? Theme.panel2 : transparent;
+    animate background { duration: 70ms; }
+    touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
-        HorizontalLayout {
-            horizontal-stretch: 1;
-            padding-left: item.is-package ? 6px : 58px;
-            padding-right: 8px;
-            spacing: 6px;
-            if item.is-package: Expander {
-                y: (parent.height - self.height) / 2;
-                expanded: item.expanded;
-                toggle => { root.toggle(); }
+        for c in root.cols: ColSlot {
+            spec: c;
+            if c.id == 0: HorizontalLayout {
+                padding-left: item.is-package ? 8px : 36px;
+                padding-right: 8px;
+                spacing: 6px;
+                if item.is-package: VerticalLayout {
+                    alignment: center;
+                    Expander {
+                        expanded: item.expanded;
+                        toggle => { root.toggle(); }
+                    }
+                }
+                if item.is-package: VerticalLayout {
+                    alignment: center;
+                    FolderIcon { }
+                }
+                Cell {
+                    text: item.name;
+                    font-weight: item.is-package ? 600 : 400;
+                    horizontal-stretch: 1;
+                }
             }
-            if item.is-package: FolderIcon { y: (parent.height - self.height) / 2; }
-            Cell {
-                text: item.name;
-                font-weight: item.is-package ? 600 : 400;
-                horizontal-stretch: 1;
+            if c.id == 1: Cell { x: 12px; width: parent.width - 16px; text: item.host; color: Theme.muted; }
+            if c.id == 2: Cell { x: 12px; width: parent.width - 16px; text: item.size; }
+            if c.id == 3: VerticalLayout {
+                alignment: center;
+                padding-left: 12px;
+                padding-right: 12px;
+                Bar {
+                    fraction: item.fraction;
+                    text: item.progress;
+                    fill: Theme.tone(item.tone);
+                }
             }
-        }
-        Cell { text: item.host; color: Theme.muted; width: DlCols.host; }
-        Cell { text: item.size; width: DlCols.size; }
-        Rectangle {
-            width: DlCols.progress;
-            Bar {
-                x: 0;
-                width: parent.width - 10px;
-                y: (parent.height - self.height) / 2;
-                fraction: item.fraction;
-                text: item.progress;
-                fill: Theme.tone(item.tone);
+            if c.id == 4: Cell { x: 12px; width: parent.width - 16px; text: item.speed; }
+            if c.id == 5: Cell { x: 12px; width: parent.width - 16px; text: item.eta; }
+            if c.id == 6: Cell { x: 12px; width: parent.width - 16px; text: item.priority; }
+            if c.id == 7: Cell {
+                x: 12px;
+                width: parent.width - 16px;
+                text: item.status;
+                color: Theme.tone(item.tone);
+                font-weight: 600;
             }
-        }
-        Cell { text: item.speed; width: DlCols.speed; }
-        Cell { text: item.eta; width: DlCols.eta; }
-        Cell { text: item.priority; width: DlCols.prio; }
-        Cell {
-            text: item.status;
-            width: DlCols.status;
-            color: Theme.tone(item.tone);
-            font-weight: 600;
         }
     }
     Rectangle {
         y: parent.height - 1px;
         height: 1px;
         background: Theme.line;
-    }
-}
-
-global GrabCols {
-    out property <length> host: 160px;
-    out property <length> size: 90px;
-    out property <length> avail: 230px;
-    out property <length> prio: 75px;
-    out property <length> dest: 240px;
-}
-
-component GrabHeader inherits Rectangle {
-    height: 32px;
-    background: Theme.head;
-    HorizontalLayout {
-        HeadCell { text: "Nombre"; horizontal-stretch: 1; }
-        HeadCell { text: "Host"; width: GrabCols.host; }
-        HeadCell { text: "Tamaño"; width: GrabCols.size; }
-        HeadCell { text: "Disponibilidad"; width: GrabCols.avail; }
-        HeadCell { text: "Prioridad"; width: GrabCols.prio; }
-        HeadCell { text: "Guardar en"; width: GrabCols.dest; }
-    }
-    Rectangle {
-        y: parent.height - Theme.lw;
-        height: Theme.lw;
-        background: Theme.rim;
     }
 }
 
 component GrabLine inherits Rectangle {
     in property <GrabTreeRow> item;
+    in property <[ColState]> cols;
     callback clicked();
     callback toggle();
     callback check(bool);
     height: Theme.row-h;
-    background: item.selected ? Theme.selbg : item.is-package ? Theme.panel2 : transparent;
-    TouchArea { clicked => { root.clicked(); } }
+    background: item.selected ? Theme.selbg : touch.has-hover ? Theme.hover : item.is-package ? Theme.panel2 : transparent;
+    animate background { duration: 70ms; }
+    touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
-        HorizontalLayout {
-            horizontal-stretch: 1;
-            padding-left: item.is-package ? 6px : 38px;
-            padding-right: 8px;
-            spacing: 8px;
-            if item.is-package: Expander {
-                y: (parent.height - self.height) / 2;
-                expanded: item.expanded;
-                toggle => { root.toggle(); }
+        for c in root.cols: ColSlot {
+            spec: c;
+            if c.id == 0: HorizontalLayout {
+                padding-left: item.is-package ? 8px : 28px;
+                padding-right: 8px;
+                spacing: 8px;
+                if item.is-package: VerticalLayout {
+                    alignment: center;
+                    Expander {
+                        expanded: item.expanded;
+                        toggle => { root.toggle(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Check {
+                        checked: item.checked;
+                        label: "Incluir " + item.name;
+                        toggled(v) => { root.check(v); }
+                    }
+                }
+                if item.is-package: VerticalLayout {
+                    alignment: center;
+                    FolderIcon { }
+                }
+                Cell {
+                    text: item.name;
+                    font-weight: item.is-package ? 600 : 400;
+                    opacity: item.dim ? 0.55 : 1;
+                    horizontal-stretch: 1;
+                }
             }
-            Check {
-                y: (parent.height - self.height) / 2;
-                checked: item.checked;
-                label: "Incluir " + item.name;
-                toggled(v) => { root.check(v); }
+            if c.id == 1: Cell { x: 12px; width: parent.width - 16px; text: item.host; color: Theme.muted; }
+            if c.id == 2: Cell { x: 12px; width: parent.width - 16px; text: item.size; }
+            if c.id == 3: Cell {
+                x: 12px;
+                width: parent.width - 16px;
+                text: item.avail;
+                color: Theme.tone(item.tone);
+                font-weight: 600;
             }
-            if item.is-package: FolderIcon { y: (parent.height - self.height) / 2; }
-            Cell {
-                text: item.name;
-                font-weight: item.is-package ? 600 : 400;
-                opacity: item.dim ? 0.55 : 1;
-                horizontal-stretch: 1;
-            }
+            if c.id == 4: Cell { x: 12px; width: parent.width - 16px; text: item.priority; }
+            if c.id == 5: Cell { x: 12px; width: parent.width - 16px; text: item.dest; color: Theme.muted; }
         }
-        Cell { text: item.host; color: Theme.muted; width: GrabCols.host; }
-        Cell { text: item.size; width: GrabCols.size; }
-        Cell {
-            text: item.avail;
-            width: GrabCols.avail;
-            color: Theme.tone(item.tone);
-            font-weight: 600;
-        }
-        Cell { text: item.priority; width: GrabCols.prio; }
-        Cell { text: item.dest; color: Theme.muted; width: GrabCols.dest; }
     }
     Rectangle {
         y: parent.height - 1px;
@@ -500,16 +845,152 @@ component GrabLine inherits Rectangle {
     }
 }
 
+// Botón «Columnas» con el menú para mostrar, ocultar y ordenar columnas.
+component ColsMenu inherits Btn {
+    in property <[ColState]> cols;
+    callback toggle(int);
+    callback move(int, int);
+    callback reset();
+    label: "Columnas";
+    icon: "M5 5v14M12 5v14M19 5v14";
+    text: "";
+    clicked => { menu.show(); }
+    menu := PopupWindow {
+        x: parent.width - 250px;
+        y: parent.height + 4px;
+        width: 250px;
+        Rectangle {
+            background: Theme.menu-bg;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.rim;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000055;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 2px;
+                Text {
+                    text: "Columnas";
+                    font-size: 13px * Theme.fscale;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+                Text {
+                    text: "Marca las que quieres ver. También puedes arrastrar las cabeceras para cambiarlas de sitio.";
+                    font-size: 11.5px * Theme.fscale;
+                    color: Theme.muted;
+                    wrap: word-wrap;
+                }
+                Rectangle { height: 6px; }
+                for c[i] in root.cols: Rectangle {
+                    height: 34px;
+                    border-radius: 8px;
+                    background: row-ta.has-hover ? Theme.hover : transparent;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 4px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 18px;
+                                height: 18px;
+                                border-radius: 5px;
+                                border-width: c.shown ? 0px : 1.5px;
+                                border-color: Theme.muted;
+                                background: c.shown ? Theme.accent : transparent;
+                                opacity: c.id == 0 ? 0.55 : 1;
+                                accessible-role: checkbox;
+                                accessible-checkable: true;
+                                accessible-checked: c.shown;
+                                accessible-label: c.name;
+                                if c.shown: Icon { size: 12px; x: 3px; y: 3px; commands: "M5 12l5 5 9-10"; ink: Theme.on-accent; stroke-width: 3px; }
+                            }
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: c.name;
+                            font-size: Theme.font;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 26px;
+                                height: 26px;
+                                border-radius: 7px;
+                                opacity: i > 0 ? 1 : 0.3;
+                                background: up.has-hover && i > 0 ? Theme.press : transparent;
+                                Icon { size: 14px; x: 6px; y: 6px; commands: "M6 15l6-6 6 6"; ink: Theme.muted; }
+                                accessible-role: button;
+                                accessible-label: "Subir " + c.name;
+                                up := TouchArea { enabled: i > 0; mouse-cursor: pointer; clicked => { root.move(i, -1); } }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 26px;
+                                height: 26px;
+                                border-radius: 7px;
+                                opacity: i < root.cols.length - 1 ? 1 : 0.3;
+                                background: down.has-hover && i < root.cols.length - 1 ? Theme.press : transparent;
+                                Icon { size: 14px; x: 6px; y: 6px; commands: "M6 9l6 6 6-6"; ink: Theme.muted; }
+                                accessible-role: button;
+                                accessible-label: "Bajar " + c.name;
+                                down := TouchArea { enabled: i < root.cols.length - 1; mouse-cursor: pointer; clicked => { root.move(i, 1); } }
+                            }
+                        }
+                    }
+                    row-ta := TouchArea {
+                        width: parent.width - 70px;
+                        mouse-cursor: c.id == 0 ? MouseCursor.default : MouseCursor.pointer;
+                        clicked => { if c.id != 0 { root.toggle(i); } }
+                    }
+                }
+                Rectangle { height: 6px; }
+                Btn { text: "Restablecer columnas"; clicked => { root.reset(); } }
+            }
+        }
+    }
+}
+
 component FieldLabel inherits Text {
-    font-size: 12px;
+    font-size: 12px * Theme.fscale;
     font-weight: 600;
     color: Theme.muted;
 }
 
-component SectionTitle inherits Text {
-    font-size: 15px;
-    font-weight: 700;
-    color: Theme.text;
+// Título de sección de Ajustes: grande, con una raya de acento y una línea
+// que lo separa de lo anterior, para que se vea dónde empieza cada grupo.
+component SectionTitle inherits VerticalLayout {
+    in property <string> text;
+    in property <bool> first: false;
+    padding-top: first ? 4px : 22px;
+    padding-bottom: 6px;
+    spacing: 12px;
+    if !first: Rectangle {
+        height: 1px;
+        background: Theme.line;
+    }
+    HorizontalLayout {
+        spacing: 10px;
+        Rectangle {
+            width: 4px;
+            height: 20px;
+            border-radius: 2px;
+            background: Theme.accent;
+        }
+        Text {
+            text: root.text;
+            font-size: 19px * Theme.fscale;
+            font-weight: 700;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+    }
 }
 
 // Botones de opción en fila ("Abajo | A la derecha | Oculto").
@@ -527,9 +1008,10 @@ component Segmented inherits Rectangle {
         for opt[i] in options: Rectangle {
             height: 32px;
             border-radius: Theme.r2 - 2px;
-            background: i == root.current ? Theme.panel : transparent;
+            background: i == root.current ? Theme.panel : segta.has-hover ? Theme.hover : transparent;
             border-width: i == root.current ? Theme.lw : 0px;
             border-color: Theme.rim;
+            animate background { duration: 90ms; }
             accessible-role: button;
             accessible-label: opt;
             HorizontalLayout {
@@ -537,13 +1019,13 @@ component Segmented inherits Rectangle {
                 padding-right: 14px;
                 Text {
                     text: opt;
-                    font-size: 13px;
+                    font-size: 13px * Theme.fscale;
                     font-weight: 600;
                     color: Theme.text;
                     vertical-alignment: center;
                 }
             }
-            TouchArea {
+            segta := TouchArea {
                 mouse-cursor: pointer;
                 clicked => {
                     root.current = i;
@@ -564,10 +1046,10 @@ component SettingRow inherits HorizontalLayout {
         horizontal-stretch: 1;
         alignment: center;
         spacing: 2px;
-        Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.text; }
+        Text { text: root.title; font-size: 14px * Theme.fscale; font-weight: 600; color: Theme.text; }
         if root.subtitle != "": Text {
             text: root.subtitle;
-            font-size: 13px;
+            font-size: 13px * Theme.fscale;
             color: Theme.muted;
             wrap: word-wrap;
         }
@@ -621,8 +1103,8 @@ component ThemeCard inherits Rectangle {
                 border-radius: 3px; background: Theme.accent;
             }
         }
-        Text { text: root.title; font-size: 13px; font-weight: 600; color: Theme.text; }
-        Text { text: root.subtitle; font-size: 12px; color: Theme.muted; }
+        Text { text: root.title; font-size: 13px * Theme.fscale; font-weight: 600; color: Theme.text; }
+        Text { text: root.subtitle; font-size: 12px * Theme.fscale; color: Theme.muted; }
     }
     TouchArea {
         mouse-cursor: pointer;
@@ -660,14 +1142,15 @@ component TabBtn inherits Rectangle {
     border-radius: Theme.r2;
     border-width: active ? Theme.lw : 0px;
     border-color: Theme.rim;
-    background: active ? Theme.panel2 : transparent;
+    background: active ? Theme.panel2 : tabta.has-hover ? Theme.hover : transparent;
+    animate background { duration: 90ms; }
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
         spacing: 8px;
         Text {
             text: root.text;
-            font-size: 14px;
+            font-size: 14px * Theme.fscale;
             font-weight: 600;
             color: active ? Theme.text : Theme.muted;
             vertical-alignment: center;
@@ -683,7 +1166,7 @@ component TabBtn inherits Rectangle {
                 padding-right: 7px;
                 Text {
                     text: badge;
-                    font-size: 11px;
+                    font-size: 11px * Theme.fscale;
                     font-weight: 700;
                     color: Theme.on-accent;
                     vertical-alignment: center;
@@ -692,7 +1175,7 @@ component TabBtn inherits Rectangle {
             }
         }
     }
-    TouchArea {
+    tabta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
@@ -700,14 +1183,339 @@ component TabBtn inherits Rectangle {
 
 // ------------------------------------------------------------ Ventana ----
 
+// Desplegable propio (mismo aspecto que el resto de botones). Misma
+// interfaz que el ComboBox estándar: `model`, `current-index`, `selected`.
+component ComboBox inherits Rectangle {
+    in property <[string]> model;
+    in-out property <int> current-index: 0;
+    in property <bool> enabled: true;
+    callback selected(string);
+    height: Theme.compact ? 30px : 34px;
+    min-width: 110px;
+    border-radius: Theme.r2;
+    border-width: Theme.lw;
+    border-color: Theme.rim;
+    background: touch.has-hover ? Theme.head : Theme.panel2;
+    opacity: enabled ? 1 : 0.45;
+    accessible-role: combobox;
+    accessible-label: root.model[root.current-index];
+    forward-focus: fs;
+    // Teclado: ↑ ↓ cambian la opción, Intro o espacio abren la lista.
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == Key.DownArrow && root.current-index < root.model.length - 1 {
+                root.current-index += 1;
+                root.selected(root.model[root.current-index]);
+                return accept;
+            } else if e.text == Key.UpArrow && root.current-index > 0 {
+                root.current-index -= 1;
+                root.selected(root.model[root.current-index]);
+                return accept;
+            } else if e.text == Key.Return || e.text == " " {
+                menu.show();
+                return accept;
+            }
+            reject
+        }
+    }
+    if fs.has-focus: Rectangle {
+        x: -2px; y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: Theme.r2 + 2px;
+        border-width: 2px;
+        border-color: Theme.ring;
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 6px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.model[root.current-index];
+            font-size: Theme.font;
+            color: Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon { size: 14px; commands: "M6 9l6 6 6-6"; ink: Theme.muted; }
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { fs.focus(); menu.show(); }
+    }
+    menu := PopupWindow {
+        x: 0px;
+        y: root.height + 2px;
+        width: max(root.width, 140px);
+        Rectangle {
+            background: Theme.menu-bg;
+            border-radius: Theme.r2;
+            border-width: 1px;
+            border-color: Theme.rim;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Theme.shadow;
+            VerticalLayout {
+                padding: 4px;
+                spacing: 1px;
+                for m[i] in root.model: Rectangle {
+                    height: 30px;
+                    border-radius: 6px;
+                    background: ta.has-hover ? Theme.selbg : transparent;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 6px;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: m;
+                            font-size: Theme.font;
+                            font-weight: i == root.current-index ? 700 : 400;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                        }
+                        if i == root.current-index: VerticalLayout {
+                            alignment: center;
+                            Icon { size: 12px; commands: "M5 12l5 5 9-10"; ink: Theme.accent; stroke-width: 3px; }
+                        }
+                    }
+                    ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.current-index = i;
+                            root.selected(m);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Selector numérico propio, con − y +. Misma interfaz que el SpinBox
+// estándar: `value`, `minimum`, `maximum`.
+component SpinBox inherits Rectangle {
+    in-out property <int> value: 0;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <bool> enabled: true;
+    callback edited(int);
+    // Mantener pulsado − o + repite: -1 baja, 1 sube, 0 parado.
+    property <int> dir: 0;
+    property <bool> fast: false;
+    function step(d: int) {
+        root.value = min(root.maximum, max(root.minimum, root.value + d));
+        root.edited(root.value);
+    }
+    function commit(t: string) {
+        if t.is-float() {
+            root.value = min(root.maximum, max(root.minimum, t.to-float().round()));
+            root.edited(root.value);
+        }
+        field.text = root.value;
+    }
+    height: Theme.compact ? 30px : 34px;
+    min-width: 96px;
+    border-radius: Theme.r2;
+    border-width: field.has-focus ? 1.5px : Theme.lw;
+    border-color: field.has-focus ? Theme.accent : Theme.rim;
+    background: Theme.panel2;
+    opacity: enabled ? 1 : 0.45;
+    accessible-role: spinbox;
+    accessible-value: root.value;
+    Timer {
+        interval: root.fast ? 70ms : 380ms;
+        running: root.dir != 0 && root.enabled;
+        triggered => {
+            root.fast = true;
+            root.step(root.dir);
+            if (root.dir < 0 && root.value <= root.minimum) || (root.dir > 0 && root.value >= root.maximum) {
+                root.dir = 0;
+            }
+        }
+    }
+    HorizontalLayout {
+        Rectangle {
+            width: 32px;
+            background: minus.pressed ? Theme.press : minus.has-hover ? Theme.hover : transparent;
+            border-radius: Theme.r2;
+            animate background { duration: 80ms; }
+            Icon { size: 12px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; commands: "M5 12h14"; ink: root.value > root.minimum ? Theme.text : Theme.muted; }
+            minus := TouchArea {
+                enabled: root.enabled && root.value > root.minimum;
+                mouse-cursor: pointer;
+                pointer-event(e) => {
+                    if e.button == PointerEventButton.left {
+                        if e.kind == PointerEventKind.down {
+                            root.step(-1);
+                            root.fast = false;
+                            root.dir = -1;
+                        } else if e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel {
+                            root.dir = 0;
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+            field := TextInput {
+                width: parent.width;
+                height: parent.height;
+                text: root.value;
+                input-type: number;
+                single-line: true;
+                enabled: root.enabled;
+                font-size: Theme.font;
+                color: Theme.text;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                selection-background-color: Theme.accent.with-alpha(0.35);
+                selection-foreground-color: Theme.text;
+                property <int> shown: root.value;
+                changed shown => { self.text = root.value; }
+                accepted => { root.commit(self.text); }
+                changed has-focus => { if !self.has-focus { root.commit(self.text); } }
+            }
+        }
+        Rectangle {
+            width: 32px;
+            background: plus.pressed ? Theme.press : plus.has-hover ? Theme.hover : transparent;
+            border-radius: Theme.r2;
+            animate background { duration: 80ms; }
+            Icon { size: 12px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; commands: "M12 5v14M5 12h14"; ink: root.value < root.maximum ? Theme.text : Theme.muted; }
+            plus := TouchArea {
+                enabled: root.enabled && root.value < root.maximum;
+                mouse-cursor: pointer;
+                pointer-event(e) => {
+                    if e.button == PointerEventButton.left {
+                        if e.kind == PointerEventKind.down {
+                            root.step(1);
+                            root.fast = false;
+                            root.dir = 1;
+                        } else if e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel {
+                            root.dir = 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Borde que se arrastra para cambiar el ancho de un panel. `dragged` da lo
+// que se arrastró desde el último aviso (ya incluido en el ancho actual).
+component Splitter inherits Rectangle {
+    callback dragged(length);
+    width: 8px;
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        width: 3px;
+        border-radius: 2px;
+        background: ta.has-hover || ta.pressed ? Theme.accent.with-alpha(0.6) : transparent;
+    }
+    ta := TouchArea {
+        mouse-cursor: ew-resize;
+        moved => {
+            if self.pressed {
+                root.dragged(self.mouse-x - self.pressed-x);
+            }
+        }
+    }
+}
+
+// Botón de la barra de título (minimizar, maximizar, cerrar).
+component WinBtn inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> danger: false;
+    callback clicked();
+    width: 46px;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { clicked(); }
+    background: ta.pressed ? (danger ? #c93a3f : Theme.press) : ta.has-hover ? (danger ? #e5484d : Theme.text.with-alpha(0.14)) : transparent;
+    animate background { duration: 80ms; }
+    Icon {
+        size: 14px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        commands: icon;
+        ink: danger && ta.has-hover ? #ffffff : Theme.text;
+        stroke-width: 1.8px;
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// Barra de título propia: arrastra la ventana, doble clic maximiza.
+component TitleBar inherits Rectangle {
+    in property <bool> maximized;
+    in property <string> title-text: "OmniLoad";
+    callback drag();
+    callback minimize();
+    callback toggle-maximize();
+    callback close();
+    height: 36px;
+    background: Theme.bar;
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.bar-line;
+    }
+    drag-area := TouchArea {
+        double-clicked => { root.toggle-maximize(); }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                root.drag();
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Image { width: 18px; height: 18px; source: @image-url("icon.png"); image-fit: contain; }
+        }
+        Text { text: root.title-text; font-size: 12px * Theme.fscale; color: Theme.muted; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        WinBtn { icon: "M5 12h14"; label: "Minimizar"; clicked => { root.minimize(); } }
+        WinBtn {
+            icon: root.maximized ? "M8 8h11v11H8zM5 15V5h10" : "M5 5h14v14H5z";
+            label: root.maximized ? "Restaurar" : "Maximizar";
+            clicked => { root.toggle-maximize(); }
+        }
+        WinBtn { icon: "M6 6l12 12M18 6L6 18"; label: "Cerrar"; danger: true; clicked => { root.close(); } }
+    }
+}
+
+// Zona de 6 px en un borde o esquina para cambiar el tamaño arrastrando.
+component ResizeEdge inherits TouchArea {
+    in property <int> edge;
+    callback start(int);
+    pointer-event(e) => {
+        if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+            root.start(root.edge);
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "OmniLoad";
     icon: @image-url("icon.png");
+    no-frame: true;
     preferred-width: 1280px;
     preferred-height: 800px;
-    min-width: 980px;
+    min-width: 1100px;
     min-height: 560px;
     background: Theme.wall;
+    default-font-family: "Inter";
     default-font-size: Theme.font;
 
     // 0 Descargas, 1 Capturador de enlaces, 2 Ajustes.
@@ -718,9 +1526,26 @@ export component AppWindow inherits Window {
 
     // Ajustes que se guardan.
     in-out property <int> properties-panel: 0;
+    // Anchos que se cambian arrastrando (panel de propiedades a la derecha, lista de Ajustes).
+    in-out property <length> side-w: 320px;
+    in-out property <length> nav-w: 240px;
     in-out property <int> max-active: 3;
     in-out property <int> connections: 8;
-    in-out property <int> speed-limit: 0;
+    // Límite de velocidad: se escribe o se elige de la lista.
+    in-out property <string> speed-text: "Sin límite";
+    in-out property <bool> speed-editing;
+    callback speed-text-accepted(string);
+    callback speed-preset(int);
+    // Barra de título propia.
+    in property <bool> maximized: false;
+    callback win-drag();
+    callback win-minimize();
+    callback win-toggle-maximize();
+    callback win-close();
+    callback win-resize(int);
+    callback col-toggle(int);
+    callback col-move(int, int);
+    callback col-reset();
     in-out property <int> max-per-server: 8;
     in-out property <bool> keep-downloading: false;
     in-out property <bool> close-to-tray: true;
@@ -730,11 +1555,35 @@ export component AppWindow inherits Window {
     in property <bool> tray-available: false;
     // Versión y aviso de versión nueva.
     in property <string> app-version;
+    // Número del PR si esta compilación es de un PR sin aprobar (0 = versión normal).
+    in property <int> app-pr: 0;
     // 0 sin comprobar, 1 comprobando, 2 al día, 3 hay una nueva, 4 aún no hay
     // versiones publicadas, 5 error.
     in property <int> update-state: 0;
     in property <string> update-text;
     in-out property <bool> check-updates: true;
+    // Automático: horario, reglas por tipo, acción al terminar, inicio con el sistema.
+    in-out property <bool> schedule-enabled: false;
+    // Días del horario: bit 0 lunes … bit 6 domingo.
+    in-out property <int> schedule-days: 127;
+    in property <[bool]> schedule-day-on: [true, true, true, true, true, true, true];
+    in-out property <string> schedule-from: "00:00";
+    in-out property <string> schedule-to: "07:00";
+    in property <bool> schedule-error: false;
+    callback schedule-day-toggled(int);
+    in-out property <[RuleRow]> rules;
+    callback rule-add();
+    callback rule-remove(int);
+    callback rule-exts-edited(int, string);
+    callback rule-choose(int);
+    // 0 nada, 1 cerrar OmniLoad, 2 suspender, 3 apagar.
+    in-out property <int> finish-action: 0;
+    in-out property <bool> autostart: false;
+    // Escala de la interfaz: 0 automática, 1 100 %, 2 125 %… (al reabrir).
+    in-out property <int> ui-scale: 0;
+    // Cuenta atrás de la acción al terminar (vacío = no hay).
+    in property <string> finish-text;
+    callback finish-cancel();
     callback check-updates-now();
     callback open-release();
     in-out property <bool> watch-clipboard: true;
@@ -817,7 +1666,6 @@ export component AppWindow inherits Window {
     changed theme-dark => { Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light; }
     changed max-active => { queue-settings-changed(); }
     changed connections => { queue-settings-changed(); }
-    changed speed-limit => { queue-settings-changed(); }
     changed max-per-server => { queue-settings-changed(); }
     changed watch-clipboard => { settings-changed(); }
     init => {
@@ -843,6 +1691,7 @@ export component AppWindow inherits Window {
 
     VerticalLayout {
         padding: 14px;
+        padding-top: 14px + 36px;
         spacing: 10px;
 
         // ---- Cabecera ----
@@ -852,24 +1701,22 @@ export component AppWindow inherits Window {
                 padding: 7px;
                 padding-left: 12px;
                 spacing: 6px;
-                Rectangle {
-                    y: (parent.height - self.height) / 2;
-                    width: 26px;
-                    height: 26px;
-                    border-radius: 8px;
-                    background: Theme.accent;
-                    Icon {
-                        size: 15px;
-                        x: 5.5px;
-                        y: 5.5px;
-                        commands: "M12 3v12M7 10l5 5 5-5M5 21h14";
-                        ink: Theme.on-accent;
-                        stroke-width: 2.6px;
+                // Dentro de un HorizontalLayout la `y` se ignora: el logo va en un
+                // VerticalLayout que lo centra.
+                VerticalLayout {
+                    alignment: center;
+                    Image {
+                        width: 26px;
+                        height: 26px;
+                        source: @image-url("icon.png");
+                        image-fit: contain;
+                        accessible-role: image;
+                        accessible-label: "OmniLoad";
                     }
                 }
                 Text {
                     text: "OmniLoad";
-                    font-size: 15px;
+                    font-size: 15px * Theme.fscale;
                     font-weight: 700;
                     color: Theme.text;
                     vertical-alignment: center;
@@ -887,8 +1734,7 @@ export component AppWindow inherits Window {
                     clicked => { root.tab = 1; }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                Path {
-                    y: (parent.height - self.height) / 2;
+                VerticalLayout { alignment: center; Path {
                     width: 140px;
                     height: 30px;
                     viewbox-width: 140;
@@ -900,11 +1746,11 @@ export component AppWindow inherits Window {
                     fill: transparent;
                     accessible-role: image;
                     accessible-label: "Velocidad de los últimos 60 segundos";
-                }
+                } }
                 Text {
                     text: root.header-speed;
                     min-width: 90px;
-                    font-size: 13px;
+                    font-size: 13px * Theme.fscale;
                     font-weight: 700;
                     color: Theme.text;
                     vertical-alignment: center;
@@ -918,20 +1764,38 @@ export component AppWindow inherits Window {
                     label: root.update-text;
                     clicked => { root.settings-section = 2; root.tab = 2; }
                 }
+                VerticalLayout { alignment: center;
                 Btn {
-                    y: (parent.height - self.height) / 2;
                     text: "Ajustes";
-                    icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z";
+                    icon: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6";
                     primary: root.tab == 2;
                     clicked => { root.tab = root.tab == 2 ? 0 : 2; }
                 }
+                }
+            }
+        }
+
+        if root.finish-text != "": Panel {
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 12px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.finish-text;
+                    wrap: word-wrap;
+                    font-size: 13px * Theme.fscale;
+                    font-weight: 600;
+                    color: Theme.warn;
+                    vertical-alignment: center;
+                }
+                Btn { text: "Cancelar"; primary: true; clicked => { root.finish-cancel(); } }
             }
         }
 
         if root.message != "": Text {
             text: root.message;
             wrap: word-wrap;
-            font-size: 13px;
+            font-size: 13px * Theme.fscale;
             color: root.message-is-error ? Theme.err : Theme.muted;
         }
 
@@ -987,16 +1851,54 @@ export component AppWindow inherits Window {
                         value <=> root.connections;
                     }
                     Text { text: "Límite"; color: Theme.text; vertical-alignment: center; }
-                    ComboBox {
-                        width: 120px;
-                        // Mismo orden que SPEED_LIMITS en settings.rs.
-                        model: ["Sin límite", "256 KB/s", "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s", "50 MB/s", "100 MB/s"];
-                        current-index <=> root.speed-limit;
+                    LineEdit {
+                        changed has-focus => { root.speed-editing = self.has-focus; }
+                        width: 100px;
+                        text <=> root.speed-text;
+                        placeholder-text: "700 KB/s";
+                        accepted => { root.speed-text-accepted(self.text); }
+                    }
+                    Btn {
+                        label: "Límites habituales";
+                        icon: "M6 9l6 6 6-6";
+                        clicked => { speed-menu.show(); }
+                        speed-menu := PopupWindow {
+                            x: 0px;
+                            y: parent.height + 2px;
+                            width: 120px;
+                            Rectangle {
+                                background: Theme.menu-bg;
+                                border-radius: Theme.r2;
+                                border-width: 1px;
+                                border-color: Theme.rim;
+                                VerticalLayout {
+                                    padding: 4px;
+                                    // Mismo orden que SPEED_LIMITS en settings.rs.
+                                    for l[i] in ["Sin límite", "256 KB/s", "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s", "50 MB/s", "100 MB/s"]: Rectangle {
+                                        height: 28px;
+                                        background: ta.has-hover ? Theme.selbg : transparent;
+                                        border-radius: 6px;
+                                        Text { x: 8px; text: l; color: Theme.text; vertical-alignment: center; }
+                                        ta := TouchArea { clicked => { root.speed-preset(i); } }
+                                    }
+                                }
+                            }
+                        }
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    ColsMenu {
+                        cols: DlCols.cols;
+                        toggle(i) => { root.col-toggle(i); }
+                        move(i, d) => { root.col-move(i, d); }
+                        reset => { root.col-reset(); }
+                    }
                     LineEdit {
-                        width: 240px;
+                        // Se encoge antes de salirse de la barra en ventanas estrechas.
+                        preferred-width: 240px;
+                        min-width: 110px;
+                        horizontal-stretch: 0;
                         placeholder-text: "Buscar paquetes o archivos";
+                        clearable: true;
                         edited(t) => { root.dl-search(t); }
                     }
                 }
@@ -1007,9 +1909,15 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Panel {
                     horizontal-stretch: 1;
+                    min-width: 0px;
                     clip: true;
                     VerticalLayout {
-                        DlHeader { }
+                        ColsHeader {
+                            cols: DlCols.cols;
+                            resize(i, w) => { DlCols.resize(i, w); }
+                            resize-done => { DlCols.resize-done(); }
+                            reorder(a, b) => { DlCols.reorder(a, b); }
+                        }
                         if root.downloads.length == 0: Rectangle {
                             vertical-stretch: 1;
                             Text {
@@ -1022,20 +1930,24 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
                             for row in root.downloads: DlLine {
                                 item: row;
+                                cols: DlCols.cols;
                                 clicked => { root.dl-click(row.key, row.is-package); }
                                 toggle => { root.dl-toggle(row.key); }
                             }
                         }
                     }
                 }
+                if root.properties-panel == 1 && root.sel-kind > 0: Splitter {
+                    dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
+                }
                 if root.properties-panel == 1 && root.sel-kind > 0: Panel {
-                    width: 320px;
+                    width: root.side-w;
                     VerticalLayout {
                         padding: 16px;
                         spacing: 10px;
                         Text {
                             text: root.sel-title;
-                            font-size: 14px;
+                            font-size: 14px * Theme.fscale;
                             font-weight: 700;
                             color: Theme.text;
                             wrap: word-wrap;
@@ -1043,7 +1955,7 @@ export component AppWindow inherits Window {
                         for l in root.sel-lines: VerticalLayout {
                             spacing: 2px;
                             FieldLabel { text: l.label; }
-                            Text { text: l.value; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+                            Text { text: l.value; color: Theme.text; font-size: 13px * Theme.fscale; wrap: word-wrap; }
                         }
                         FieldLabel { text: "Prioridad"; }
                         ComboBox {
@@ -1088,7 +2000,7 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         Text {
                             text: (root.sel-kind == 1 ? "Paquete: " : "Archivo: ") + root.sel-title;
-                            font-size: 13px;
+                            font-size: 13px * Theme.fscale;
                             font-weight: 700;
                             color: Theme.text;
                             overflow: elide;
@@ -1124,7 +2036,7 @@ export component AppWindow inherits Window {
                             spacing: 2px;
                             horizontal-stretch: l.label == "Enlace" || l.label == "Carpeta" || l.label == "Detalle" ? 2 : 1;
                             FieldLabel { text: l.label; }
-                            Text { text: l.value; color: Theme.text; font-size: 13px; overflow: elide; }
+                            Text { text: l.value; color: Theme.text; font-size: 13px * Theme.fscale; overflow: elide; }
                         }
                     }
                 }
@@ -1139,14 +2051,14 @@ export component AppWindow inherits Window {
                     spacing: 24px;
                     for t in root.totals: VerticalLayout {
                         spacing: 2px;
-                        Text { text: t.label; font-size: 12px; color: Theme.muted; }
-                        Text { text: t.value; font-size: 14px; font-weight: 700; color: Theme.text; }
+                        Text { text: t.label; font-size: 12px * Theme.fscale; color: Theme.muted; }
+                        Text { text: t.value; font-size: 14px * Theme.fscale; font-weight: 700; color: Theme.text; }
                     }
                     VerticalLayout {
                         horizontal-stretch: 1;
                         min-width: 200px;
                         spacing: 4px;
-                        Text { text: "Redes en uso"; font-size: 12px; color: Theme.muted; }
+                        Text { text: "Redes en uso"; font-size: 12px * Theme.fscale; color: Theme.muted; }
                         Rectangle {
                             height: 14px;
                             border-radius: 5px;
@@ -1158,7 +2070,7 @@ export component AppWindow inherits Window {
                                 background: Theme.accent;
                             }
                         }
-                        Text { text: root.net-text; font-size: 12.5px; color: Theme.text; }
+                        Text { text: root.net-text; font-size: 12.5px * Theme.fscale; color: Theme.text; }
                     }
                 }
             }
@@ -1174,9 +2086,15 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Panel {
                     horizontal-stretch: 1;
+                    min-width: 0px;
                     clip: true;
                     VerticalLayout {
-                        GrabHeader { }
+                        ColsHeader {
+                            cols: GrabCols.cols;
+                            resize(i, w) => { GrabCols.resize(i, w); }
+                            resize-done => { GrabCols.resize-done(); }
+                            reorder(a, b) => { GrabCols.reorder(a, b); }
+                        }
                         if root.grabbed.length == 0: Rectangle {
                             vertical-stretch: 1;
                             Text {
@@ -1189,6 +2107,7 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
                             for row in root.grabbed: GrabLine {
                                 item: row;
+                                cols: GrabCols.cols;
                                 clicked => { root.grab-click(row.key, row.is-package); }
                                 toggle => { root.grab-toggle(row.key); }
                                 check(v) => { root.grab-check(row.key, row.is-package, v); }
@@ -1196,14 +2115,17 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                if root.properties-panel == 1 && root.pkg-selected: Splitter {
+                    dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
+                }
                 if root.properties-panel == 1 && root.pkg-selected: Panel {
-                    width: 320px;
+                    width: root.side-w;
                     VerticalLayout {
                         padding: 16px;
                         spacing: 8px;
                         Text {
                             text: "Propiedades del paquete";
-                            font-size: 14px;
+                            font-size: 14px * Theme.fscale;
                             font-weight: 700;
                             color: Theme.text;
                         }
@@ -1238,7 +2160,7 @@ export component AppWindow inherits Window {
                     spacing: 10px;
                     Text {
                         text: "Propiedades del paquete: " + root.pkg-title;
-                        font-size: 13px;
+                        font-size: 13px * Theme.fscale;
                         font-weight: 700;
                         color: Theme.text;
                         overflow: elide;
@@ -1333,9 +2255,9 @@ export component AppWindow inherits Window {
         // ---- Ajustes ----
         if root.tab == 2: HorizontalLayout {
             vertical-stretch: 1;
-            spacing: 16px;
+            spacing: 0px;
             Panel {
-                width: 240px;
+                width: root.nav-w;
                 VerticalLayout {
                     padding: 16px;
                     padding-left: 10px;
@@ -1344,12 +2266,12 @@ export component AppWindow inherits Window {
                     alignment: start;
                     Text {
                         text: "Ajustes";
-                        font-size: 20px;
+                        font-size: 20px * Theme.fscale;
                         font-weight: 700;
                         color: Theme.text;
                     }
                     Rectangle { height: 12px; }
-                    for s[i] in ["General", "Apariencia", "Versión"]: Rectangle {
+                    for s[i] in ["General", "Apariencia", "Versión", "Automático"]: Rectangle {
                         height: 40px;
                         border-radius: Theme.r2;
                         background: i == root.settings-section ? Theme.panel2 : transparent;
@@ -1360,7 +2282,7 @@ export component AppWindow inherits Window {
                         Text {
                             x: 12px;
                             text: s;
-                            font-size: 13px;
+                            font-size: 13px * Theme.fscale;
                             font-weight: 600;
                             color: Theme.text;
                             vertical-alignment: center;
@@ -1373,6 +2295,10 @@ export component AppWindow inherits Window {
                 }
             }
 
+            Splitter {
+                width: 16px;
+                dragged(d) => { root.nav-w = clamp(root.nav-w + d, 180px, 420px); }
+            }
             Panel {
                 horizontal-stretch: 1;
                 if root.settings-section == 0: general := ScrollView {
@@ -1381,7 +2307,7 @@ export component AppWindow inherits Window {
                     padding: 28px;
                     spacing: 6px;
                     alignment: start;
-                    Text { text: "General"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                    Text { text: "General"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
                     SettingRow {
                         title: "Carpeta de descargas";
                         subtitle: "Donde se guarda todo lo que descargas.";
@@ -1476,13 +2402,152 @@ export component AppWindow inherits Window {
                   }
                 }
 
+                if root.settings-section == 3: auto := ScrollView {
+                  VerticalLayout {
+                    width: auto.visible-width;
+                    padding: 28px;
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: "Automático"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
+                    SettingRow {
+                        title: "Horario de descargas";
+                        subtitle: "Solo descarga en los días y las horas que elijas. Fuera de ellas todo queda en pausa (con el progreso guardado) y sigue solo al llegar la hora. Si la hora de fin es menor que la de inicio, el tramo acaba al día siguiente (por ejemplo, de 23:00 a 07:00).";
+                        Check {
+                            checked <=> root.schedule-enabled;
+                            label: "Usar horario";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        opacity: root.schedule-enabled ? 1 : 0.5;
+                        for d[i] in ["L", "M", "X", "J", "V", "S", "D"]: Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            border-radius: Theme.r2;
+                            background: root.schedule-day-on[i] ? Theme.accent : Theme.panel2;
+                            accessible-role: checkbox;
+                            accessible-label: d;
+                            Text {
+                                text: d;
+                                font-size: 13px * Theme.fscale;
+                                font-weight: 600;
+                                color: root.schedule-day-on[i] ? Theme.on-accent : Theme.text;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                enabled: root.schedule-enabled;
+                                mouse-cursor: pointer;
+                                clicked => { root.schedule-day-toggled(i); }
+                            }
+                        }
+                        Rectangle { width: 16px; }
+                        Text { text: "De"; color: Theme.muted; font-size: 13px * Theme.fscale; vertical-alignment: center; }
+                        LineEdit {
+                            width: 80px;
+                            enabled: root.schedule-enabled;
+                            text <=> root.schedule-from;
+                            placeholder-text: "00:00";
+                            accepted => { root.settings-changed(); }
+                        }
+                        Text { text: "a"; color: Theme.muted; font-size: 13px * Theme.fscale; vertical-alignment: center; }
+                        LineEdit {
+                            width: 80px;
+                            enabled: root.schedule-enabled;
+                            text <=> root.schedule-to;
+                            placeholder-text: "07:00";
+                            accepted => { root.settings-changed(); }
+                        }
+                        Btn { text: "Aplicar"; enabled: root.schedule-enabled; clicked => { root.settings-changed(); } }
+                    }
+                    if root.schedule-error: Text {
+                        text: "Escribe las horas como HH:MM, por ejemplo 23:30.";
+                        color: Theme.err;
+                        font-size: 13px * Theme.fscale;
+                    }
+                    SettingRow {
+                        title: "Carpeta según el tipo de archivo";
+                        subtitle: "Por ejemplo, vídeos a una carpeta y .zip a otra. Escribe las extensiones separadas por comas (mp4, mkv). Gana la primera regla que coincida; un paquete con carpeta propia no se toca.";
+                        Btn { text: "Añadir regla"; icon: "M12 5v14M5 12h14"; clicked => { root.rule-add(); } }
+                    }
+                    for r[i] in root.rules: HorizontalLayout {
+                        spacing: 8px;
+                        height: 36px;
+                        LineEdit {
+                            width: 200px;
+                            text: r.exts;
+                            placeholder-text: "mp4, mkv, avi";
+                            edited(t) => { root.rule-exts-edited(i, t); }
+                            accepted => { root.settings-changed(); }
+                        }
+                        Text { text: "→"; color: Theme.muted; vertical-alignment: center; }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: r.folder == "" ? "(elige una carpeta)" : r.folder;
+                            color: r.folder == "" ? Theme.muted : Theme.text;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            font-size: 13px * Theme.fscale;
+                        }
+                        Btn { text: "Elegir…"; clicked => { root.rule-choose(i); } }
+                        Btn { text: "Quitar"; clicked => { root.rule-remove(i); } }
+                    }
+                    SettingRow {
+                        title: "Al terminar todas las descargas";
+                        subtitle: "Qué hacer cuando no queda nada por descargar. Suspender y apagar dan 60 segundos para cancelar con un aviso.";
+                        ComboBox {
+                            width: 200px;
+                            model: ["No hacer nada", "Cerrar OmniLoad", "Suspender el equipo", "Apagar el equipo"];
+                            current-index <=> root.finish-action;
+                            selected => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Iniciar con el sistema";
+                        subtitle: "OmniLoad arranca al encender el equipo, escondido en la bandeja, y las descargas siguen sin que tengas que abrirlo.";
+                        Check {
+                            checked <=> root.autostart;
+                            label: "Iniciar con el sistema";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                  }
+                }
+
                 if root.settings-section == 2: VerticalLayout {
                     padding: 28px;
                     spacing: 6px;
                     alignment: start;
-                    Text { text: "Versión"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                    Text { text: "Versión"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
+                    if root.app-pr > 0: Rectangle {
+                        height: 44px;
+                        border-radius: Theme.r2;
+                        background: Theme.warn.with-alpha(0.14);
+                        border-width: Theme.lw;
+                        border-color: Theme.warn.with-alpha(0.5);
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            spacing: 10px;
+                            VerticalLayout {
+                                alignment: center;
+                                Icon { size: 16px; commands: "M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"; ink: Theme.warn; }
+                            }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: "Versión del PR #" + root.app-pr + " sin aprobar: es una prueba, no una versión publicada.";
+                                font-size: 13px * Theme.fscale;
+                                font-weight: 600;
+                                color: Theme.warn;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
                     SettingRow {
-                        title: "OmniLoad " + root.app-version;
+                        title: "OmniLoad " + root.app-version + (root.app-pr > 0 ? " · PR #" + root.app-pr : "");
                         subtitle: root.update-text;
                         if root.update-state == 3: Btn {
                             text: "Ver la versión nueva";
@@ -1515,10 +2580,10 @@ export component AppWindow inherits Window {
                         alignment: start;
                         VerticalLayout {
                             spacing: 6px;
-                            Text { text: "Apariencia"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                            Text { text: "Apariencia"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
                             Text {
                                 text: "Los cambios se aplican al momento.";
-                                font-size: 14px;
+                                font-size: 14px * Theme.fscale;
                                 color: Theme.muted;
                             }
                         }
@@ -1587,6 +2652,25 @@ export component AppWindow inherits Window {
                                 }
                             }
                             SettingRow {
+                                title: "Tamaño de letra";
+                                subtitle: "Para leer mejor o para ver más cosas a la vez";
+                                Segmented {
+                                    options: ["Pequeña", "Normal", "Grande"];
+                                    current: Theme.font-level;
+                                    changed-by-user(i) => { Theme.font-level = i; root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Escala de la interfaz";
+                                subtitle: "Agranda o reduce toda la ventana. Automática sigue la escala de Windows. Se aplica al volver a abrir OmniLoad.";
+                                ComboBox {
+                                    width: 140px;
+                                    model: ["Automática", "100 %", "125 %", "150 %", "175 %", "200 %"];
+                                    current-index <=> root.ui-scale;
+                                    selected => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
                                 title: "Color de acento";
                                 subtitle: "Botones, barras de progreso y selección";
                                 HorizontalLayout {
@@ -1617,6 +2701,16 @@ export component AppWindow inherits Window {
                                     checked: Theme.reduce-transparency;
                                     label: "Reducir transparencia";
                                     toggled(v) => { Theme.reduce-transparency = v; root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Intensidad del desenfoque";
+                                subtitle: "Cuánto se difuminan las sombras y los brillos de los paneles de cristal";
+                                opacity: Theme.glass ? 1 : 0.5;
+                                Segmented {
+                                    options: ["Suave", "Normal", "Fuerte"];
+                                    current: Theme.blur-level;
+                                    changed-by-user(i) => { Theme.blur-level = i; root.settings-changed(); }
                                 }
                             }
                         }
@@ -1662,7 +2756,7 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 20px;
                 spacing: 12px;
-                Text { text: "Quitar descargas"; font-size: 18px; font-weight: 700; color: Theme.text; }
+                Text { text: "Quitar descargas"; font-size: 18px * Theme.fscale; font-weight: 700; color: Theme.text; }
                 Text {
                     text: "«" + root.sel-title + "»";
                     color: Theme.text;
@@ -1711,7 +2805,7 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 20px;
                 spacing: 12px;
-                Text { text: "Añadir enlaces"; font-size: 18px; font-weight: 700; color: Theme.text; }
+                Text { text: "Añadir enlaces"; font-size: 18px * Theme.fscale; font-weight: 700; color: Theme.text; }
                 Text {
                     text: "Pega uno o varios enlaces, sueltos o dentro de un texto. También sirven páginas con enlaces a archivos, o una lista guardada en un archivo .txt o .html.";
                     wrap: word-wrap;
@@ -1743,6 +2837,30 @@ export component AppWindow inherits Window {
             }
             init => { links.focus(); }
         }
+    }
+
+    // Barra de título propia y bordes para cambiar el tamaño (encima de todo).
+    TitleBar {
+        x: 0;
+        y: 0;
+        width: root.width;
+        maximized: root.maximized;
+        title-text: root.app-pr > 0 ? "OmniLoad " + root.app-version + " · PR #" + root.app-pr + " sin aprobar" : "OmniLoad " + root.app-version;
+        drag => { root.win-drag(); }
+        minimize => { root.win-minimize(); }
+        toggle-maximize => { root.win-toggle-maximize(); }
+        close => { root.win-close(); }
+    }
+    if !root.maximized: Rectangle {
+        // 0 N, 1 NE, 2 E, 3 SE, 4 S, 5 SW, 6 W, 7 NW.
+        ResizeEdge { edge: 0; x: 8px; y: 0; width: root.width - 16px; height: 4px; mouse-cursor: ns-resize; start(e) => { root.win-resize(e); } }
+        ResizeEdge { edge: 4; x: 8px; y: root.height - 5px; width: root.width - 16px; height: 5px; mouse-cursor: ns-resize; start(e) => { root.win-resize(e); } }
+        ResizeEdge { edge: 6; x: 0; y: 8px; width: 5px; height: root.height - 16px; mouse-cursor: ew-resize; start(e) => { root.win-resize(e); } }
+        ResizeEdge { edge: 2; x: root.width - 5px; y: 8px; width: 5px; height: root.height - 16px; mouse-cursor: ew-resize; start(e) => { root.win-resize(e); } }
+        ResizeEdge { edge: 7; x: 0; y: 0; width: 8px; height: 8px; mouse-cursor: nwse-resize; start(e) => { root.win-resize(e); } }
+        ResizeEdge { edge: 1; x: root.width - 8px; y: 0; width: 8px; height: 8px; mouse-cursor: nesw-resize; start(e) => { root.win-resize(e); } }
+        ResizeEdge { edge: 5; x: 0; y: root.height - 8px; width: 8px; height: 8px; mouse-cursor: nesw-resize; start(e) => { root.win-resize(e); } }
+        ResizeEdge { edge: 3; x: root.width - 8px; y: root.height - 8px; width: 8px; height: 8px; mouse-cursor: nwse-resize; start(e) => { root.win-resize(e); } }
     }
 }
 
@@ -1797,6 +2915,7 @@ export component ClipPopup inherits Window {
     no-frame: true;
     always-on-top: true;
     background: transparent;
+    default-font-family: "Inter";
 
     in property <bool> compact: true;
     // Desvanecerse para cerrarse (dura `fade-ms`; igual que popup::FADE).
@@ -1863,14 +2982,14 @@ export component ClipPopup inherits Window {
                 spacing: 2px;
                 Text {
                     text: root.total == 1 ? "1 enlace copiado" : root.total + " enlaces copiados";
-                    font-size: 14px;
+                    font-size: 14px * Theme.fscale;
                     font-weight: 600;
                     color: Theme.text;
                     overflow: elide;
                 }
                 Text {
                     text: root.time-text;
-                    font-size: 12px;
+                    font-size: 12px * Theme.fscale;
                     color: Theme.muted;
                     overflow: elide;
                 }
@@ -1944,7 +3063,7 @@ export component ClipPopup inherits Window {
                         text: (root.total == 1 ? "1 enlace copiado" : root.total + " enlaces copiados")
                             + " · " + root.ok + " disponibles"
                             + (root.bad == 1 ? " · 1 caído" : root.bad > 1 ? " · " + root.bad + " caídos" : "");
-                        font-size: 14px;
+                        font-size: 14px * Theme.fscale;
                         font-weight: 600;
                         color: Theme.text;
                         overflow: elide;
@@ -2004,20 +3123,20 @@ export component ClipPopup inherits Window {
                                 spacing: 1px;
                                 Text {
                                     text: row.name;
-                                    font-size: 13px;
+                                    font-size: 13px * Theme.fscale;
                                     color: Theme.text;
                                     overflow: elide;
                                 }
                                 Text {
                                     text: row.host + (row.size == "" ? "" : " · " + row.size);
-                                    font-size: 11px;
+                                    font-size: 11px * Theme.fscale;
                                     color: Theme.muted;
                                     overflow: elide;
                                 }
                             }
                             Text {
                                 text: row.status;
-                                font-size: 12px;
+                                font-size: 12px * Theme.fscale;
                                 font-weight: 600;
                                 color: Theme.tone(row.tone);
                                 vertical-alignment: center;
@@ -2040,7 +3159,7 @@ export component ClipPopup inherits Window {
                 Rectangle { horizontal-stretch: 1; }
                 Text {
                     text: root.time-text;
-                    font-size: 12px;
+                    font-size: 12px * Theme.fscale;
                     color: Theme.muted;
                     vertical-alignment: center;
                 }

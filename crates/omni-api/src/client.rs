@@ -107,6 +107,22 @@ impl Client {
         self.get("/jobs").await
     }
 
+    /// Solo lo que cambió desde la última vez que preguntó `client`.
+    pub async fn jobs_changes(
+        &self,
+        client: &str,
+        reset: bool,
+    ) -> Result<crate::types::JobsDelta, ClientError> {
+        let body = crate::types::DeltaRequest {
+            client: client.to_owned(),
+            reset,
+        };
+        let resp = self
+            .send(Method::POST, "/jobs/changes", Some(&body))
+            .await?;
+        Ok(resp.json().await?)
+    }
+
     pub async fn add(&self, new: &NewJob) -> Result<u64, ClientError> {
         let resp = self.send(Method::POST, "/jobs", Some(new)).await?;
         Ok(resp.json::<AddResponse>().await?.id)

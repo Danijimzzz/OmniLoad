@@ -37,8 +37,8 @@ pub use paths::{Endpoint, Paths};
 pub use remote::{RemoteGrabber, RemoteQueue};
 pub use server::{Service, ServiceError};
 pub use types::{
-    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest, RemoveRequest,
-    SpeedLimitRequest, Status, TakeRequest, TakeResponse,
+    AddLinksRequest, AddResponse, DeltaRequest, ErrorResponse, GrabberView, Ids, JobsDelta,
+    PriorityRequest, RemoveRequest, SpeedLimitRequest, Status, TakeRequest, TakeResponse,
 };
 
 /// Versión de la API (va en la ruta: `/api/v1`).

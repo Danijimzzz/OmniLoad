@@ -168,6 +168,9 @@ struct Inner {
     next_run: AtomicU64,
     /// Cerrando: no arranca nada más y lo que corre vuelve a la cola.
     closing: AtomicBool,
+    /// Fuera del horario de descargas: como una pausa, pero no es la del
+    /// usuario.
+    sched_blocked: AtomicBool,
     stop_ticker: CancellationToken,
 }
 
@@ -218,6 +221,10 @@ impl Queue {
                 entries.len()
             );
         }
+        let blocked = {
+            let (weekday, minute) = crate::schedule::local_now();
+            !settings.schedule.allows(weekday, minute)
+        };
         let inner = Arc::new(Inner {
             rt,
             base: cfg.base,
@@ -229,6 +236,7 @@ impl Queue {
             servers,
             next_run: AtomicU64::new(0),
             closing: AtomicBool::new(false),
+            sched_blocked: AtomicBool::new(blocked),
             stop_ticker: CancellationToken::new(),
         });
         let queue = Self { inner };
@@ -442,6 +450,11 @@ impl Queue {
         self.inner.settings().held
     }
 
+    /// ¿Está la cola parada porque ahora no toca descargar según el horario?
+    pub fn blocked_by_schedule(&self) -> bool {
+        self.inner.sched_blocked.load(Ordering::Relaxed)
+    }
+
     fn ids(&self) -> Vec<u64> {
         self.entries().iter().map(|e| e.id).collect()
     }
@@ -561,7 +574,7 @@ impl Queue {
     /// Foto de la lista para pintarla.
     pub fn snapshot(&self) -> Vec<JobInfo> {
         self.inner.refresh();
-        let held = self.is_held();
+        let held = self.is_held() || self.blocked_by_schedule();
         self.entries().iter().map(|e| info(e, held)).collect()
     }
 
@@ -629,6 +642,25 @@ impl Inner {
         }
     }
 
+    /// Mira el horario: al salir de él pausa lo que corre y al volver a entrar
+    /// la cola sigue sola.
+    fn check_schedule(&self) {
+        let schedule = self.settings().schedule;
+        let (weekday, minute) = crate::schedule::local_now();
+        let blocked = !schedule.allows(weekday, minute);
+        if self.sched_blocked.swap(blocked, Ordering::Relaxed) == blocked {
+            return;
+        }
+        if blocked {
+            info!("fuera del horario de descargas: se pausa la cola");
+            for e in self.entries().iter_mut() {
+                self.cancel_entry(e, true);
+            }
+        } else {
+            info!("empieza el horario de descargas: la cola sigue");
+        }
+    }
+
     fn pump(self: &Arc<Self>) {
         if self.closing.load(Ordering::Relaxed) {
             return;
@@ -637,7 +669,7 @@ impl Inner {
             let s = self.settings();
             (s.held, s.max_active)
         };
-        if held {
+        if held || self.sched_blocked.load(Ordering::Relaxed) {
             return;
         }
         let mut entries = self.entries();
@@ -833,6 +865,7 @@ async fn ticker(inner: std::sync::Weak<Inner>) {
             _ = iv.tick() => {}
         }
         let Some(inner) = inner.upgrade() else { return };
+        inner.check_schedule();
         inner.refresh();
         inner.pump();
         n += 1;

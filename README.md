@@ -133,19 +133,34 @@ GitHub si hay una nueva y, si la hay, te lo dice con un botón en la barra de
 arriba. Nunca descarga ni instala nada por su cuenta: tú decides. Si no quieres
 que mire, se desactiva ahí mismo.
 
-### Junto al reloj (bandeja del sistema)
+### Que se haga solo
 
-Cerrar o minimizar la ventana no para nada: OmniLoad se queda en la bandeja
-del sistema, junto al reloj, y sigue descargando y vigilando lo que copias.
+En **Ajustes › Automático**:
 
-- **Un clic en el icono** y vuelve la ventana. Al pasar el ratón ves cuántas
-  descargas van y a qué velocidad.
-- Con el **botón derecho**: pausar o reanudar todo, activar o quitar la
-  vigilancia del portapapeles y **Salir** del todo.
-- Si abres OmniLoad otra vez, no se abre una segunda ventana: aparece la que ya
-  tenías.
-- ¿Prefieres que la X cierre el programa? Desactívalo en **Ajustes ›
-  General**.
+- **Horario de descargas.** Elige los días y las horas en que se puede
+  descargar (por ejemplo, de 23:00 a 07:00). Fuera de ese horario todo queda en
+  pausa, con el progreso guardado, y sigue solo cuando llega la hora.
+- **Carpeta según el tipo de archivo.** Vídeos a una carpeta, `.zip` a otra,
+  lo que quieras: escribes las extensiones y eliges la carpeta.
+- **Al terminar todas las descargas**: no hacer nada, cerrar OmniLoad,
+  suspender o apagar el equipo (con 60 segundos para cancelar).
+- **Iniciar con el sistema**, escondido en la bandeja.
+
+### Hecho a tu gusto
+
+- **Listas desplegables con teclado**: con el foco puesto, ↑ ↓ cambian la opción e Intro o espacio abren la lista.
+- **Números con − y +**: haz clic, mantén pulsado para que repita, o escribe el número directamente.
+- **Columnas de la lista**: arrastra el borde de la cabecera para cambiar el
+  ancho, arrastra el nombre de una columna (Nombre incluido) para cambiarla de
+  sitio, y con el botón de columnas las muestras u ocultas. Vale para las
+  descargas y para el Capturador de enlaces. Se recuerda.
+- **Tamaño de letra** (pequeña, normal o grande), **escala de la interfaz** y
+  **desenfoque del cristal** en Ajustes › Apariencia.
+- **Límite de velocidad**: elige uno de la lista o escribe el tuyo («700 KB/s»,
+  «3 MB/s»).
+- Paneles que se pueden ensanchar arrastrando su borde, y ventana con barra de
+  título propia y tamaño libre.
+- Fluida incluso con **10.000 descargas** en la lista.
 
 ### Apariencia
 

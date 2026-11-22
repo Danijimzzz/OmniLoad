@@ -387,27 +387,25 @@ async fn resumes_after_cancel() {
 
     let saved = download_until_cancelled(&server, &dest, 512 * KIB).await;
     assert!(state_path_for(&dest).exists());
-    let served_first = server.bytes_served();
 
-    // Pausa mínima: sin ella el servidor llena los búferes de localhost con
-    // bytes que el cliente ya no quiere y la cuenta de abajo sale inflada.
-    server.set_chunk_delay(Some(Duration::from_millis(1)));
-    let out = Download::new(
+    let dl = Download::new(
         &server.url("a.bin"),
         Destination::File(dest.clone()),
         fast_opts(),
     )
-    .unwrap()
-    .run(CancellationToken::new())
-    .await
     .unwrap();
+    let progress = dl.progress();
+    let out = dl.run(CancellationToken::new()).await.unwrap();
     assert_eq!(out.resumed_from, saved);
     assert_eq!(read(&dest), data);
-    // La segunda vez solo se pidió lo que faltaba.
-    let served_second = server.bytes_served() - served_first;
+    // La segunda vez solo se bajó lo que faltaba. Se cuenta lo que el
+    // *cliente* recibió en esta vez: contar lo que el servidor escribió
+    // incluiría lo que sigue saliendo hacia conexiones de la primera vez ya
+    // cerradas, y eso depende del tamaño de los búferes del sistema.
+    let received: u64 = progress.per_network().values().map(|n| n.bytes).sum();
     assert!(
-        served_second <= data.len() as u64 - saved + 4 * 64 * KIB,
-        "segunda vez: {served_second}, guardado: {saved}"
+        received <= data.len() as u64 - saved + 4 * 64 * KIB,
+        "segunda vez: se recibieron {received} bytes, guardado: {saved}"
     );
 }
 

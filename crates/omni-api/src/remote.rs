@@ -7,6 +7,7 @@
 //! los mismos métodos que [`omni_queue::Queue`], así la ventana apenas nota
 //! la diferencia.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -19,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::client::{Client, ClientError};
-use crate::types::{AddLinksRequest, GrabberView, TakeRequest, TakeResponse};
+use crate::types::{AddLinksRequest, GrabberView, JobsDelta, TakeRequest, TakeResponse};
 
 /// Cada cuánto se pregunta al servicio.
 const POLL: Duration = Duration::from_millis(250);
@@ -30,6 +31,35 @@ struct Cache {
     settings: QueueSettings,
     /// ¿Contestó el servicio la última vez?
     online: bool,
+    /// Cómo nos conoce el servicio, para mandarnos solo los cambios.
+    view_id: String,
+    /// La próxima vez, pedir toda la lista.
+    need_full: bool,
+}
+
+impl Cache {
+    fn new() -> Self {
+        let mut buf = [0u8; 8];
+        let _ = getrandom::fill(&mut buf);
+        Self {
+            view_id: u64::from_le_bytes(buf).to_string(),
+            need_full: true,
+            ..Self::default()
+        }
+    }
+
+    /// Aplica lo que cambió. Si algo no cuadra, la próxima vez pide todo.
+    fn apply(&mut self, delta: JobsDelta) {
+        let old = std::mem::take(&mut self.jobs);
+        let old_order: Vec<u64> = old.iter().map(|j| j.id).collect();
+        let mut by_id: HashMap<u64, JobInfo> = old.into_iter().map(|j| (j.id, j)).collect();
+        for j in delta.jobs {
+            by_id.insert(j.id, j);
+        }
+        let order = delta.order.unwrap_or(old_order);
+        self.jobs = order.iter().filter_map(|id| by_id.remove(id)).collect();
+        self.need_full = self.jobs.len() != order.len();
+    }
 }
 
 /// La cola del servicio, vista desde la ventana.
@@ -46,7 +76,7 @@ impl RemoteQueue {
     /// hilo de la ventana): espera a la primera respuesta para tener datos
     /// desde el principio.
     pub fn new(rt: Handle, client: Client) -> Self {
-        let cache = Arc::new(Mutex::new(Cache::default()));
+        let cache = Arc::new(Mutex::new(Cache::new()));
         rt.block_on(refresh(&client, &cache));
         let me = Self {
             client,
@@ -219,15 +249,21 @@ impl Drop for RemoteQueue {
 }
 
 async fn refresh(client: &Client, cache: &Mutex<Cache>) {
-    let (jobs, settings) = tokio::join!(client.jobs(), client.settings());
+    let (view_id, reset) = {
+        let c = cache.lock().expect("caché envenenada");
+        (c.view_id.clone(), c.need_full)
+    };
+    let (jobs, settings) = tokio::join!(client.jobs_changes(&view_id, reset), client.settings());
     let mut c = cache.lock().expect("caché envenenada");
     match (jobs, settings) {
-        (Ok(jobs), Ok(settings)) => {
-            c.jobs = jobs;
+        (Ok(delta), Ok(settings)) => {
+            c.apply(delta);
             c.settings = settings;
             c.online = true;
         }
         (Err(e), _) | (_, Err(e)) => {
+            // Quizá se perdió una respuesta: la siguiente trae todo.
+            c.need_full = true;
             if c.online {
                 warn!("el servicio no contesta: {e}");
             }

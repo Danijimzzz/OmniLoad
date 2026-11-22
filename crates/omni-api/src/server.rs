@@ -1,8 +1,9 @@
 //! El servicio: la cola y su API HTTP.
 
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
@@ -25,6 +26,7 @@ use crate::types::{
     AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest, RemoveRequest,
     SpeedLimitRequest, Status, TakeRequest, TakeResponse,
 };
+use crate::types::{DeltaRequest, JobsDelta};
 
 /// Errores al arrancar el servicio.
 #[derive(Debug, thiserror::Error)]
@@ -52,7 +54,18 @@ struct App {
     grabber: Grabber,
     token: Arc<str>,
     stop: CancellationToken,
+    views: Arc<Mutex<HashMap<String, View>>>,
 }
+
+/// Lo último que se le mandó a una ventana.
+struct View {
+    seen: Instant,
+    order: Vec<u64>,
+    jobs: HashMap<u64, JobInfo>,
+}
+
+/// Una ventana que lleva este tiempo sin preguntar se olvida.
+const VIEW_TTL: Duration = Duration::from_secs(60);
 
 /// El servicio en marcha.
 pub struct Service {
@@ -99,6 +112,7 @@ impl Service {
             grabber: grabber.clone(),
             token: token.clone().into(),
             stop: stop.clone(),
+            views: Arc::default(),
         };
         let server = {
             let stop = stop.clone();
@@ -216,6 +230,7 @@ fn router(app: App) -> Router {
     Router::new()
         .route("/api/v1/status", get(status))
         .route("/api/v1/jobs", get(jobs).post(add))
+        .route("/api/v1/jobs/changes", post(jobs_changes))
         .route("/api/v1/jobs/start", post(start))
         .route("/api/v1/jobs/stop", post(stop))
         .route("/api/v1/jobs/remove", post(remove))
@@ -267,6 +282,42 @@ async fn status(State(app): State<App>) -> Json<Status> {
 
 async fn jobs(State(app): State<App>) -> Json<Vec<JobInfo>> {
     Json(app.queue.snapshot())
+}
+
+async fn jobs_changes(State(app): State<App>, Json(req): Json<DeltaRequest>) -> Json<JobsDelta> {
+    let snapshot = app.queue.snapshot();
+    let now = Instant::now();
+    let mut views = app.views.lock().expect("vistas envenenadas");
+    views.retain(|_, v| now.duration_since(v.seen) < VIEW_TTL);
+    let order: Vec<u64> = snapshot.iter().map(|j| j.id).collect();
+    let prev = if req.reset {
+        None
+    } else {
+        views.remove(&req.client)
+    };
+    let delta = match &prev {
+        None => JobsDelta {
+            order: Some(order.clone()),
+            jobs: snapshot.clone(),
+        },
+        Some(v) => JobsDelta {
+            order: (v.order != order).then(|| order.clone()),
+            jobs: snapshot
+                .iter()
+                .filter(|j| v.jobs.get(&j.id) != Some(*j))
+                .cloned()
+                .collect(),
+        },
+    };
+    views.insert(
+        req.client,
+        View {
+            seen: now,
+            order,
+            jobs: snapshot.into_iter().map(|j| (j.id, j)).collect(),
+        },
+    );
+    Json(delta)
 }
 
 async fn add(State(app): State<App>, Json(new): Json<NewJob>) -> Response {

@@ -24,8 +24,8 @@ mod links;
 
 pub use check::{CheckFuture, Checkers, DEFAULT_PER_HOST, HostChecker};
 pub use grabber::{
-    Added, Check, Dest, GrabCommand, GrabItem, GrabPackage, Grabber, KnownLinks, PARALLEL_CHECKS,
-    Pick, Picked, Saved, package_name, short_error,
+    Added, Check, Dest, FileRule, GrabCommand, GrabItem, GrabPackage, Grabber, KnownLinks,
+    PARALLEL_CHECKS, Pick, Picked, Saved, package_name, short_error,
 };
 pub use import::{LINK_FILE_EXTENSIONS, MAX_LINK_FILE, links_from_file};
 pub use inspect::{FolderFile, Found, MAX_LINKS_PER_PAGE, inspect};

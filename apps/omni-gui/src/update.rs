@@ -15,6 +15,17 @@ use serde::Deserialize;
 /// La versión de este programa.
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
+/// La parte numérica de la versión, sin el sufijo `-prN` (`0.2.0`).
+pub fn base_version(version: &str) -> &str {
+    version.split(['-', '+']).next().unwrap_or(version)
+}
+
+/// Número del PR de una versión de PR sin aprobar (`0.2.0-pr9` → `Some(9)`).
+/// Al aprobarse el PR se quita el sufijo y vuelve a ser una versión normal.
+pub fn pr_number(version: &str) -> Option<u32> {
+    version.split_once('-')?.1.strip_prefix("pr")?.parse().ok()
+}
+
 /// Qué se encontró.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -152,6 +163,19 @@ mod tests {
         format!(
             r#"{{"tag_name":"{tag}","html_url":"https://github.com/Danijimzzz/OmniLoad/releases/tag/{tag}"{extra}}}"#
         )
+    }
+
+    #[test]
+    fn pr_versions_are_recognised() {
+        assert_eq!(pr_number("0.2.0-pr9"), Some(9));
+        assert_eq!(pr_number("0.2.0-pr12"), Some(12));
+        assert_eq!(pr_number("0.2.0"), None);
+        assert_eq!(pr_number("0.2.0-beta"), None);
+        assert_eq!(pr_number("0.2.0-prx"), None);
+        assert_eq!(base_version("0.2.0-pr9"), "0.2.0");
+        assert_eq!(base_version("0.2.0"), "0.2.0");
+        // Una versión de PR es anterior a la misma ya aprobada.
+        assert_eq!(compare("0.2.0", "0.2.0-pr9"), Some(Ordering::Greater));
     }
 
     #[test]
