@@ -148,6 +148,7 @@ En **Ajustes › Automático**:
 
 ### Hecho a tu gusto
 
+- **Números con − y +**: haz clic, mantén pulsado para que repita, o escribe el número directamente.
 - **Columnas de la lista**: arrastra el borde de la cabecera para cambiar el
   ancho, arrastra el nombre de una columna (Nombre incluido) para cambiarla de
   sitio, y con el botón de columnas las muestras u ocultas. Vale para las

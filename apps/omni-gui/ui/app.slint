@@ -1277,44 +1277,105 @@ component SpinBox inherits Rectangle {
     in property <int> maximum: 100;
     in property <bool> enabled: true;
     callback edited(int);
+    // Mantener pulsado − o + repite: -1 baja, 1 sube, 0 parado.
+    property <int> dir: 0;
+    property <bool> fast: false;
+    function step(d: int) {
+        root.value = min(root.maximum, max(root.minimum, root.value + d));
+        root.edited(root.value);
+    }
+    function commit(t: string) {
+        if t.is-float() {
+            root.value = min(root.maximum, max(root.minimum, t.to-float().round()));
+            root.edited(root.value);
+        }
+        field.text = root.value;
+    }
     height: Theme.compact ? 30px : 34px;
-    min-width: 90px;
+    min-width: 96px;
     border-radius: Theme.r2;
-    border-width: Theme.lw;
-    border-color: Theme.rim;
+    border-width: field.has-focus ? 1.5px : Theme.lw;
+    border-color: field.has-focus ? Theme.accent : Theme.rim;
     background: Theme.panel2;
     opacity: enabled ? 1 : 0.45;
     accessible-role: spinbox;
     accessible-value: root.value;
+    Timer {
+        interval: root.fast ? 70ms : 380ms;
+        running: root.dir != 0 && root.enabled;
+        triggered => {
+            root.fast = true;
+            root.step(root.dir);
+            if (root.dir < 0 && root.value <= root.minimum) || (root.dir > 0 && root.value >= root.maximum) {
+                root.dir = 0;
+            }
+        }
+    }
     HorizontalLayout {
         Rectangle {
-            width: 30px;
-            background: minus.has-hover ? Theme.head : transparent;
+            width: 32px;
+            background: minus.pressed ? Theme.press : minus.has-hover ? Theme.hover : transparent;
             border-radius: Theme.r2;
+            animate background { duration: 80ms; }
             Icon { size: 12px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; commands: "M5 12h14"; ink: root.value > root.minimum ? Theme.text : Theme.muted; }
             minus := TouchArea {
                 enabled: root.enabled && root.value > root.minimum;
                 mouse-cursor: pointer;
-                clicked => { root.value = max(root.minimum, root.value - 1); root.edited(root.value); }
+                pointer-event(e) => {
+                    if e.button == PointerEventButton.left {
+                        if e.kind == PointerEventKind.down {
+                            root.step(-1);
+                            root.fast = false;
+                            root.dir = -1;
+                        } else if e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel {
+                            root.dir = 0;
+                        }
+                    }
+                }
             }
         }
-        Text {
+        Rectangle {
             horizontal-stretch: 1;
-            text: root.value;
-            font-size: Theme.font;
-            color: Theme.text;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+            clip: true;
+            field := TextInput {
+                width: parent.width;
+                height: parent.height;
+                text: root.value;
+                input-type: number;
+                single-line: true;
+                enabled: root.enabled;
+                font-size: Theme.font;
+                color: Theme.text;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                selection-background-color: Theme.accent.with-alpha(0.35);
+                selection-foreground-color: Theme.text;
+                property <int> shown: root.value;
+                changed shown => { self.text = root.value; }
+                accepted => { root.commit(self.text); }
+                changed has-focus => { if !self.has-focus { root.commit(self.text); } }
+            }
         }
         Rectangle {
-            width: 30px;
-            background: plus.has-hover ? Theme.head : transparent;
+            width: 32px;
+            background: plus.pressed ? Theme.press : plus.has-hover ? Theme.hover : transparent;
             border-radius: Theme.r2;
+            animate background { duration: 80ms; }
             Icon { size: 12px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; commands: "M12 5v14M5 12h14"; ink: root.value < root.maximum ? Theme.text : Theme.muted; }
             plus := TouchArea {
                 enabled: root.enabled && root.value < root.maximum;
                 mouse-cursor: pointer;
-                clicked => { root.value = min(root.maximum, root.value + 1); root.edited(root.value); }
+                pointer-event(e) => {
+                    if e.button == PointerEventButton.left {
+                        if e.kind == PointerEventKind.down {
+                            root.step(1);
+                            root.fast = false;
+                            root.dir = 1;
+                        } else if e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel {
+                            root.dir = 0;
+                        }
+                    }
+                }
             }
         }
     }
