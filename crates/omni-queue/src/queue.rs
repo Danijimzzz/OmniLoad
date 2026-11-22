@@ -317,12 +317,17 @@ impl Queue {
             return Err("Elige una carpeta de destino.".into());
         }
         // Validamos ya la URL para avisar sin añadir una fila que va a fallar.
-        Download::new(
-            &url,
-            Destination::Dir(new.dir.clone()),
-            self.inner.base.clone(),
-        )
-        .map_err(|e| e.to_string())?;
+        // Los enlaces magnet y los archivos .torrent no son http: los lee el
+        // plugin de torrents al resolverlos.
+        let parsed = url::Url::parse(&url).map_err(|e| format!("{url}: {e}"))?;
+        if !matches!(parsed.scheme(), "magnet" | "file") {
+            Download::new(
+                &url,
+                Destination::Dir(new.dir.clone()),
+                self.inner.base.clone(),
+            )
+            .map_err(|e| e.to_string())?;
+        }
 
         {
             let mut entries = self.entries();

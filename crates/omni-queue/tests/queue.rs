@@ -467,3 +467,23 @@ async fn pausing_kills_the_external_program() {
     q.stop(&[id]);
     wait_for(&q, id, State::Paused).await;
 }
+
+/// Magnets y archivos .torrent no son http, pero la cola los acepta (los
+/// resuelve el plugin de torrents); cualquier otro esquema, no.
+#[tokio::test]
+async fn accepts_magnets_and_torrent_files_but_not_other_schemes() {
+    let q = memory_queue();
+    let dir = tempfile::tempdir().unwrap();
+    let job = |url: &str| NewJob {
+        start: false,
+        ..NewJob::new(url, dir.path().to_path_buf())
+    };
+    assert!(
+        q.add(job(
+            "magnet:?xt=urn:btih:cab507494d02ebb1178b38f2e9d7be299c86b862&dn=x"
+        ))
+        .is_ok()
+    );
+    assert!(q.add(job("file:///tmp/a.torrent")).is_ok());
+    assert!(q.add(job("ftp://a.com/x.zip")).is_err());
+}
