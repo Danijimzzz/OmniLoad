@@ -87,6 +87,38 @@ Para probar la bandeja de Linux sin escritorio hace falta un
 prueba hecho con `zbus`); con él, `dbus-send ... org.kde.StatusNotifierItem.Activate`
 equivale al clic y `com.canonical.dbusmenu.Event` a elegir en el menú.
 
+### Horario, reglas por tipo, acción al terminar y columnas
+
+- **Horario** (`omni-queue/src/schedule.rs`): `Schedule { enabled, days, from_min,
+  to_min }` va dentro de `QueueSettings`. El tramo pertenece al día en que
+  empieza; si `to <= from` cruza la medianoche (`from == to` son 24 h). El
+  `ticker` de la cola mira el reloj local cada tick: al salirse del horario
+  pausa lo que corre (guardando progreso) y no arranca nada (`sched_blocked`,
+  independiente del «Pausar» del usuario; el estado dice «En pausa»); al entrar
+  de nuevo, `pump` sigue solo.
+- **Reglas por tipo de archivo** (`omni-grab`): `Dest.rules` es una lista de
+  `FileRule { extensions, folder }`; gana la primera que coincide y un paquete
+  con carpeta propia no se toca. Las reglas se guardan en `ajustes.json` de la
+  ventana.
+- **Acción al terminar** (`omni-gui/src/automation.rs`): `FinishWatch` detecta
+  el final de la tanda (no salta si se pausó o se quitó algo); suspender y apagar
+  dan 60 s con un aviso y botón «Cancelar». **Iniciar con el sistema**: clave
+  `Run` de HKCU en Windows, LaunchAgent en macOS, `autostart/omniload.desktop`
+  en Linux; arranca con `--minimizado` (a la bandeja).
+- **Lista con miles de filas**: `POST /api/v1/jobs/changes` devuelve solo lo
+  que cambió desde la última vez que preguntó esa ventana (`JobsDelta`: el
+  orden si cambió y las filas modificadas; el servicio recuerda la última foto
+  de cada ventana 60 s). `RemoteQueue` lo aplica y pide todo si algo no cuadra.
+  La ventana solo rehace la tabla si la cola cambió y agrupa por paquete con un
+  `HashMap` (antes era cuadrático). Con 10.000 filas en una compilación
+  release, la ventana gasta ~20 % de un núcleo y el servicio ~7 %.
+- **Interfaz**: tipografía Inter incluida (`ui/fonts`, licencia OFL), barra de
+  título propia (`no-frame`, mover y redimensionar con `drag_window` y
+  `drag_resize_window` de winit), `ComboBox` y `SpinBox` propios con la misma
+  interfaz que los estándar, columnas en `DlCols` (modelo `ColState` rellenado
+  desde `Settings.columns`), `Splitter` para los anchos de panel y escala de
+  la interfaz con `SLINT_SCALE_FACTOR` (se fija al arrancar).
+
 ## Línea de comandos (`omni`)
 
 Con el servicio (la misma lista que ve la ventana; lo lanza si hace falta):
