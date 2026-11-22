@@ -70,6 +70,9 @@ pub struct Settings {
     /// Escala de la interfaz: 0 automática, 1 100 %, 2 125 %, 3 150 %,
     /// 4 175 %, 5 200 %.
     pub ui_scale: i32,
+    /// Ancho del panel de propiedades a la derecha y de la lista de Ajustes.
+    pub side_width: f32,
+    pub nav_width: f32,
 }
 
 /// Factor de escala de una opción de [`Settings::ui_scale`] (`None` =
@@ -197,6 +200,8 @@ impl Default for Settings {
             font_level: 1,
             blur_level: 1,
             ui_scale: 0,
+            side_width: 320.0,
+            nav_width: 240.0,
         }
     }
 }

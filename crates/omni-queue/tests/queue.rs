@@ -344,8 +344,8 @@ async fn remove_with_files_deletes_file_state_and_empty_folder() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn schedule_blocks_and_releases_the_queue() {
-    let data = pseudo_random_bytes(3 * 1024 * 1024, 9);
-    let server = TestServer::start(data, slow_server_cfg(5)).await;
+    let data = pseudo_random_bytes(8 * 1024 * 1024, 9);
+    let server = TestServer::start(data, slow_server_cfg(40)).await;
     let dir = tempfile::tempdir().unwrap();
     let q = memory_queue();
 
@@ -374,7 +374,7 @@ async fn schedule_blocks_and_releases_the_queue() {
 
     // Vuelve a quedar fuera de horario con la descarga en marcha: se pausa
     // guardando el progreso y vuelve a la cola.
-    while row(&q, id).downloaded < 256 * 1024 {
+    while row(&q, id).downloaded < 128 * 1024 {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     q.update_settings(|s| s.schedule.days = 0);

@@ -706,6 +706,8 @@ impl App {
         s.font_level = theme.get_font_level();
         s.blur_level = theme.get_blur_level();
         s.ui_scale = ui.get_ui_scale();
+        s.side_width = ui.get_side_w();
+        s.nav_width = ui.get_nav_w();
         s.reduce_transparency = theme.get_reduce_transparency();
         s.properties_panel = ui.get_properties_panel();
         s.max_active = ui.get_max_active();
@@ -1070,6 +1072,8 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     theme.set_font_level(s.font_level);
     theme.set_blur_level(s.blur_level);
     ui.set_ui_scale(s.ui_scale);
+    ui.set_side_w(s.side_width.clamp(240.0, 720.0));
+    ui.set_nav_w(s.nav_width.clamp(180.0, 420.0));
     theme.set_reduce_transparency(s.reduce_transparency);
     ui.set_properties_panel(s.properties_panel);
     ui.set_max_active(s.max_active);

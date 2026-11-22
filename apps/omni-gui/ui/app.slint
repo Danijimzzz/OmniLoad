@@ -886,6 +886,27 @@ component SpinBox inherits Rectangle {
     }
 }
 
+// Borde que se arrastra para cambiar el ancho de un panel. `dragged` da lo
+// que se arrastró desde el último aviso (ya incluido en el ancho actual).
+component Splitter inherits Rectangle {
+    callback dragged(length);
+    width: 8px;
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        width: 3px;
+        border-radius: 2px;
+        background: ta.has-hover || ta.pressed ? Theme.accent.with-alpha(0.6) : transparent;
+    }
+    ta := TouchArea {
+        mouse-cursor: ew-resize;
+        moved => {
+            if self.pressed {
+                root.dragged(self.mouse-x - self.pressed-x);
+            }
+        }
+    }
+}
+
 // Botón de la barra de título (minimizar, maximizar, cerrar).
 component WinBtn inherits Rectangle {
     in property <string> icon;
@@ -975,6 +996,9 @@ export component AppWindow inherits Window {
 
     // Ajustes que se guardan.
     in-out property <int> properties-panel: 0;
+    // Anchos que se cambian arrastrando (panel de propiedades a la derecha, lista de Ajustes).
+    in-out property <length> side-w: 320px;
+    in-out property <length> nav-w: 240px;
     in-out property <int> max-active: 3;
     in-out property <int> connections: 8;
     // Límite de velocidad: se escribe o se elige de la lista.
@@ -1414,8 +1438,11 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                if root.properties-panel == 1 && root.sel-kind > 0: Splitter {
+                    dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
+                }
                 if root.properties-panel == 1 && root.sel-kind > 0: Panel {
-                    width: 320px;
+                    width: root.side-w;
                     VerticalLayout {
                         padding: 16px;
                         spacing: 10px;
@@ -1582,8 +1609,11 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                if root.properties-panel == 1 && root.pkg-selected: Splitter {
+                    dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
+                }
                 if root.properties-panel == 1 && root.pkg-selected: Panel {
-                    width: 320px;
+                    width: root.side-w;
                     VerticalLayout {
                         padding: 16px;
                         spacing: 8px;
@@ -1719,9 +1749,9 @@ export component AppWindow inherits Window {
         // ---- Ajustes ----
         if root.tab == 2: HorizontalLayout {
             vertical-stretch: 1;
-            spacing: 16px;
+            spacing: 0px;
             Panel {
-                width: 240px;
+                width: root.nav-w;
                 VerticalLayout {
                     padding: 16px;
                     padding-left: 10px;
@@ -1759,6 +1789,10 @@ export component AppWindow inherits Window {
                 }
             }
 
+            Splitter {
+                width: 16px;
+                dragged(d) => { root.nav-w = clamp(root.nav-w + d, 180px, 420px); }
+            }
             Panel {
                 horizontal-stretch: 1;
                 if root.settings-section == 0: general := ScrollView {
