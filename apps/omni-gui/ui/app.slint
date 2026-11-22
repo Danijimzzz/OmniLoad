@@ -1199,6 +1199,34 @@ component ComboBox inherits Rectangle {
     opacity: enabled ? 1 : 0.45;
     accessible-role: combobox;
     accessible-label: root.model[root.current-index];
+    forward-focus: fs;
+    // Teclado: ↑ ↓ cambian la opción, Intro o espacio abren la lista.
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == Key.DownArrow && root.current-index < root.model.length - 1 {
+                root.current-index += 1;
+                root.selected(root.model[root.current-index]);
+                return accept;
+            } else if e.text == Key.UpArrow && root.current-index > 0 {
+                root.current-index -= 1;
+                root.selected(root.model[root.current-index]);
+                return accept;
+            } else if e.text == Key.Return || e.text == " " {
+                menu.show();
+                return accept;
+            }
+            reject
+        }
+    }
+    if fs.has-focus: Rectangle {
+        x: -2px; y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: Theme.r2 + 2px;
+        border-width: 2px;
+        border-color: Theme.ring;
+    }
     HorizontalLayout {
         padding-left: 12px;
         padding-right: 8px;
@@ -1219,7 +1247,7 @@ component ComboBox inherits Rectangle {
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
-        clicked => { menu.show(); }
+        clicked => { fs.focus(); menu.show(); }
     }
     menu := PopupWindow {
         x: 0px;

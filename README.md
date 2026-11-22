@@ -148,6 +148,7 @@ En **Ajustes › Automático**:
 
 ### Hecho a tu gusto
 
+- **Listas desplegables con teclado**: con el foco puesto, ↑ ↓ cambian la opción e Intro o espacio abren la lista.
 - **Números con − y +**: haz clic, mantén pulsado para que repita, o escribe el número directamente.
 - **Columnas de la lista**: arrastra el borde de la cabecera para cambiar el
   ancho, arrastra el nombre de una columna (Nombre incluido) para cambiarla de
