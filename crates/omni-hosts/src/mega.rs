@@ -166,8 +166,8 @@ fn folder_file_url(id: &str, key: &[u8], node: &str) -> Option<Url> {
 fn ecb_decrypt(key: &[u8; 16], data: &[u8]) -> Vec<u8> {
     let cipher = Aes128::new(GenericArray::from_slice(key));
     let mut out = data.to_vec();
-    for block in out.chunks_exact_mut(16) {
-        cipher.decrypt_block(GenericArray::from_mut_slice(block));
+    for block in out.as_chunks_mut::<16>().0 {
+        cipher.decrypt_block(GenericArray::from_mut_slice(&mut block[..]));
     }
     out
 }

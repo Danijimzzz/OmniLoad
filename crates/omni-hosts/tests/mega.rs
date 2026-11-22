@@ -60,8 +60,8 @@ fn encrypt_content(aes: [u8; 16], nonce: [u8; 8], plain: &[u8]) -> Vec<u8> {
 fn ecb_encrypt(key: &[u8; 16], data: &[u8]) -> Vec<u8> {
     let c = Aes128::new(GenericArray::from_slice(key));
     let mut out = data.to_vec();
-    for b in out.chunks_exact_mut(16) {
-        c.encrypt_block(GenericArray::from_mut_slice(b));
+    for b in out.as_chunks_mut::<16>().0 {
+        c.encrypt_block(GenericArray::from_mut_slice(&mut b[..]));
     }
     out
 }
