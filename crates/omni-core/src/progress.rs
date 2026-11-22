@@ -66,6 +66,13 @@ impl Progress {
         }
     }
 
+    /// Como [`Self::report`], pero esos bytes ya estaban (comprobar lo que
+    /// hay en disco al reanudar): no cuentan para la velocidad.
+    pub fn report_resumed(&self, downloaded: u64, total: Option<u64>) {
+        self.report(downloaded, total);
+        self.resumed_from.store(downloaded, Ordering::Relaxed);
+    }
+
     pub(crate) fn set_total(&self, total: Option<u64>) {
         self.total.store(total.unwrap_or(0), Ordering::Relaxed);
         self.total_known.store(total.is_some(), Ordering::Relaxed);

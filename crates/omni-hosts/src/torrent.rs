@@ -17,6 +17,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use librqbit::TorrentStatsState;
 use librqbit::api::TorrentIdOrHash;
 use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerMode, ListenerOptions, Session,
@@ -376,9 +377,17 @@ impl CustomDownload for TorrentJob {
                 }
                 AddTorrentResponse::ListOnly(_) => return Err(fail("respuesta inesperada")),
             };
+            let mut started = false;
             let outcome = loop {
                 let stats = handle.stats();
-                progress.report(stats.progress_bytes, Some(stats.total_bytes));
+                // Mientras se comprueba lo que ya hay en disco (y en el primer
+                // instante en marcha), esos bytes no son velocidad de bajada.
+                if started {
+                    progress.report(stats.progress_bytes, Some(stats.total_bytes));
+                } else {
+                    progress.report_resumed(stats.progress_bytes, Some(stats.total_bytes));
+                    started = matches!(stats.state, TorrentStatsState::Live);
+                }
                 if let Some(err) = stats.error {
                     break Err(fail(err));
                 }
