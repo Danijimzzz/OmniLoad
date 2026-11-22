@@ -152,8 +152,9 @@ En **Ajustes › Automático**:
 - **Números con − y +**: haz clic, mantén pulsado para que repita, o escribe el número directamente.
 - **Columnas de la lista**: arrastra el borde de la cabecera para cambiar el
   ancho, arrastra el nombre de una columna (Nombre incluido) para cambiarla de
-  sitio, y con el botón de columnas las muestras, las ocultas o cambias su
-  orden arrastrando el asa ≡. La columna Nombre se estira sola para llenar la
+  sitio. Con **clic derecho en una cabecera** puedes ocultar esa columna, ver la
+  lista de columnas con sus tics para mostrar u ocultar cualquiera, o
+  restablecerlas. La columna Nombre se estira sola para llenar la
   tabla. Vale para las descargas y para el Capturador de enlaces. Se recuerda.
 - **Tamaño de letra** (pequeña, normal o grande), **escala de la interfaz** y
   **desenfoque del cristal** en Ajustes › Apariencia.

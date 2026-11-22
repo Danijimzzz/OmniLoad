@@ -1432,7 +1432,27 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
     });
     // Columnas: arrastrar el borde, mostrar/ocultar y cambiar el orden.
     macro_rules! table_cols {
-        ($global:ident, $rows:ident) => {
+        ($global:ident, $rows:ident, $table:expr) => {
+            ui.global::<$global>().on_toggle({
+                let app = app.clone();
+                move |i| {
+                    if let Some(mut c) = app.$rows.row_data(i as usize) {
+                        // «Nombre» siempre se ve.
+                        if c.id != 0 {
+                            c.shown = !c.shown;
+                            app.$rows.set_row_data(i as usize, c);
+                            app.save_columns();
+                        }
+                    }
+                }
+            });
+            ui.global::<$global>().on_reset({
+                let app = app.clone();
+                move || {
+                    fill_columns($table, &app.$rows, &settings::default_columns($table));
+                    app.save_columns();
+                }
+            });
             ui.global::<$global>().on_resize({
                 let app = app.clone();
                 move |i, width| {
@@ -1478,45 +1498,8 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             });
         };
     }
-    table_cols!(DlCols, col_rows);
-    table_cols!(GrabCols, grab_col_rows);
-    ui.on_col_toggle({
-        let app = app.clone();
-        move |i| {
-            let i = i as usize;
-            if let Some(mut c) = app.col_rows.row_data(i) {
-                c.shown = !c.shown;
-                app.col_rows.set_row_data(i, c);
-                app.save_columns();
-            }
-        }
-    });
-    ui.on_col_move({
-        let app = app.clone();
-        move |i, dir| {
-            let (i, j) = (i as usize, i + dir);
-            if j < 0 || j as usize >= app.col_rows.row_count() {
-                return;
-            }
-            let j = j as usize;
-            if let (Some(a), Some(b)) = (app.col_rows.row_data(i), app.col_rows.row_data(j)) {
-                app.col_rows.set_row_data(i, b);
-                app.col_rows.set_row_data(j, a);
-                app.save_columns();
-            }
-        }
-    });
-    ui.on_col_reset({
-        let app = app.clone();
-        move || {
-            fill_columns(
-                Table::Downloads,
-                &app.col_rows,
-                &settings::default_columns(Table::Downloads),
-            );
-            app.save_columns();
-        }
-    });
+    table_cols!(DlCols, col_rows, Table::Downloads);
+    table_cols!(GrabCols, grab_col_rows, Table::Grabber);
     // Barra de título propia: mover, redimensionar, minimizar, maximizar, cerrar.
     ui.on_win_drag({
         let app = app.clone();
