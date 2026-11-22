@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 base64.workspace = true
 hex.workspace = true
+librqbit = { version = "9.1", default-features = false, features = ["rust-tls"] }
 omni-core.workspace = true
 omni-grab.workspace = true
 omni-queue.workspace = true

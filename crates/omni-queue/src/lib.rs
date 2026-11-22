@@ -19,6 +19,8 @@ mod schedule;
 mod types;
 
 pub use queue::{Queue, QueueConfig};
-pub use resolver::{DirectLinks, ExternalJob, ResolveFuture, ResolvedLink, Resolver};
+pub use resolver::{
+    CustomDownload, DirectLinks, ExternalJob, ResolveFuture, ResolvedLink, Resolver, RunFuture,
+};
 pub use schedule::{ALL_DAYS, Schedule, local_now};
 pub use types::{JobInfo, NewJob, Priority, QueueSettings, State};

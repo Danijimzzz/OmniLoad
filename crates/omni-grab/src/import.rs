@@ -9,7 +9,18 @@ use crate::links::{extract_hrefs, extract_urls};
 pub const MAX_LINK_FILE: u64 = 16 * 1024 * 1024;
 
 /// Extensiones que se ofrecen al abrir un archivo de enlaces.
-pub const LINK_FILE_EXTENSIONS: &[&str] = &["txt", "html", "htm", "crawljob", "dlc"];
+pub const LINK_FILE_EXTENSIONS: &[&str] = &["txt", "html", "htm", "crawljob", "dlc", "torrent"];
+
+/// Un archivo `.torrent` del disco, como enlace `file:///…` (el plugin de
+/// torrents lo lee al comprobarlo y al descargar). `None` si no es un
+/// `.torrent`.
+pub fn torrent_file_url(path: &std::path::Path) -> Option<Url> {
+    let is_torrent = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("torrent"));
+    let abs = std::path::absolute(path).ok()?;
+    is_torrent.then(|| Url::from_file_path(abs).ok()).flatten()
+}
 
 /// Saca los enlaces de un archivo, por su nombre y contenido.
 ///
@@ -68,6 +79,14 @@ mod tests {
         assert_eq!(links_from_file("a.crawljob", crawl).unwrap().len(), 1);
 
         assert!(links_from_file("vacio.txt", b"nada").is_err());
+        assert!(torrent_file_url(std::path::Path::new("/tmp/a.txt")).is_none());
+        #[cfg(unix)]
+        assert_eq!(
+            torrent_file_url(std::path::Path::new("/tmp/mi pelicula.TORRENT"))
+                .unwrap()
+                .as_str(),
+            "file:///tmp/mi%20pelicula.TORRENT"
+        );
         assert!(
             links_from_file("cosas.dlc", b"abc")
                 .unwrap_err()

@@ -24,6 +24,7 @@ mod gofile;
 mod html;
 mod mediafire;
 mod pixeldrain;
+mod torrent;
 mod ytdlp;
 
 use std::sync::Arc;
@@ -41,6 +42,7 @@ pub use gdrive::GoogleDrive;
 pub use gofile::Gofile;
 pub use mediafire::Mediafire;
 pub use pixeldrain::Pixeldrain;
+pub use torrent::Torrents;
 pub use ytdlp::YtDlp;
 
 /// Un host de descarga.
@@ -86,6 +88,7 @@ impl Hosts {
             .with(GoogleDrive::new())
             .with(Gofile::new())
             .with(YtDlp::new())
+            .with(Torrents::new())
     }
 
     /// Añade un plugin. Los añadidos antes tienen preferencia.

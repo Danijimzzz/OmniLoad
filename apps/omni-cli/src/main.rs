@@ -304,7 +304,12 @@ fn links_text(args: &[String]) -> Result<String> {
     let mut out = String::new();
     for a in args {
         let path = std::path::Path::new(a);
-        if path.is_file() {
+        if path.is_file()
+            && let Some(url) = omni_grab::torrent_file_url(path)
+        {
+            out.push_str(url.as_str());
+            out.push('\n');
+        } else if path.is_file() {
             let bytes = std::fs::read(path).with_context(|| format!("no se pudo leer {a}"))?;
             let urls = omni_grab::links_from_file(a, &bytes).map_err(anyhow::Error::msg)?;
             for u in urls {

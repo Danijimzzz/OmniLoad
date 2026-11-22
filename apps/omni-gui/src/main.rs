@@ -918,6 +918,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Lee los enlaces de un archivo `.txt`, `.html`…
 fn read_link_file(path: &std::path::Path) -> Result<Vec<url::Url>, String> {
+    if let Some(url) = omni_grab::torrent_file_url(path) {
+        return Ok(vec![url]);
+    }
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

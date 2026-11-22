@@ -740,6 +740,9 @@ impl Inner {
             _ = cancel.cancelled() => return Err(Error::Cancelled),
             r = self.resolver.resolve(url, &cancel) => r?,
         };
+        if let Some(engine) = link.custom {
+            return engine.run(&dir, shown, cancel).await;
+        }
         if let Some(job) = link.external {
             // Lo descarga un programa externo; el progreso que ve la
             // interfaz es el que él va diciendo.
