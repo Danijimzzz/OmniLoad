@@ -90,8 +90,22 @@ pub fn run_action(action: FinishAction) {
     }
 }
 
+/// Un comando del sistema. En Windows sin ventana de consola: sin esto, cada
+/// llamada hace aparecer y desaparecer una ventana negra.
+fn command(program: &str) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 fn run(program: &str, args: &[&str]) -> std::io::Result<()> {
-    let status = Command::new(program).args(args).status()?;
+    let status = command(program).args(args).status()?;
     status
         .success()
         .then_some(())
@@ -154,7 +168,7 @@ mod imp {
     const NAME: &str = "OmniLoad";
 
     pub fn enabled() -> bool {
-        Command::new("reg")
+        command("reg")
             .args(["query", KEY, "/v", NAME])
             .output()
             .is_ok_and(|o| o.status.success())

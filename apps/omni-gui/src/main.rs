@@ -92,6 +92,8 @@ struct App {
     last_rows: RefCell<Vec<manager::RowInfo>>,
     /// Cuenta atrás de suspender o apagar: cuándo y qué.
     countdown: Cell<Option<(Instant, FinishAction)>>,
+    /// Si el inicio con el sistema está puesto (se lee una vez al arrancar).
+    autostart_on: Cell<bool>,
     rule_rows: Rc<VecModel<RuleRow>>,
     col_rows: Rc<VecModel<ColState>>,
     /// Arrancó con `--minimizado` (inicio con el sistema).
@@ -731,12 +733,17 @@ impl App {
         s.schedule_to = ui.get_schedule_to().to_string();
         s.finish_action = ui.get_finish_action();
         ui.set_schedule_error(s.schedule().is_none());
+        // Solo se toca el sistema cuando la casilla cambió (consultar el
+        // registro en cada ajuste sería lento e innecesario).
         let autostart = ui.get_autostart();
-        if autostart != automation::autostart_enabled()
-            && let Err(e) = automation::set_autostart(autostart)
-        {
-            tracing::warn!("no se pudo cambiar el inicio con el sistema: {e}");
-            ui.set_autostart(automation::autostart_enabled());
+        if autostart != self.autostart_on.get() {
+            match automation::set_autostart(autostart) {
+                Ok(()) => self.autostart_on.set(autostart),
+                Err(e) => {
+                    tracing::warn!("no se pudo cambiar el inicio con el sistema: {e}");
+                    ui.set_autostart(self.autostart_on.get());
+                }
+            }
         }
         s.save();
         apply_queue_settings(&self.manager, &s);
@@ -827,6 +834,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         finish: RefCell::default(),
         last_rows: RefCell::default(),
         countdown: Cell::new(None),
+        autostart_on: Cell::new(automation::autostart_enabled()),
         rule_rows,
         col_rows,
         start_hidden,
