@@ -893,6 +893,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = ui.hide();
     let _ = app.popup.hide();
 
+    // Red de seguridad: si algo se atasca al cerrar (un hilo del sistema, el
+    // servicio que no contesta), el proceso se termina igualmente a los 8 s
+    // en vez de quedarse en segundo plano.
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(8));
+        tracing::warn!("el cierre tardó demasiado; se termina el proceso");
+        std::process::exit(0);
+    });
+
     // Al salir: pausar todo (salvo "Seguir descargando al salir") y dar
     // tiempo al motor a guardar el progreso.
     drop(timer);
@@ -903,7 +912,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let keep = app.settings.borrow().keep_downloading;
     rt.block_on(manager.close(keep));
     rt.shutdown_timeout(Duration::from_secs(1));
-    Ok(())
+    // Salir ya, sin esperar a hilos sueltos (bandeja, avisos…).
+    std::process::exit(0);
 }
 
 /// Lee los enlaces de un archivo `.txt`, `.html`…
