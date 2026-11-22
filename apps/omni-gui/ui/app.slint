@@ -932,6 +932,7 @@ component WinBtn inherits Rectangle {
 // Barra de título propia: arrastra la ventana, doble clic maximiza.
 component TitleBar inherits Rectangle {
     in property <bool> maximized;
+    in property <string> title-text: "OmniLoad";
     callback drag();
     callback minimize();
     callback toggle-maximize();
@@ -953,7 +954,7 @@ component TitleBar inherits Rectangle {
             alignment: center;
             Image { width: 18px; height: 18px; source: @image-url("icon.png"); image-fit: contain; }
         }
-        Text { text: "OmniLoad"; font-size: 12px * Theme.fscale; color: Theme.muted; vertical-alignment: center; }
+        Text { text: root.title-text; font-size: 12px * Theme.fscale; color: Theme.muted; vertical-alignment: center; }
         Rectangle { horizontal-stretch: 1; }
         WinBtn { icon: "M5 12h14"; label: "Minimizar"; clicked => { root.minimize(); } }
         WinBtn {
@@ -1025,6 +1026,8 @@ export component AppWindow inherits Window {
     in property <bool> tray-available: false;
     // Versión y aviso de versión nueva.
     in property <string> app-version;
+    // Número del PR si esta compilación es de un PR sin aprobar (0 = versión normal).
+    in property <int> app-pr: 0;
     // 0 sin comprobar, 1 comprobando, 2 al día, 3 hay una nueva, 4 aún no hay
     // versiones publicadas, 5 error.
     in property <int> update-state: 0;
@@ -2015,8 +2018,33 @@ export component AppWindow inherits Window {
                     spacing: 6px;
                     alignment: start;
                     Text { text: "Versión"; font-size: 28px * Theme.fscale; font-weight: 700; color: Theme.text; }
+                    if root.app-pr > 0: Rectangle {
+                        height: 44px;
+                        border-radius: Theme.r2;
+                        background: Theme.warn.with-alpha(0.14);
+                        border-width: Theme.lw;
+                        border-color: Theme.warn.with-alpha(0.5);
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            spacing: 10px;
+                            VerticalLayout {
+                                alignment: center;
+                                Icon { size: 16px; commands: "M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"; ink: Theme.warn; }
+                            }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: "Versión del PR #" + root.app-pr + " sin aprobar: es una prueba, no una versión publicada.";
+                                font-size: 13px * Theme.fscale;
+                                font-weight: 600;
+                                color: Theme.warn;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
                     SettingRow {
-                        title: "OmniLoad " + root.app-version;
+                        title: "OmniLoad " + root.app-version + (root.app-pr > 0 ? " · PR #" + root.app-pr : "");
                         subtitle: root.update-text;
                         if root.update-state == 3: Btn {
                             text: "Ver la versión nueva";
@@ -2314,6 +2342,7 @@ export component AppWindow inherits Window {
         y: 0;
         width: root.width;
         maximized: root.maximized;
+        title-text: root.app-pr > 0 ? "OmniLoad " + root.app-version + " · PR #" + root.app-pr + " sin aprobar" : "OmniLoad " + root.app-version;
         drag => { root.win-drag(); }
         minimize => { root.win-minimize(); }
         toggle-maximize => { root.win-toggle-maximize(); }

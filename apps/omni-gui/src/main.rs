@@ -861,7 +861,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     connect_settings(&ui, &app);
     connect_popup(&ui, &app);
     connect_updates(&ui, &app);
-    ui.set_app_version(update::CURRENT.into());
+    ui.set_app_version(update::base_version(update::CURRENT).into());
+    ui.set_app_pr(update::pr_number(update::CURRENT).map_or(0, |n| n as i32));
     if app.settings.borrow().check_updates {
         app.check_updates(true);
     }
