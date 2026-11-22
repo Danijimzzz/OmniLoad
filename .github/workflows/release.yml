@@ -127,5 +127,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --title "OmniLoad ${GITHUB_REF_NAME#v}" --generate-notes --verify-tag
+          # Si la release ya existe (creada a mano en la web), solo se suben
+          # los archivos.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* \
+              --title "OmniLoad ${GITHUB_REF_NAME#v}" --generate-notes --verify-tag
+          fi

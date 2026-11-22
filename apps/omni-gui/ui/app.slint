@@ -1605,6 +1605,9 @@ export component AppWindow inherits Window {
     in property <bool> update-busy: false;
     in-out property <bool> check-updates: true;
     // Automático: horario, reglas por tipo, acción al terminar, inicio con el sistema.
+    in-out property <bool> extract-enabled: true;
+    in-out property <bool> extract-delete: false;
+    in-out property <string> extract-passwords;
     in-out property <bool> schedule-enabled: false;
     // Días del horario: bit 0 lunes … bit 6 domingo.
     in-out property <int> schedule-days: 127;
@@ -2546,6 +2549,41 @@ export component AppWindow inherits Window {
                             model: ["No hacer nada", "Cerrar OmniLoad", "Suspender el equipo", "Apagar el equipo"];
                             current-index <=> root.finish-action;
                             selected => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Descomprimir al terminar";
+                        subtitle: "Cuando un paquete termina, abre los .zip, .7z y .rar que traiga en una carpeta con su nombre. Los .rar necesitan 7-Zip, WinRAR o unrar instalado. Si el archivo tiene contraseña, prueba las de la lista.";
+                        Check {
+                            checked <=> root.extract-enabled;
+                            label: "Descomprimir al terminar";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Borrar el comprimido después";
+                        subtitle: "Si se abrió bien, se borran el archivo y todas sus partes. Si falla, no se toca nada.";
+                        opacity: root.extract-enabled ? 1 : 0.5;
+                        Check {
+                            checked <=> root.extract-delete;
+                            enabled: root.extract-enabled;
+                            label: "Borrar el comprimido después";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Contraseñas para descomprimir";
+                        subtitle: "Una por línea. Se prueba primero sin contraseña y luego con cada una.";
+                        opacity: root.extract-enabled ? 1 : 0.5;
+                        VerticalLayout {
+                            spacing: 6px;
+                            TextEdit {
+                                width: 360px;
+                                height: 90px;
+                                text <=> root.extract-passwords;
+                                placeholder-text: "una contraseña por línea";
+                            }
+                            Btn { text: "Aplicar"; enabled: root.extract-enabled; clicked => { root.settings-changed(); } }
                         }
                     }
                     SettingRow {

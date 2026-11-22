@@ -779,6 +779,9 @@ impl App {
         s.connections = ui.get_connections();
         s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
+        s.extract_enabled = ui.get_extract_enabled();
+        s.extract_delete = ui.get_extract_delete();
+        s.extract_passwords = ui.get_extract_passwords().to_string();
         s.check_updates = ui.get_check_updates();
         s.close_to_tray = ui.get_close_to_tray();
         s.minimize_to_tray = ui.get_minimize_to_tray();
@@ -1134,6 +1137,9 @@ fn apply_queue_settings(manager: &Manager, s: &Settings) {
         q.max_active = s.max_active.max(1) as usize;
         q.connections = s.connections.max(1) as usize;
         q.max_per_server = s.max_per_server.max(0) as usize;
+        q.extract.enabled = s.extract_enabled;
+        q.extract.delete_archives = s.extract_delete;
+        q.extract.passwords = s.passwords();
         // Con una hora mal escrita se deja el horario como estaba.
         if let Some(schedule) = s.schedule() {
             q.schedule = schedule;
@@ -1184,6 +1190,9 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_connections(s.connections);
     ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
+    ui.set_extract_enabled(s.extract_enabled);
+    ui.set_extract_delete(s.extract_delete);
+    ui.set_extract_passwords(s.extract_passwords.clone().into());
     ui.set_check_updates(s.check_updates);
     ui.set_close_to_tray(s.close_to_tray);
     ui.set_minimize_to_tray(s.minimize_to_tray);

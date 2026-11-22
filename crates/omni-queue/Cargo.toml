@@ -11,6 +11,7 @@ repository.workspace = true
 chrono.workspace = true
 dirs.workspace = true
 omni-core.workspace = true
+omni-extract.workspace = true
 omni-store.workspace = true
 serde.workspace = true
 tokio.workspace = true

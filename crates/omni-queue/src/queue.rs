@@ -172,6 +172,8 @@ struct Inner {
     /// usuario.
     sched_blocked: AtomicBool,
     stop_ticker: CancellationToken,
+    /// Archivos comprimidos ya abiertos (no abrirlos dos veces).
+    extracted: Mutex<std::collections::HashSet<PathBuf>>,
 }
 
 /// La cola de descargas. Clonarla es barato: todas las copias son la misma
@@ -238,6 +240,7 @@ impl Queue {
             closing: AtomicBool::new(false),
             sched_blocked: AtomicBool::new(blocked),
             stop_ticker: CancellationToken::new(),
+            extracted: Mutex::default(),
         });
         let queue = Self { inner };
         queue.inner.rt.spawn(ticker(Arc::downgrade(&queue.inner)));
@@ -819,7 +822,88 @@ impl Inner {
         if let Err(e) = self.store.save_server_limits(&self.servers.learned()) {
             warn!("no se pudo guardar lo aprendido de los servidores: {e}");
         }
+        self.maybe_extract(run_id);
         self.pump();
+    }
+
+    /// Si con esta descarga se completó su paquete, abre los archivos
+    /// comprimidos que haya en él.
+    fn maybe_extract(self: &Arc<Self>, run_id: u64) {
+        let cfg = self.settings().extract.clone();
+        if !cfg.enabled {
+            return;
+        }
+        let files: Vec<PathBuf> = {
+            let entries = self.entries();
+            let Some(me) = entries.iter().find(|e| e.run_id == run_id) else {
+                return;
+            };
+            if me.state != State::Done {
+                return;
+            }
+            let siblings = entries
+                .iter()
+                .filter(|e| e.package == me.package && e.dir == me.dir);
+            let mut files = Vec::new();
+            for e in siblings {
+                match e.state {
+                    State::Done => files.push(e.dir.join(&e.name)),
+                    State::Failed => {}
+                    _ => return, // aún falta alguna parte
+                }
+            }
+            files
+        };
+        let archives: Vec<_> = {
+            let mut done = self.extracted.lock().expect("lista de abiertos envenenada");
+            omni_extract::entry_points(files.iter().map(PathBuf::as_path))
+                .into_iter()
+                .filter(|a| done.insert(a.path.clone()))
+                .collect()
+        };
+        for archive in archives {
+            let me = Arc::clone(self);
+            let cfg = cfg.clone();
+            self.rt.spawn_blocking(move || me.extract_one(&archive, &cfg));
+        }
+    }
+
+    fn extract_one(&self, archive: &omni_extract::Archive, cfg: &crate::types::ExtractSettings) {
+        let note = match omni_extract::extract(archive, &cfg.passwords) {
+            Ok(done) => {
+                if cfg.delete_archives {
+                    for p in omni_extract::parts_of(archive) {
+                        let _ = std::fs::remove_file(p);
+                    }
+                }
+                let name = done
+                    .dest
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let pw = if done.password_used {
+                    " (con contraseña)"
+                } else {
+                    ""
+                };
+                info!(archive = %archive.path.display(), "descomprimido");
+                format!("Descomprimido en «{name}»{pw}")
+            }
+            Err(e) => {
+                warn!(archive = %archive.path.display(), "no se pudo descomprimir: {e}");
+                // Que se pueda reintentar si cambian las contraseñas.
+                self.extracted
+                    .lock()
+                    .expect("lista de abiertos envenenada")
+                    .remove(&archive.path);
+                format!("No se pudo descomprimir: {e}")
+            }
+        };
+        let mut entries = self.entries();
+        if let Some(e) = entries.iter_mut().find(|e| e.dir.join(&e.name) == archive.path) {
+            e.detail = note;
+            self.save(e);
+        }
     }
 
     fn cancel_entry(&self, e: &mut Entry, requeue: bool) {
