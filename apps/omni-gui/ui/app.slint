@@ -162,13 +162,6 @@ component Panel inherits Rectangle {
     drop-shadow-offset-y: Theme.glass ? 12px : 0px;
     drop-shadow-color: Theme.shadow;
     @children
-    Rectangle {
-        x: Theme.r;
-        y: 1px;
-        width: max(0px, parent.width - 2 * Theme.r);
-        height: 1px;
-        background: Theme.spec;
-    }
 }
 
 // Una columna de una tabla (el orden del modelo es el orden en pantalla).
