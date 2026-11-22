@@ -1587,6 +1587,10 @@ export component AppWindow inherits Window {
     // versiones publicadas, 5 error.
     in property <int> update-state: 0;
     in property <string> update-text;
+    // Hay instalador de la versión nueva para este sistema (se puede
+    // actualizar sin salir de la app) y se está descargando.
+    in property <bool> update-installable: false;
+    in property <bool> update-busy: false;
     in-out property <bool> check-updates: true;
     // Automático: horario, reglas por tipo, acción al terminar, inicio con el sistema.
     in-out property <bool> schedule-enabled: false;
@@ -1612,6 +1616,7 @@ export component AppWindow inherits Window {
     callback finish-cancel();
     callback check-updates-now();
     callback open-release();
+    callback install-update();
     in-out property <bool> watch-clipboard: true;
     in-out property <int> clip-popup: 1;
     in-out property <bool> package-folders: true;
@@ -2577,21 +2582,29 @@ export component AppWindow inherits Window {
                     SettingRow {
                         title: "OmniLoad " + root.app-version + (root.app-pr > 0 ? " · PR #" + root.app-pr : "");
                         subtitle: root.update-text;
+                        if root.update-state == 3 && root.update-installable: Btn {
+                            text: root.update-busy ? "Actualizando…" : "Actualizar ahora";
+                            primary: true;
+                            enabled: !root.update-busy;
+                            icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
+                            clicked => { root.install-update(); }
+                        }
                         if root.update-state == 3: Btn {
                             text: "Ver la versión nueva";
-                            primary: true;
+                            primary: !root.update-installable;
+                            enabled: !root.update-busy;
                             icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
                             clicked => { root.open-release(); }
                         }
                         Btn {
                             text: root.update-state == 1 ? "Comprobando…" : "Buscar actualizaciones";
-                            enabled: root.update-state != 1;
+                            enabled: root.update-state != 1 && !root.update-busy;
                             clicked => { root.check-updates-now(); }
                         }
                     }
                     SettingRow {
                         title: "Buscar al abrir";
-                        subtitle: "Al abrir OmniLoad pregunta a GitHub cuál es la última versión y te avisa si hay una nueva. No descarga ni instala nada: tú decides si actualizas. Solo envía el nombre y el número de versión del programa.";
+                        subtitle: "Al abrir OmniLoad pregunta a GitHub cuál es la última versión y te avisa si hay una nueva. No descarga ni instala nada hasta que pulses «Actualizar ahora»: entonces baja el instalador, comprueba su suma de seguridad, se cierra, se actualiza y se vuelve a abrir. Solo envía el nombre y el número de versión del programa.";
                         Check {
                             checked <=> root.check-updates;
                             label: "Buscar actualizaciones al abrir";

@@ -77,6 +77,11 @@ struct App {
     rt: tokio::runtime::Handle,
     /// Dirección de la versión nueva, si hay.
     release_url: RefCell<Option<String>>,
+    /// El instalador de la versión nueva para este sistema, si lo hay.
+    install: RefCell<Option<update::Install>>,
+    /// Instalador ya descargado y comprobado: se lanza al salir.
+    pending_update: RefCell<Option<std::path::PathBuf>>,
+    installing: Cell<bool>,
     /// Icono de la bandeja (si el sistema tiene bandeja).
     tray: RefCell<Option<Tray>>,
     tray_tx: Sender<TrayEvent>,
@@ -331,8 +336,14 @@ impl App {
         use update::Outcome::*;
         let Some(ui) = self.ui() else { return };
         let (state, text) = match outcome {
-            Newer { version, url } => {
+            Newer {
+                version,
+                url,
+                install,
+            } => {
                 *self.release_url.borrow_mut() = Some(url.clone());
+                ui.set_update_installable(install.is_some());
+                *self.install.borrow_mut() = install.clone();
                 (
                     3,
                     format!(
@@ -354,6 +365,64 @@ impl App {
         };
         ui.set_update_state(state);
         ui.set_update_text(text.into());
+    }
+
+    /// «Actualizar ahora»: baja el instalador de la versión nueva, comprueba
+    /// su suma y cierra OmniLoad para instalarlo (y volver a abrirlo).
+    fn install_update(self: &Rc<Self>) {
+        enum Msg {
+            Progress(u64, u64),
+            Done(Result<std::path::PathBuf, String>),
+        }
+        let Some(install) = self.install.borrow().clone() else {
+            return;
+        };
+        let Some(ui) = self.ui() else { return };
+        if self.installing.replace(true) {
+            return;
+        }
+        ui.set_update_busy(true);
+        ui.set_update_text(format!("Descargando {}…", install.name).into());
+        let (tx, rx) = mpsc::channel();
+        let progress_tx = tx.clone();
+        self.rt.spawn(async move {
+            let r = update::download(&install, move |done, total| {
+                let _ = progress_tx.send(Msg::Progress(done, total));
+            })
+            .await;
+            let _ = tx.send(Msg::Done(r));
+        });
+        let app = self.clone();
+        let timer = Rc::new(Timer::default());
+        let keep = timer.clone();
+        timer.start(TimerMode::Repeated, Duration::from_millis(200), move || {
+            let Some(ui) = app.ui() else { return };
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    Msg::Progress(done, total) => {
+                        let pct = (done * 100).checked_div(total).unwrap_or(0);
+                        ui.set_update_text(format!("Descargando la actualización… {pct} %").into());
+                    }
+                    Msg::Done(Ok(path)) => {
+                        keep.stop();
+                        *app.pending_update.borrow_mut() = Some(path);
+                        ui.set_update_text(
+                            "Descargada y comprobada. OmniLoad se cierra para instalarla y se abrirá solo."
+                                .into(),
+                        );
+                        let _ = slint::quit_event_loop();
+                        return;
+                    }
+                    Msg::Done(Err(e)) => {
+                        keep.stop();
+                        app.installing.set(false);
+                        ui.set_update_busy(false);
+                        ui.set_update_text(format!("No se pudo actualizar: {e}.").into());
+                        return;
+                    }
+                }
+            }
+        });
     }
 
     /// ¿Hay un icono en la bandeja donde esconder la ventana?
@@ -824,6 +893,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pop_place: Cell::new(None),
         rt: rt.handle().clone(),
         release_url: RefCell::new(None),
+        install: RefCell::new(None),
+        pending_update: RefCell::new(None),
+        installing: Cell::new(false),
         tray: RefCell::new(None),
         tray_tx,
         tray_rx,
@@ -909,9 +981,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(app.tray.borrow_mut().take());
     app.save_settings();
     app.grabber.close();
-    let keep = app.settings.borrow().keep_downloading;
+    // Si se va a actualizar, el servicio también se para (el instalador
+    // reemplaza sus archivos).
+    let update_file = app.pending_update.borrow_mut().take();
+    let keep = app.settings.borrow().keep_downloading && update_file.is_none();
     rt.block_on(manager.close(keep));
     rt.shutdown_timeout(Duration::from_secs(1));
+    if let Some(file) = update_file
+        && let Err(e) = update::launch_installer(&file)
+    {
+        tracing::error!("no se pudo actualizar: {e}");
+    }
     // Salir ya, sin esperar a hilos sueltos (bandeja, avisos…).
     std::process::exit(0);
 }
@@ -955,6 +1035,10 @@ fn connect_updates(ui: &AppWindow, app: &Rc<App>) {
     ui.on_check_updates_now({
         let app = app.clone();
         move || app.check_updates(false)
+    });
+    ui.on_install_update({
+        let app = app.clone();
+        move || app.install_update()
     });
     ui.on_open_release({
         let app = app.clone();
