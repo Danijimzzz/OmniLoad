@@ -531,15 +531,16 @@ component Cell inherits Text {
     overflow: elide;
 }
 
-// Hueco de una columna: ancho propio, sin estirarse (un ancho de columna no
-// afecta a las demás; lo que sobra queda a la derecha).
+// Hueco de una columna: ancho propio. Solo «Nombre» se estira para llenar la
+// tabla; el ancho de una columna no afecta a las demás.
 component ColSlot inherits Rectangle {
     in property <ColState> spec;
     visible: spec.shown;
     min-width: spec.shown ? spec.width : 0px;
-    max-width: spec.shown ? spec.width : 0px;
+    // «Nombre» es la columna elástica: se queda con el ancho que sobra.
+    max-width: spec.shown ? (spec.id == 0 ? 100000px : spec.width) : 0px;
     preferred-width: spec.shown ? spec.width : 0px;
-    horizontal-stretch: 0;
+    horizontal-stretch: spec.id == 0 ? 1 : 0;
 }
 
 // Cabecera de una tabla: arrastrar el borde derecho cambia el ancho y
@@ -648,7 +649,6 @@ component ColsHeader inherits Rectangle {
                 }
             }
         }
-        Rectangle { horizontal-stretch: 1; }
     }
     // Lo que se arrastra, siguiendo al ratón.
     if root.dragging >= 0: Rectangle {
@@ -1513,7 +1513,7 @@ export component AppWindow inherits Window {
     no-frame: true;
     preferred-width: 1280px;
     preferred-height: 800px;
-    min-width: 1100px;
+    min-width: 1180px;
     min-height: 560px;
     background: Theme.wall;
     default-font-family: "Inter";
@@ -1942,7 +1942,7 @@ export component AppWindow inherits Window {
                     dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
                 }
                 if root.properties-panel == 1 && root.sel-kind > 0: Panel {
-                    width: root.side-w;
+                    width: min(root.side-w, max(240px, root.width - 620px));
                     VerticalLayout {
                         padding: 16px;
                         spacing: 10px;
@@ -2120,7 +2120,7 @@ export component AppWindow inherits Window {
                     dragged(d) => { root.side-w = clamp(root.side-w - d, 240px, 720px); }
                 }
                 if root.properties-panel == 1 && root.pkg-selected: Panel {
-                    width: root.side-w;
+                    width: min(root.side-w, max(240px, root.width - 620px));
                     VerticalLayout {
                         padding: 16px;
                         spacing: 8px;
