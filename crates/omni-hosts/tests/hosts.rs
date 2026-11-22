@@ -372,13 +372,14 @@ async fn standard_set_has_all_hosts() {
             "Mediafire",
             "Google Drive",
             "Gofile",
+            "Mega",
             "yt-dlp",
             "OneDrive",
             "1fichier",
             "Torrent"
         ]
     );
-    assert_eq!(hosts.checkers().names().len(), 10);
+    assert_eq!(hosts.checkers().names().len(), 11);
 }
 
 // -------------------------------------------------------------- Google Drive

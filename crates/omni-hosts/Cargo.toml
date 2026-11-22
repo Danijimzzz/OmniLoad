@@ -8,7 +8,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+aes.workspace = true
 base64.workspace = true
+cbc.workspace = true
+ctr.workspace = true
 hex.workspace = true
 librqbit = { version = "9.1", default-features = false, features = ["rust-tls"] }
 omni-core.workspace = true

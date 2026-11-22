@@ -24,6 +24,7 @@ mod gdrive;
 mod gofile;
 mod html;
 mod mediafire;
+mod mega;
 mod onedrive;
 mod pixeldrain;
 mod torrent;
@@ -44,6 +45,7 @@ pub use fichier::OneFichier;
 pub use gdrive::GoogleDrive;
 pub use gofile::Gofile;
 pub use mediafire::Mediafire;
+pub use mega::Mega;
 pub use onedrive::OneDrive;
 pub use pixeldrain::Pixeldrain;
 pub use torrent::Torrents;
@@ -91,6 +93,7 @@ impl Hosts {
             .with(Mediafire::new())
             .with(GoogleDrive::new())
             .with(Gofile::new())
+            .with(Mega::new())
             .with(YtDlp::new())
             .with(OneDrive::new())
             .with(OneFichier::new())
