@@ -189,7 +189,9 @@ async fn list_and_settings_survive_a_restart() {
         (running, parked)
     };
 
-    assert!(downloads.join("grande.bin.part.omni").exists());
+    // El estado de reanudar ya no ensucia la carpeta de descargas.
+    assert!(omni_core::state_path_for(&downloads.join("grande.bin")).exists());
+    assert!(!downloads.join("grande.bin.part.omni").exists());
     server.set_chunk_delay(None);
     let before = server.ranges().len();
     let q = open(Arc::new(Store::open(&db).unwrap()));
@@ -299,4 +301,43 @@ async fn resolver_turns_links_into_downloads() {
         std::fs::read(dir.path().join("resuelto-a.bin")).unwrap(),
         data
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remove_with_files_deletes_file_state_and_empty_folder() {
+    let data = pseudo_random_bytes(512 * 1024, 3);
+    let server = TestServer::start(data, ServerConfig::default()).await;
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().join("Mi paquete");
+    std::fs::create_dir_all(&folder).unwrap();
+    let q = memory_queue();
+
+    // Terminada: se borra el archivo y la carpeta, que queda vacía.
+    let id = q.add(new(server.url("a.bin"), &folder, true)).unwrap();
+    wait_for(&q, id, State::Done).await;
+    assert!(folder.join("a.bin").exists());
+    let n = q
+        .remove_with_files(&[id], Some(root.path().to_path_buf()))
+        .await;
+    assert_eq!(n, 1);
+    assert!(q.snapshot().is_empty());
+    assert!(!folder.join("a.bin").exists());
+    assert!(!folder.exists(), "la carpeta vacía debe borrarse");
+    assert!(root.path().exists(), "la carpeta de descargas se conserva");
+
+    // Con otro archivo ajeno dentro, la carpeta se queda.
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("mio.txt"), b"mio").unwrap();
+    let id = q.add(new(server.url("b.bin"), &folder, true)).unwrap();
+    wait_for(&q, id, State::Done).await;
+    q.remove_with_files(&[id], Some(root.path().to_path_buf()))
+        .await;
+    assert!(!folder.join("b.bin").exists());
+    assert!(folder.join("mio.txt").exists());
+
+    // Solo quitar de la lista no toca el disco.
+    let id = q.add(new(server.url("c.bin"), &folder, true)).unwrap();
+    wait_for(&q, id, State::Done).await;
+    q.remove(&[id]);
+    assert!(folder.join("c.bin").exists());
 }

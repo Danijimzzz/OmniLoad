@@ -118,6 +118,14 @@ impl RemoteQueue {
         self.fire(|c| async move { c.remove(&ids).await });
     }
 
+    /// Quita descargas y borra sus archivos del disco (y la carpeta si queda
+    /// vacía, salvo `keep`).
+    pub fn remove_with_files(&self, ids: &[u64], keep: std::path::PathBuf) {
+        self.cache().jobs.retain(|j| !ids.contains(&j.id));
+        let ids = ids.to_vec();
+        self.fire(|c| async move { c.remove_with(&ids, true, Some(keep)).await });
+    }
+
     pub fn set_priority(&self, ids: &[u64], priority: Priority) {
         let ids = ids.to_vec();
         self.fire(|c| async move { c.set_priority(&ids, priority).await });

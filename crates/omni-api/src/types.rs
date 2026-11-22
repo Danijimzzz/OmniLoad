@@ -5,6 +5,19 @@ use omni_queue::{Priority, QueueSettings};
 use serde::{Deserialize, Serialize};
 
 /// Estado del servicio.
+/// Quitar descargas; con `files` también se borran sus archivos.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoveRequest {
+    pub ids: Vec<u64>,
+    /// Borrar también el archivo (o lo descargado a medias) y la carpeta si
+    /// se queda vacía.
+    #[serde(default)]
+    pub files: bool,
+    /// Carpeta que nunca se borra (la de descargas del usuario).
+    #[serde(default)]
+    pub keep: Option<std::path::PathBuf>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Status {
     /// Versión de OmniLoad del servicio.

@@ -55,11 +55,14 @@ enum Command {
     Pause { ids: Vec<u64> },
     /// Reanuda descargas (sin ids: todas).
     Resume { ids: Vec<u64> },
-    /// Quita descargas de la lista (no borra archivos).
+    /// Quita descargas de la lista (no borra archivos salvo con --archivos).
     #[command(alias = "rm")]
     Remove {
         #[arg(required = true)]
         ids: Vec<u64>,
+        /// Borra también los archivos descargados y la carpeta si queda vacía.
+        #[arg(long)]
+        archivos: bool,
     },
     /// Límite de velocidad: global, o de unas descargas con --id.
     Limit(LimitArgs),
@@ -264,7 +267,7 @@ async fn remote(c: &Client, cmd: Command) -> Result<()> {
         Command::Pause { ids } => c.stop(&ids).await?,
         Command::Resume { ids } if ids.is_empty() => c.start_all().await?,
         Command::Resume { ids } => c.start(&ids).await?,
-        Command::Remove { ids } => c.remove(&ids).await?,
+        Command::Remove { ids, archivos } => c.remove_with(&ids, archivos, None).await?,
         Command::Limit(l) => {
             let speed = match l.speed.as_str() {
                 "off" | "no" | "0" => None,

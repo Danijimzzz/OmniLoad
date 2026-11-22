@@ -4074,6 +4074,7 @@ name = "omni-core"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "dirs",
  "fs4",
  "futures-util",
  "hex",
@@ -4141,6 +4142,7 @@ dependencies = [
 name = "omni-queue"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "omni-core",
  "omni-store",
  "omni-testserver",

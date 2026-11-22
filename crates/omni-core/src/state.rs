@@ -1,7 +1,14 @@
-//! Archivo de estado para reanudar: `<destino>.part.omni`, en JSON.
+//! Archivo de estado para reanudar, en JSON: tamaño, validadores y bloques
+//! con lo escrito.
 //!
-//! En la fase 2 este estado pasará a SQLite (crate omni-store), pero el
-//! contenido es el mismo: tamaño, validadores y bloques con lo escrito.
+//! No va junto a la descarga (antes era `<destino>.part.omni`): como se
+//! guarda cada poco con un temporal que se renombra, en la carpeta se veía un
+//! archivo aparecer y desaparecer sin parar. Ahora vive en la carpeta de datos
+//! del programa (`%LOCALAPPDATA%\OmniLoad\reanudar` en Windows,
+//! `~/.local/share/omniload/reanudar` en Linux,
+//! `~/Library/Application Support/OmniLoad/reanudar` en macOS), con un nombre
+//! sacado de la ruta del destino. En la carpeta de descargas solo queda el
+//! `.part`. La variable `OMNILOAD_REANUDAR` cambia esa carpeta.
 
 use std::fs;
 use std::io::{self, Write};
@@ -20,7 +27,47 @@ pub fn part_path_for(dest: &Path) -> PathBuf {
 
 /// Ruta del archivo de estado de un destino.
 pub fn state_path_for(dest: &Path) -> PathBuf {
+    match state_dir() {
+        Some(dir) => dir.join(state_file_name(dest)),
+        // Sin carpeta de datos (raro): junto a la descarga, como antes.
+        None => legacy_state_path_for(dest),
+    }
+}
+
+/// Dónde iba el estado en versiones anteriores: junto a la descarga. Se lee
+/// para no perder lo que estuviera a medias al actualizar.
+pub fn legacy_state_path_for(dest: &Path) -> PathBuf {
     append_ext(dest, ".part.omni")
+}
+
+fn state_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("OMNILOAD_REANUDAR") {
+        return Some(dir.into());
+    }
+    let app = if cfg!(any(target_os = "windows", target_os = "macos")) {
+        "OmniLoad"
+    } else {
+        "omniload"
+    };
+    dirs::data_local_dir().map(|d| d.join(app).join("reanudar"))
+}
+
+/// `<nombre>-<huella de la ruta>.json`: el nombre para reconocerlo a ojo, la
+/// huella para que dos descargas con el mismo nombre en carpetas distintas no
+/// se pisen.
+fn state_file_name(dest: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let abs = std::path::absolute(dest).unwrap_or_else(|_| dest.to_path_buf());
+    let hash = Sha256::digest(abs.as_os_str().as_encoded_bytes());
+    let name: String = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .take(60)
+        .collect();
+    format!("{name}-{}.json", hex::encode(&hash[..10]))
 }
 
 fn append_ext(dest: &Path, ext: &str) -> PathBuf {
@@ -71,6 +118,9 @@ impl SavedState {
     /// Guarda de forma atómica: escribe un temporal, lo sincroniza y lo
     /// renombra encima. Un corte a mitad deja el estado anterior intacto.
     pub fn save_atomic(&self, path: &Path) -> io::Result<()> {
+        if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            fs::create_dir_all(dir)?;
+        }
         let tmp = append_ext(path, ".tmp");
         {
             let mut f = fs::File::create(&tmp)?;
@@ -102,7 +152,15 @@ mod tests {
     fn roundtrip_and_match() {
         let dir = tempfile::tempdir().unwrap();
         let path = state_path_for(&dir.path().join("a.bin"));
-        assert!(path.to_string_lossy().ends_with("a.bin.part.omni"));
+        // Fuera de la carpeta de descargas, con el nombre delante.
+        assert!(!path.starts_with(dir.path()));
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with("a.bin-") && name.ends_with(".json"),
+            "{name}"
+        );
+        // El mismo nombre en otra carpeta no se pisa.
+        assert_ne!(path, state_path_for(&dir.path().join("otra").join("a.bin")));
         let s = SavedState::new(
             "http://x/a.bin".into(),
             10,
@@ -114,6 +172,8 @@ mod tests {
                 written: 4,
             }],
         );
+        // Se guarda en la carpeta temporal, no en la de datos del usuario.
+        let path = dir.path().join("estado").join("a.json");
         s.save_atomic(&path).unwrap();
         s.save_atomic(&path).unwrap();
         let loaded = SavedState::load(&path).unwrap();
@@ -122,6 +182,12 @@ mod tests {
         assert!(!loaded.matches(10, Some("\"e2\""), None));
         assert!(!loaded.matches(11, Some("\"e1\""), None));
         assert!(!loaded.matches(10, None, None));
+    }
+
+    #[test]
+    fn odd_names_are_cleaned() {
+        let name = state_file_name(Path::new("/x/a b?:*<>|ñ.zip"));
+        assert!(name.starts_with("abñ.zip-"), "{name}");
     }
 
     #[test]

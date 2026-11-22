@@ -51,6 +51,22 @@ al salir". `omnid` escribe su
 registro en `omnid.log`, junto a la base de datos; para verlo en directo,
 ejecútalo en una terminal (`RUST_LOG=debug omnid`; Ctrl+C lo para).
 
+### Quitar descargas, velocidad estable y versión
+
+- Quitar: `Queue::remove` solo saca de la lista; `Queue::remove_with_files`
+  (API `POST /jobs/remove` con `{"ids":…, "files":true, "keep":"<carpeta de
+  descargas>"}`, CLI `omni remove --archivos`) borra también el archivo, el
+  `.part`, el estado de reanudar y la carpeta del paquete **solo si queda
+  vacía** y no es la de descargas ni una carpeta personal del sistema.
+- `apps/omni-gui/src/smooth.rs`: la velocidad y el tiempo restante que se ven
+  cambian una vez por segundo (media más lenta que la del motor); el tiempo
+  restante cuenta hacia atrás entre actualizaciones y se redondea (1 s hasta
+  1 min, 5 s hasta 1 h, 1 min después).
+- `apps/omni-gui/src/update.rs`: al abrir pide `releases/latest` a la API de
+  GitHub (una sola petición, con `User-Agent: OmniLoad/<versión>`), compara
+  versiones y avisa; nunca descarga ni instala. Se desactiva en Ajustes ›
+  Versión. Sin releases publicadas (404) lo dice sin dar error.
+
 ### Bandeja, ventana única y notificaciones
 
 - `apps/omni-gui/src/tray.rs`: el icono. Windows y macOS usan `tray-icon`
@@ -125,7 +141,13 @@ se quedó, también tras un cierre forzado o un corte de luz.
    final (`pwrite` en Unix, `seek_write` en Windows); no hay paso de "unir
    partes".
 6. **Reanudación**: cada medio segundo se hace `fsync` del `.part` y se guarda
-   el progreso en `archivo.part.omni`. Al reanudar se comprueba que tamaño,
+   el progreso en un archivo de estado que **no** va en la carpeta de
+   descargas (antes era `archivo.part.omni`, que aparecía y desaparecía sin
+   parar), sino en la carpeta de datos del programa: `reanudar/<nombre>-<huella
+   de la ruta>.json` (`%LOCALAPPDATA%\OmniLoad`, `~/.local/share/omniload` o
+   `~/Library/Application Support/OmniLoad`; `OMNILOAD_REANUDAR` la cambia).
+   Si queda un `.part.omni` de una versión anterior, se adopta al reanudar.
+   Al reanudar se comprueba que tamaño,
    ETag y Last-Modified no hayan cambiado; si cambiaron, se empieza de cero.
    Además cada petición lleva `If-Range`, así que un cambio a mitad de
    descarga se detecta en vez de mezclar dos versiones del archivo.
@@ -162,7 +184,7 @@ Prioridades, descargas a la vez, pausa global, límites y persistencia. Vive
 en el servicio `omnid`. Detalles:
 
 - Se guarda en SQLite (`omni-store`) cada cambio de estado y, cada 2 s, el
-  progreso. El progreso fino (qué bloques faltan) sigue en el `.part.omni`:
+  progreso. El progreso fino (qué bloques faltan) sigue en el archivo de estado de arriba:
   una descarga se reanuda aunque se borre la base de datos.
 - Al cerrar, lo que corre se pausa guardando el progreso y queda "en espera";
   al abrir, arranca solo.

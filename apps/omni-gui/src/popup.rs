@@ -21,7 +21,15 @@ pub struct State {
     started: Option<Instant>,
     /// Cuándo terminó la comprobación, y cuánto tardó.
     done: Option<(Instant, Duration)>,
+    /// Desde cuándo se está desvaneciendo para cerrarse.
+    fade: Option<Instant>,
 }
+
+/// Cuánto se espera tras terminar la comprobación antes de empezar a
+/// desvanecer el aviso.
+pub const LINGER: Duration = Duration::from_secs(2);
+/// Lo que dura el desvanecimiento (el mismo que `fade-ms` en app.slint).
+pub const FADE: Duration = Duration::from_millis(1000);
 
 /// Recuento de una tanda.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -65,6 +73,7 @@ impl State {
             compact,
             started: Some(now),
             done: None,
+            fade: None,
         };
     }
 
@@ -75,6 +84,26 @@ impl State {
     /// Llegaron más enlaces a la tanda: vuelve a estar comprobando.
     pub fn more_links(&mut self) {
         self.done = None;
+        self.fade = None;
+    }
+
+    /// Empieza a desvanecerse (si no lo estaba ya).
+    pub fn start_fade(&mut self, now: Instant) {
+        self.fade.get_or_insert(now);
+    }
+
+    /// El ratón está encima o llegó algo nuevo: vuelve a verse entero.
+    pub fn cancel_fade(&mut self) {
+        self.fade = None;
+    }
+
+    pub fn is_fading(&self) -> bool {
+        self.fade.is_some()
+    }
+
+    /// ¿Ya se desvaneció del todo?
+    pub fn fade_finished(&self, now: Instant) -> bool {
+        self.fade.is_some_and(|at| now.duration_since(at) >= FADE)
     }
 
     /// Actualiza con el recuento de ahora. Devuelve el texto del tiempo.
@@ -88,10 +117,11 @@ impl State {
         format!("Comprobado en {}", seconds(took))
     }
 
-    /// Si toca cerrarlo solo: 1 s después de terminar de comprobar.
+    /// Si toca empezar a cerrarlo solo: [`LINGER`] después de terminar de
+    /// comprobar.
     pub fn should_autoclose(&self, now: Instant) -> bool {
         self.done
-            .is_some_and(|(at, _)| now.duration_since(at) >= Duration::from_secs(1))
+            .is_some_and(|(at, _)| now.duration_since(at) >= LINGER)
     }
 }
 
@@ -305,7 +335,18 @@ mod tests {
             "Comprobado en 2,4 s"
         );
         assert!(!st.should_autoclose(t1 + Duration::from_millis(500)));
-        assert!(st.should_autoclose(t1 + Duration::from_secs(1)));
+        assert!(!st.should_autoclose(t1 + Duration::from_secs(1)));
+        assert!(st.should_autoclose(t1 + LINGER));
+
+        // Se desvanece poco a poco y se puede recuperar.
+        let t2 = t1 + LINGER;
+        st.start_fade(t2);
+        assert!(st.is_fading());
+        assert!(!st.fade_finished(t2 + FADE / 2));
+        st.cancel_fade();
+        assert!(!st.is_fading());
+        st.start_fade(t2);
+        assert!(st.fade_finished(t2 + FADE));
 
         st.more_links();
         assert!(!st.should_autoclose(t1 + Duration::from_secs(5)));

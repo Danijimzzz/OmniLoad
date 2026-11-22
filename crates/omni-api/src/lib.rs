@@ -37,7 +37,7 @@ pub use paths::{Endpoint, Paths};
 pub use remote::{RemoteGrabber, RemoteQueue};
 pub use server::{Service, ServiceError};
 pub use types::{
-    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest,
+    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest, RemoveRequest,
     SpeedLimitRequest, Status, TakeRequest, TakeResponse,
 };
 

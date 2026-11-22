@@ -34,7 +34,9 @@ mod platform;
 mod popup;
 mod settings;
 mod single;
+mod smooth;
 mod tray;
+mod update;
 mod views;
 
 use std::cell::{Cell, RefCell};
@@ -71,6 +73,8 @@ struct App {
     pop_rows: Rc<VecModel<PopRow>>,
     pop_place: Cell<Option<(i32, i32)>>,
     rt: tokio::runtime::Handle,
+    /// Dirección de la versión nueva, si hay.
+    release_url: RefCell<Option<String>>,
     /// Icono de la bandeja (si el sistema tiene bandeja).
     tray: RefCell<Option<Tray>>,
     tray_tx: Sender<TrayEvent>,
@@ -184,6 +188,61 @@ impl App {
         if self.hidden.get() && lost {
             self.show_window();
         }
+    }
+
+    /// Mira en GitHub si hay una versión nueva y lo cuenta en Ajustes › Versión
+    /// (y en la barra de arriba si la hay). `quiet`: al abrir, sin
+    /// «Comprobando…» ni mensajes si falla.
+    fn check_updates(self: &Rc<Self>, quiet: bool) {
+        let Some(ui) = self.ui() else { return };
+        if ui.get_update_state() == 1 {
+            return;
+        }
+        ui.set_update_state(1);
+        ui.set_update_text("Comprobando si hay una versión nueva…".into());
+        let (tx, rx) = mpsc::channel();
+        self.rt.spawn(async move {
+            let _ = tx.send(update::check().await);
+        });
+        // El resultado llega por el canal; se recoge con un temporizador
+        // corto que se para solo.
+        let app = self.clone();
+        let timer = Rc::new(Timer::default());
+        let keep = timer.clone();
+        timer.start(TimerMode::Repeated, Duration::from_millis(200), move || {
+            let Ok(outcome) = rx.try_recv() else { return };
+            keep.stop();
+            app.show_update(&outcome, quiet);
+        });
+    }
+
+    fn show_update(&self, outcome: &update::Outcome, quiet: bool) {
+        use update::Outcome::*;
+        let Some(ui) = self.ui() else { return };
+        let (state, text) = match outcome {
+            Newer { version, url } => {
+                *self.release_url.borrow_mut() = Some(url.clone());
+                (
+                    3,
+                    format!(
+                        "Hay una versión nueva: {version}. Tienes la {}. Actualizar es opcional.",
+                        update::CURRENT
+                    ),
+                )
+            }
+            UpToDate { .. } => (2, "Tienes la última versión.".to_owned()),
+            NoReleases => (
+                4,
+                "Aún no hay versiones publicadas en GitHub: esta es la más reciente.".to_owned(),
+            ),
+            Failed(e) if quiet => {
+                tracing::info!("no se pudo buscar una versión nueva: {e}");
+                (0, String::new())
+            }
+            Failed(e) => (5, format!("No se pudo comprobar: {e}.")),
+        };
+        ui.set_update_state(state);
+        ui.set_update_text(text.into());
     }
 
     /// ¿Hay un icono en la bandeja donde esconder la ventana?
@@ -405,9 +464,17 @@ impl App {
             && self.pop.borrow().should_autoclose(now)
             && !self.popup.get_hovered()
         {
-            self.close_popup();
-            return;
+            // Se desvanece poco a poco y, al terminar, se cierra.
+            self.pop.borrow_mut().start_fade(now);
+            if self.pop.borrow().fade_finished(now) {
+                self.close_popup();
+                return;
+            }
+        } else if self.pop.borrow().is_fading() {
+            // El ratón volvió a pasar por encima, o llegaron más enlaces.
+            self.pop.borrow_mut().cancel_fade();
         }
+        self.popup.set_fading(self.pop.borrow().is_fading());
         let rows = items
             .iter()
             .map(|i| {
@@ -528,6 +595,7 @@ impl App {
         s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
         s.keep_downloading = ui.get_keep_downloading();
+        s.check_updates = ui.get_check_updates();
         s.close_to_tray = ui.get_close_to_tray();
         s.minimize_to_tray = ui.get_minimize_to_tray();
         s.notify_done = ui.get_notify_done();
@@ -595,6 +663,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pop_rows,
         pop_place: Cell::new(None),
         rt: rt.handle().clone(),
+        release_url: RefCell::new(None),
         tray: RefCell::new(None),
         tray_tx,
         tray_rx,
@@ -631,6 +700,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     connect_grabber(&ui, &app);
     connect_settings(&ui, &app);
     connect_popup(&ui, &app);
+    connect_updates(&ui, &app);
+    ui.set_app_version(update::CURRENT.into());
+    if app.settings.borrow().check_updates {
+        app.check_updates(true);
+    }
 
     app.open_args(args);
     app.refresh();
@@ -689,6 +763,26 @@ fn copy_theme(ui: &AppWindow, popup: &ClipPopup) {
     to.set_accent_index(from.get_accent_index());
     to.set_compact(from.get_compact());
     to.set_reduce_transparency(from.get_reduce_transparency());
+}
+
+fn connect_updates(ui: &AppWindow, app: &Rc<App>) {
+    ui.on_check_updates_now({
+        let app = app.clone();
+        move || app.check_updates(false)
+    });
+    ui.on_open_release({
+        let app = app.clone();
+        move || {
+            let url = app
+                .release_url
+                .borrow()
+                .clone()
+                .unwrap_or_else(update::releases_page);
+            if let Err(e) = platform::open_url(&url) {
+                app.show(&format!("No se pudo abrir {url}: {e}"), true);
+            }
+        }
+    });
 }
 
 fn connect_popup(ui: &AppWindow, app: &Rc<App>) {
@@ -819,6 +913,7 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
     ui.set_keep_downloading(s.keep_downloading);
+    ui.set_check_updates(s.check_updates);
     ui.set_close_to_tray(s.close_to_tray);
     ui.set_minimize_to_tray(s.minimize_to_tray);
     ui.set_notify_done(s.notify_done);
@@ -932,8 +1027,14 @@ fn connect_downloads(ui: &AppWindow, app: &Rc<App>) {
     });
     ui.on_sel_remove({
         let app = app.clone();
-        move || {
-            app.manager.remove(&app.selected_ids());
+        move |delete_files| {
+            let ids = app.selected_ids();
+            if delete_files {
+                let keep = app.settings.borrow().download_dir.clone();
+                app.manager.remove_with_files(&ids, keep);
+            } else {
+                app.manager.remove(&ids);
+            }
             app.state.borrow_mut().dl_selected = None;
             app.refresh();
         }
