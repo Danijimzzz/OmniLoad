@@ -1685,6 +1685,8 @@ export component AppWindow inherits Window {
     in-out property <bool> remove-dialog-open: false;
     callback change-sel-priority(int);
     callback sel-open-folder();
+    // Cierra el panel de detalles (quita la selección).
+    callback sel-close();
 
     callback grab-click(int, bool);
     callback grab-toggle(int);
@@ -1987,12 +1989,17 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         padding: 16px;
                         spacing: 10px;
-                        Text {
-                            text: root.sel-title;
-                            font-size: 14px * Theme.fscale;
-                            font-weight: 700;
-                            color: Theme.text;
-                            wrap: word-wrap;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: root.sel-title;
+                                font-size: 14px * Theme.fscale;
+                                font-weight: 700;
+                                color: Theme.text;
+                                wrap: word-wrap;
+                                horizontal-stretch: 1;
+                            }
+                            Btn { label: "Cerrar detalles"; icon: "M6 6l12 12M18 6L6 18"; clicked => { root.sel-close(); } }
                         }
                         for l in root.sel-lines: VerticalLayout {
                             spacing: 2px;
@@ -2071,6 +2078,7 @@ export component AppWindow inherits Window {
                         }
                         Btn { text: "Abrir carpeta"; clicked => { root.sel-open-folder(); } }
                         Btn { text: "Quitar"; clicked => { root.remove-dialog-open = true; } }
+                        Btn { label: "Cerrar detalles"; icon: "M6 6l12 12M18 6L6 18"; clicked => { root.sel-close(); } }
                     }
                     HorizontalLayout {
                         spacing: 24px;

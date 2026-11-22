@@ -1372,6 +1372,13 @@ fn connect_downloads(ui: &AppWindow, app: &Rc<App>) {
             app.refresh();
         }
     });
+    ui.on_sel_close({
+        let app = app.clone();
+        move || {
+            app.state.borrow_mut().dl_selected = None;
+            app.refresh();
+        }
+    });
     ui.on_sel_open_folder({
         let app = app.clone();
         move || {
