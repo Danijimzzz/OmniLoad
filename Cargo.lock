@@ -4939,7 +4939,7 @@ dependencies = [
 
 [[package]]
 name = "omni-api"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "axum",
  "fs4",
@@ -4963,7 +4963,7 @@ dependencies = [
 
 [[package]]
 name = "omni-cli"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4984,7 +4984,7 @@ dependencies = [
 
 [[package]]
 name = "omni-core"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "dirs",
@@ -5007,7 +5007,7 @@ dependencies = [
 
 [[package]]
 name = "omni-grab"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "axum",
  "omni-core",
@@ -5022,7 +5022,7 @@ dependencies = [
 
 [[package]]
 name = "omni-gui"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "arboard",
  "dirs",
@@ -5055,7 +5055,7 @@ dependencies = [
 
 [[package]]
 name = "omni-hosts"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "aes",
  "axum",
@@ -5082,7 +5082,7 @@ dependencies = [
 
 [[package]]
 name = "omni-queue"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -5100,7 +5100,7 @@ dependencies = [
 
 [[package]]
 name = "omni-store"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "dirs",
  "omni-core",
@@ -5113,7 +5113,7 @@ dependencies = [
 
 [[package]]
 name = "omni-testserver"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "axum",
  "bytes",
@@ -5125,7 +5125,7 @@ dependencies = [
 
 [[package]]
 name = "omnid"
-version = "0.4.0-pr11"
+version = "0.4.0"
 dependencies = [
  "omni-api",
  "omni-core",
