@@ -87,9 +87,13 @@ struct App {
     hidden: Cell<bool>,
     notes: RefCell<notify::Tracker>,
     finish: RefCell<FinishWatch>,
+    /// Lo último que se pintó: si la cola no cambió no se repinta (con miles
+    /// de filas, rehacer la tabla cuatro veces por segundo es mucho trabajo).
+    last_rows: RefCell<Vec<manager::RowInfo>>,
     /// Cuenta atrás de suspender o apagar: cuándo y qué.
     countdown: Cell<Option<(Instant, FinishAction)>>,
     rule_rows: Rc<VecModel<RuleRow>>,
+    col_rows: Rc<VecModel<ColState>>,
     /// Arrancó con `--minimizado` (inicio con el sistema).
     start_hidden: bool,
 }
@@ -128,22 +132,42 @@ impl App {
     fn refresh(&self) {
         let Some(ui) = self.ui() else { return };
         let rows = self.manager.snapshot();
-        self.notify_finished(&ui, &rows);
-        self.watch_finish(&rows);
-        self.update_tray(&ui, &rows);
+        self.repaint(&ui, rows, true);
+    }
+
+    /// Cada cuarto de segundo: la tabla de descargas solo se rehace si la cola
+    /// cambió.
+    fn tick(&self) {
+        let rows = self.manager.snapshot();
+        let changed = *self.last_rows.borrow() != rows || self.hidden.get();
+        if let Some(ui) = self.ui() {
+            self.repaint(&ui, rows, changed);
+        }
+    }
+
+    fn repaint(&self, ui: &AppWindow, rows: Vec<manager::RowInfo>, changed: bool) {
+        if changed {
+            self.notify_finished(ui, &rows);
+            self.watch_finish(&rows);
+            self.update_tray(ui, &rows);
+        }
         if self.hidden.get() {
             // Escondida en la bandeja: no hace falta pintar las tablas (con
             // miles de filas se notaría), pero el aviso de enlaces sigue.
             self.refresh_popup();
+            *self.last_rows.borrow_mut() = rows;
             return;
         }
         let grabbed = self.grabber.snapshot();
         let dest = self.dest();
         let mut st = self.state.borrow_mut();
-        views::fill_downloads(&ui, &self.dl_rows, &rows, &mut st);
-        views::fill_grabber(&ui, &self.grab_rows, &grabbed, &dest, &mut st);
+        if changed {
+            views::fill_downloads(ui, &self.dl_rows, &rows, &mut st);
+        }
+        views::fill_grabber(ui, &self.grab_rows, &grabbed, &dest, &mut st);
         drop(st);
-        sync_queue_settings(&ui, &self.manager);
+        *self.last_rows.borrow_mut() = rows;
+        sync_queue_settings(ui, &self.manager);
         self.refresh_popup();
 
         let notes = self.grabber.take_notes();
@@ -158,6 +182,12 @@ impl App {
         {
             self.show("", false);
         }
+    }
+
+    fn save_columns(&self) {
+        let mut s = self.settings.borrow_mut();
+        s.columns = read_columns(&self.col_rows);
+        s.save();
     }
 
     /// Al terminar todas las descargas, hace lo que se eligió en Ajustes.
@@ -730,7 +760,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .thread_name("omni-motor")
         .build()?;
-    let settings = Settings::load();
+    let mut settings = Settings::load();
     let manager = Arc::new(manager::open(rt.handle().clone()));
     if manager.in_process() {
         tracing::info!("el servicio corre dentro de la ventana");
@@ -754,6 +784,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fill_rules(&rule_rows, &settings.file_rules);
     ui.set_rules(ModelRc::from(rule_rows.clone()));
 
+    let col_rows: Rc<VecModel<ColState>> = Rc::new(VecModel::default());
+    settings.columns = settings::fix_columns(&settings.columns);
+    fill_columns(&col_rows, &settings.columns);
+    ui.global::<DlCols>()
+        .set_cols(ModelRc::from(col_rows.clone()));
+
     let (tray_tx, tray_rx) = mpsc::channel();
     let app = Rc::new(App {
         ui: ui.as_weak(),
@@ -776,8 +812,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         hidden: Cell::new(false),
         notes: RefCell::default(),
         finish: RefCell::default(),
+        last_rows: RefCell::default(),
         countdown: Cell::new(None),
         rule_rows,
+        col_rows,
         start_hidden,
     });
 
@@ -786,7 +824,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let app = app.clone();
         move || {
             app.handle_events();
-            app.refresh();
+            app.tick();
         }
     });
 
@@ -1045,6 +1083,32 @@ fn set_schedule_days(ui: &AppWindow, mask: i32) {
     ui.set_schedule_days(mask);
     let on: Vec<bool> = (0..7).map(|d| mask & (1 << d) != 0).collect();
     ui.set_schedule_day_on(ModelRc::from(Rc::new(VecModel::from(on))));
+}
+
+/// Pone las columnas guardadas en el modelo de la tabla.
+fn fill_columns(model: &VecModel<ColState>, cols: &[settings::ColCfg]) {
+    model.set_vec(
+        cols.iter()
+            .map(|c| ColState {
+                id: c.id,
+                name: settings::column_name(c.id).into(),
+                width: c.width,
+                shown: c.shown,
+            })
+            .collect::<Vec<_>>(),
+    );
+}
+
+/// Lo que hay ahora en el modelo, para guardarlo.
+fn read_columns(model: &VecModel<ColState>) -> Vec<settings::ColCfg> {
+    model
+        .iter()
+        .map(|c| settings::ColCfg {
+            id: c.id,
+            width: c.width,
+            shown: c.shown,
+        })
+        .collect()
 }
 
 /// Pone al día la lista de reglas de Ajustes › Automático.
@@ -1326,6 +1390,54 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
     ui.on_settings_changed({
         let app = app.clone();
         move || app.save_settings()
+    });
+    // Columnas: arrastrar el borde, mostrar/ocultar y cambiar el orden.
+    ui.global::<DlCols>().on_resize({
+        let app = app.clone();
+        move |i, delta| {
+            let i = i as usize;
+            if let Some(mut c) = app.col_rows.row_data(i) {
+                c.width = (c.width + delta).max(settings::MIN_COL_WIDTH);
+                app.col_rows.set_row_data(i, c);
+            }
+        }
+    });
+    ui.global::<DlCols>().on_resize_done({
+        let app = app.clone();
+        move || app.save_columns()
+    });
+    ui.on_col_toggle({
+        let app = app.clone();
+        move |i| {
+            let i = i as usize;
+            if let Some(mut c) = app.col_rows.row_data(i) {
+                c.shown = !c.shown;
+                app.col_rows.set_row_data(i, c);
+                app.save_columns();
+            }
+        }
+    });
+    ui.on_col_move({
+        let app = app.clone();
+        move |i, dir| {
+            let (i, j) = (i as usize, i + dir);
+            if j < 0 || j as usize >= app.col_rows.row_count() {
+                return;
+            }
+            let j = j as usize;
+            if let (Some(a), Some(b)) = (app.col_rows.row_data(i), app.col_rows.row_data(j)) {
+                app.col_rows.set_row_data(i, b);
+                app.col_rows.set_row_data(j, a);
+                app.save_columns();
+            }
+        }
+    });
+    ui.on_col_reset({
+        let app = app.clone();
+        move || {
+            fill_columns(&app.col_rows, &settings::default_columns());
+            app.save_columns();
+        }
     });
     ui.on_speed_text_accepted({
         let app = app.clone();

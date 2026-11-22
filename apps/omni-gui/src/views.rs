@@ -2,7 +2,7 @@
 //! ventana: árbol de paquetes, resumen, gráfica de velocidad y panel de
 //! propiedades.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -172,19 +172,31 @@ fn stat(label: &str, value: impl Into<SharedString>) -> Stat {
     }
 }
 
+/// Agrupa las filas por paquete, en el orden en que aparece cada paquete.
+fn group_by_package(rows: &[RowInfo]) -> Vec<(String, Vec<&RowInfo>)> {
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    let mut packages: Vec<(String, Vec<&RowInfo>)> = Vec::new();
+    for r in rows {
+        match index.get(r.package.as_str()) {
+            Some(&i) => packages[i].1.push(r),
+            None => {
+                index.insert(&r.package, packages.len());
+                packages.push((r.package.clone(), vec![r]));
+            }
+        }
+    }
+    packages
+}
+
 /// Tabla de descargas, resumen, cabecera y panel de propiedades.
 pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo], st: &mut UiState) {
     let now = Instant::now();
     // Paquetes en el orden en que llegaron.
-    let mut packages: Vec<(String, Vec<&RowInfo>)> = Vec::new();
-    for r in rows {
-        match packages.iter_mut().find(|(n, _)| *n == r.package) {
-            Some((_, v)) => v.push(r),
-            None => packages.push((r.package.clone(), vec![r])),
-        }
-    }
+    // Con miles de descargas, buscar el paquete en una lista sería cuadrático.
+    let packages = group_by_package(rows);
     st.dl_packages = packages.iter().map(|(n, _)| n.clone()).collect();
-    st.dl_collapsed.retain(|n| st.dl_packages.contains(n));
+    let known: HashSet<&String> = st.dl_packages.iter().collect();
+    st.dl_collapsed.retain(|n| known.contains(n));
 
     let mut out = Vec::new();
     for (key, (name, files)) in packages.iter().enumerate() {
@@ -615,5 +627,46 @@ mod tests {
         let path = sparkline(&s);
         assert!(path.starts_with('M'), "{path}");
         assert!(path.trim_end().ends_with("140.0 4.0"), "{path}");
+    }
+
+    fn row(id: u64, package: &str) -> RowInfo {
+        RowInfo {
+            id,
+            package: package.into(),
+            name: format!("a{id}"),
+            host: "a.com".into(),
+            folder: "/tmp".into(),
+            url: format!("https://a.com/{id}"),
+            state: State::Queued,
+            priority: crate::manager::Priority::Normal,
+            held: false,
+            downloaded: 0,
+            total: None,
+            rate: 0.0,
+            receiving: 0,
+            connections: 0,
+            server_limit: 0,
+            retries: 0,
+            started_once: false,
+            speed_limit: None,
+            detail: String::new(),
+        }
+    }
+
+    #[test]
+    fn grouping_keeps_order_and_is_fast_with_ten_thousand_rows() {
+        let rows: Vec<RowInfo> = (0..10_000u64)
+            .map(|i| row(i, &format!("paquete {}", i % 2_500)))
+            .collect();
+        let t = Instant::now();
+        let groups = group_by_package(&rows);
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+        assert_eq!(groups.len(), 2_500);
+        assert_eq!(groups[0].0, "paquete 0");
+        assert_eq!(groups[1].0, "paquete 1");
+        assert_eq!(
+            groups[0].1.iter().map(|r| r.id).collect::<Vec<_>>(),
+            [0, 2_500, 5_000, 7_500]
+        );
     }
 }

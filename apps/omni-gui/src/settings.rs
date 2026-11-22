@@ -61,6 +61,77 @@ pub struct Settings {
     pub schedule_to: String,
     /// Al terminar todo: 0 nada, 1 cerrar OmniLoad, 2 suspender, 3 apagar.
     pub finish_action: i32,
+    /// Columnas de la tabla de descargas, en el orden en que se ven.
+    pub columns: Vec<ColCfg>,
+}
+
+/// Una columna de la tabla de descargas.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColCfg {
+    /// 1 Host, 2 Tamaño, 3 Progreso, 4 Velocidad, 5 Restante, 6 Prioridad,
+    /// 7 Estado.
+    pub id: i32,
+    pub width: f32,
+    pub shown: bool,
+}
+
+/// Nombre de cada columna según su número.
+pub fn column_name(id: i32) -> &'static str {
+    match id {
+        1 => "Host",
+        2 => "Tamaño",
+        3 => "Progreso",
+        4 => "Velocidad",
+        5 => "Restante",
+        6 => "Prioridad",
+        _ => "Estado",
+    }
+}
+
+/// Ancho menor al que no se deja encoger una columna.
+pub const MIN_COL_WIDTH: f32 = 48.0;
+
+pub fn default_columns() -> Vec<ColCfg> {
+    [
+        (1, 150.0),
+        (2, 90.0),
+        (3, 170.0),
+        (4, 95.0),
+        (5, 95.0),
+        (6, 75.0),
+        (7, 210.0),
+    ]
+    .into_iter()
+    .map(|(id, width)| ColCfg {
+        id,
+        width,
+        shown: true,
+    })
+    .collect()
+}
+
+/// Deja las columnas guardadas completas y válidas: sin repetidas ni
+/// desconocidas, con las que falten al final y anchos razonables.
+pub fn fix_columns(saved: &[ColCfg]) -> Vec<ColCfg> {
+    let mut out: Vec<ColCfg> = Vec::new();
+    for c in saved {
+        if (1..=7).contains(&c.id) && !out.iter().any(|o| o.id == c.id) {
+            out.push(ColCfg {
+                width: if c.width.is_finite() {
+                    c.width.clamp(MIN_COL_WIDTH, 1200.0)
+                } else {
+                    MIN_COL_WIDTH
+                },
+                ..*c
+            });
+        }
+    }
+    for d in default_columns() {
+        if !out.iter().any(|o| o.id == d.id) {
+            out.push(d);
+        }
+    }
+    out
 }
 
 /// Una regla por tipo de archivo, tal como se escribe en Ajustes.
@@ -102,6 +173,7 @@ impl Default for Settings {
             schedule_from: "00:00".into(),
             schedule_to: "07:00".into(),
             finish_action: 0,
+            columns: default_columns(),
         }
     }
 }
@@ -257,6 +329,42 @@ mod tests {
         assert!(s.notify_done);
         assert!(s.check_updates);
         assert!(!s.tray_hint_shown);
+    }
+
+    #[test]
+    fn columns_are_repaired() {
+        let saved = [
+            ColCfg {
+                id: 4,
+                width: 10.0,
+                shown: false,
+            },
+            ColCfg {
+                id: 4,
+                width: 99.0,
+                shown: true,
+            },
+            ColCfg {
+                id: 99,
+                width: 99.0,
+                shown: true,
+            },
+            ColCfg {
+                id: 1,
+                width: f32::NAN,
+                shown: true,
+            },
+        ];
+        let fixed = fix_columns(&saved);
+        assert_eq!(fixed.len(), 7);
+        assert_eq!(fixed[0].id, 4);
+        assert_eq!(fixed[0].width, MIN_COL_WIDTH);
+        assert!(!fixed[0].shown);
+        assert_eq!(fixed[1].id, 1);
+        let mut ids: Vec<i32> = fixed.iter().map(|c| c.id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(fix_columns(&[]), default_columns());
     }
 
     #[test]
