@@ -6,8 +6,7 @@ use std::time::{Duration, Instant};
 
 use omni_core::DownloadOptions;
 use omni_queue::{
-    ExternalJob, JobInfo, NewJob, Priority, Queue, QueueConfig, ResolveFuture, ResolvedLink,
-    Resolver, State,
+    JobInfo, NewJob, Priority, Queue, QueueConfig, ResolveFuture, ResolvedLink, Resolver, State,
 };
 use omni_store::Store;
 use omni_testserver::{ServerConfig, TestServer, pseudo_random_bytes};
@@ -405,7 +404,7 @@ impl Resolver for Script {
     fn resolve<'a>(&'a self, _url: &'a str, _c: &'a CancellationToken) -> ResolveFuture<'a> {
         Box::pin(async move {
             Ok(ResolvedLink {
-                external: Some(ExternalJob {
+                external: Some(omni_queue::ExternalJob {
                     program: "sh".into(),
                     args: vec!["-c".into(), self.0.into(), "sh".into(), "{dir}".into()],
                     label: "script".into(),
