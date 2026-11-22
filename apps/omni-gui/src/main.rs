@@ -2,8 +2,8 @@
 //!
 //! La ventana corre en el hilo principal. Las descargas las hace el servicio
 //! `omnid` (ver [`manager`]), que guarda la lista en SQLite: al volver a abrir
-//! todo sigue donde estaba, y con "Seguir descargando al salir"
-//! las descargas continúan con la ventana cerrada. Un temporizador de Slint
+//! todo sigue donde estaba. Con la ventana en la bandeja las descargas siguen;
+//! al salir del todo se para también el servicio. Un temporizador de Slint
 //! lee el estado cuatro veces por segundo y actualiza las tablas.
 //!
 //! Como en JDownloader, los enlaces no se descargan directamente: primero van
@@ -779,7 +779,6 @@ impl App {
         s.connections = ui.get_connections();
         s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
-        s.keep_downloading = ui.get_keep_downloading();
         s.check_updates = ui.get_check_updates();
         s.close_to_tray = ui.get_close_to_tray();
         s.minimize_to_tray = ui.get_minimize_to_tray();
@@ -974,7 +973,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     });
 
-    // Al salir: pausar todo (salvo "Seguir descargando al salir") y dar
+    // Al salir: pausar todo y parar el servicio, y dar
     // tiempo al motor a guardar el progreso.
     drop(timer);
     drop(clip_timer);
@@ -984,8 +983,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Si se va a actualizar, el servicio también se para (el instalador
     // reemplaza sus archivos).
     let update_file = app.pending_update.borrow_mut().take();
-    let keep = app.settings.borrow().keep_downloading && update_file.is_none();
-    rt.block_on(manager.close(keep));
+    rt.block_on(manager.close(false));
     rt.shutdown_timeout(Duration::from_secs(1));
     if let Some(file) = update_file
         && let Err(e) = update::launch_installer(&file)
@@ -1186,7 +1184,6 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_connections(s.connections);
     ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
-    ui.set_keep_downloading(s.keep_downloading);
     ui.set_check_updates(s.check_updates);
     ui.set_close_to_tray(s.close_to_tray);
     ui.set_minimize_to_tray(s.minimize_to_tray);

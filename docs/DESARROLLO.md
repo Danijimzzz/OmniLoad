@@ -46,8 +46,8 @@ igual, pero las descargas se paran al cerrarla.
 Cerrar o minimizar la ventana la esconde en la bandeja del sistema (si el
 escritorio tiene bandeja) y las descargas siguen. Al salir de verdad («Salir»
 en el menú del icono, o cerrar la ventana si no hay bandeja) se para el
-servicio (guardando el progreso) salvo que esté activado "Seguir descargando
-al salir". `omnid` escribe su
+servicio (guardando el progreso); no hay opción de dejarlo en segundo plano.
+`omnid` escribe su
 registro en `omnid.log`, junto a la base de datos; para verlo en directo,
 ejecútalo en una terminal (`RUST_LOG=debug omnid`; Ctrl+C lo para).
 

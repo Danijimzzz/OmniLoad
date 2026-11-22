@@ -1586,7 +1586,6 @@ export component AppWindow inherits Window {
     callback win-close();
     callback win-resize(int);
     in-out property <int> max-per-server: 8;
-    in-out property <bool> keep-downloading: false;
     in-out property <bool> close-to-tray: true;
     in-out property <bool> minimize-to-tray: true;
     in-out property <bool> notify-done: true;
@@ -2432,15 +2431,6 @@ export component AppWindow inherits Window {
                         Check {
                             checked <=> root.notify-done;
                             label: "Avisar al terminar";
-                            toggled => { root.settings-changed(); }
-                        }
-                    }
-                    SettingRow {
-                        title: "Seguir descargando al salir";
-                        subtitle: "Al salir de OmniLoad las descargas continúan en segundo plano. Al volver a abrirlo las verás tal cual. Desde la terminal: «omni service stop» para pararlas.";
-                        Check {
-                            checked <=> root.keep-downloading;
-                            label: "Seguir descargando al salir";
                             toggled => { root.settings-changed(); }
                         }
                     }

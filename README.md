@@ -114,9 +114,9 @@ límite de velocidad.
 - Iniciar, pausar o detener todo con un clic, y buscar entre tus descargas.
 - **Límite de velocidad** en la barra de arriba (por ejemplo, 2 MB/s), que se
   aplica al momento, también a lo que ya se está bajando.
-- Al salir de OmniLoad, lo que se estaba bajando queda en la cola y **sigue
-  solo** la próxima vez que lo abras. Y si activas **Seguir descargando al
-  salir** (en Ajustes), ni siquiera se para.
+- Con la ventana en la bandeja, las descargas siguen. Si sales del todo
+  (**Salir**), se para todo: lo que se estaba bajando queda en la cola y
+  **sigue solo** la próxima vez que lo abras.
 - Si un servidor limita las conexiones, OmniLoad se adapta solo y **lo
   recuerda** para la próxima vez. En Ajustes puedes poner cuántas conexiones
   abrir como mucho a una misma web, y las descargas a la misma web se reparten
