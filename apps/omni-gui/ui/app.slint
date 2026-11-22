@@ -556,6 +556,12 @@ component ColsHeader inherits Rectangle {
     in-out property <length> pointer-x;
     height: 34px;
     background: Theme.head;
+    // ¿Va la columna «Nombre» (la elástica) antes que la columna `i`?
+    pure function name-before(i: int) -> bool {
+        (i > 0 && cols[0].id == 0) || (i > 1 && cols[1].id == 0) || (i > 2 && cols[2].id == 0)
+            || (i > 3 && cols[3].id == 0) || (i > 4 && cols[4].id == 0)
+            || (i > 5 && cols[5].id == 0) || (i > 6 && cols[6].id == 0) || (i > 7 && cols[7].id == 0)
+    }
     HorizontalLayout {
         for c[i] in root.cols: ColSlot {
             spec: c;
@@ -567,6 +573,7 @@ component ColsHeader inherits Rectangle {
             property <length> w0;
             property <length> x0;
             property <bool> sizing: false;
+            property <bool> is-name: c.id == 0;
             Rectangle {
                 background: root.dragging == i ? Theme.accent.with-alpha(0.28)
                     : hot ? Theme.accent.with-alpha(0.16)
@@ -627,9 +634,14 @@ component ColsHeader inherits Rectangle {
                     }
                 }
             }
-            // Asa para el ancho, siempre encima.
-            TouchArea {
-                x: parent.width - 6px;
+            // Asa para el ancho, siempre encima. «Nombre» se estira con lo que
+            // sobra, así que su borde derecho no se puede mover: en las columnas
+            // que van detrás de «Nombre» el asa está en su borde izquierdo (que
+            // es el que se mueve con el ratón) y al arrastrar a la izquierda
+            // crecen.
+            if !is-name: TouchArea {
+                property <bool> after: root.name-before(i);
+                x: after ? -6px : parent.width - 6px;
                 width: 12px;
                 mouse-cursor: col-resize;
                 Rectangle {
@@ -651,7 +663,8 @@ component ColsHeader inherits Rectangle {
                 }
                 moved => {
                     if sizing {
-                        root.resize(i, max(48px, w0 + (self.absolute-position.x + self.mouse-x - x0)));
+                        let dx = self.absolute-position.x + self.mouse-x - x0;
+                        root.resize(i, max(48px, after ? w0 - dx : w0 + dx));
                     }
                 }
             }
