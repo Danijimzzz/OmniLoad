@@ -378,14 +378,24 @@ impl CustomDownload for TorrentJob {
                 AddTorrentResponse::ListOnly(_) => return Err(fail("respuesta inesperada")),
             };
             let mut started = false;
+            let mut base = 0u64;
             let outcome = loop {
                 let stats = handle.stats();
                 // Mientras se comprueba lo que ya hay en disco (y en el primer
                 // instante en marcha), esos bytes no son velocidad de bajada.
                 if started {
-                    progress.report(stats.progress_bytes, Some(stats.total_bytes));
+                    // Las piezas se dan por buenas de una en una (32 MiB o más):
+                    // con solo eso la velocidad iría a saltos. Sumar lo ya
+                    // recibido de las piezas a medias la suaviza.
+                    let received = stats.live.as_ref().map_or(0, |l| l.snapshot.fetched_bytes);
+                    let shown = stats
+                        .progress_bytes
+                        .max(base.saturating_add(received))
+                        .min(stats.total_bytes);
+                    progress.report(shown, Some(stats.total_bytes));
                 } else {
                     progress.report_resumed(stats.progress_bytes, Some(stats.total_bytes));
+                    base = stats.progress_bytes;
                     started = matches!(stats.state, TorrentStatsState::Live);
                 }
                 if let Some(err) = stats.error {
