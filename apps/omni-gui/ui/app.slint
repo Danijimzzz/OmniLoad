@@ -145,6 +145,12 @@ component Panel inherits Rectangle {
     }
 }
 
+// Una regla por tipo de archivo en Ajustes › Automático.
+struct RuleRow {
+    exts: string,
+    folder: string,
+}
+
 component Btn inherits Rectangle {
     in property <string> text;
     in property <string> icon;
@@ -735,6 +741,26 @@ export component AppWindow inherits Window {
     in property <int> update-state: 0;
     in property <string> update-text;
     in-out property <bool> check-updates: true;
+    // Automático: horario, reglas por tipo, acción al terminar, inicio con el sistema.
+    in-out property <bool> schedule-enabled: false;
+    // Días del horario: bit 0 lunes … bit 6 domingo.
+    in-out property <int> schedule-days: 127;
+    in property <[bool]> schedule-day-on: [true, true, true, true, true, true, true];
+    in-out property <string> schedule-from: "00:00";
+    in-out property <string> schedule-to: "07:00";
+    in property <bool> schedule-error: false;
+    callback schedule-day-toggled(int);
+    in-out property <[RuleRow]> rules;
+    callback rule-add();
+    callback rule-remove(int);
+    callback rule-exts-edited(int, string);
+    callback rule-choose(int);
+    // 0 nada, 1 cerrar OmniLoad, 2 suspender, 3 apagar.
+    in-out property <int> finish-action: 0;
+    in-out property <bool> autostart: false;
+    // Cuenta atrás de la acción al terminar (vacío = no hay).
+    in property <string> finish-text;
+    callback finish-cancel();
     callback check-updates-now();
     callback open-release();
     in-out property <bool> watch-clipboard: true;
@@ -925,6 +951,23 @@ export component AppWindow inherits Window {
                     primary: root.tab == 2;
                     clicked => { root.tab = root.tab == 2 ? 0 : 2; }
                 }
+            }
+        }
+
+        if root.finish-text != "": Panel {
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 12px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.finish-text;
+                    wrap: word-wrap;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Theme.warn;
+                    vertical-alignment: center;
+                }
+                Btn { text: "Cancelar"; primary: true; clicked => { root.finish-cancel(); } }
             }
         }
 
@@ -1349,7 +1392,7 @@ export component AppWindow inherits Window {
                         color: Theme.text;
                     }
                     Rectangle { height: 12px; }
-                    for s[i] in ["General", "Apariencia", "Versión"]: Rectangle {
+                    for s[i] in ["General", "Apariencia", "Versión", "Automático"]: Rectangle {
                         height: 40px;
                         border-radius: Theme.r2;
                         background: i == root.settings-section ? Theme.panel2 : transparent;
@@ -1470,6 +1513,120 @@ export component AppWindow inherits Window {
                         Check {
                             checked <=> root.watch-clipboard;
                             label: "Vigilar portapapeles";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                  }
+                }
+
+                if root.settings-section == 3: auto := ScrollView {
+                  VerticalLayout {
+                    width: auto.visible-width;
+                    padding: 28px;
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: "Automático"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                    SettingRow {
+                        title: "Horario de descargas";
+                        subtitle: "Solo descarga en los días y las horas que elijas. Fuera de ellas todo queda en pausa (con el progreso guardado) y sigue solo al llegar la hora. Si la hora de fin es menor que la de inicio, el tramo acaba al día siguiente (por ejemplo, de 23:00 a 07:00).";
+                        Check {
+                            checked <=> root.schedule-enabled;
+                            label: "Usar horario";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        opacity: root.schedule-enabled ? 1 : 0.5;
+                        for d[i] in ["L", "M", "X", "J", "V", "S", "D"]: Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            border-radius: Theme.r2;
+                            background: root.schedule-day-on[i] ? Theme.accent : Theme.panel2;
+                            accessible-role: checkbox;
+                            accessible-label: d;
+                            Text {
+                                text: d;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.schedule-day-on[i] ? Theme.on-accent : Theme.text;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                enabled: root.schedule-enabled;
+                                mouse-cursor: pointer;
+                                clicked => { root.schedule-day-toggled(i); }
+                            }
+                        }
+                        Rectangle { width: 16px; }
+                        Text { text: "De"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
+                        LineEdit {
+                            width: 80px;
+                            enabled: root.schedule-enabled;
+                            text <=> root.schedule-from;
+                            placeholder-text: "00:00";
+                            accepted => { root.settings-changed(); }
+                        }
+                        Text { text: "a"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
+                        LineEdit {
+                            width: 80px;
+                            enabled: root.schedule-enabled;
+                            text <=> root.schedule-to;
+                            placeholder-text: "07:00";
+                            accepted => { root.settings-changed(); }
+                        }
+                        Btn { text: "Aplicar"; enabled: root.schedule-enabled; clicked => { root.settings-changed(); } }
+                    }
+                    if root.schedule-error: Text {
+                        text: "Escribe las horas como HH:MM, por ejemplo 23:30.";
+                        color: Theme.err;
+                        font-size: 13px;
+                    }
+                    SettingRow {
+                        title: "Carpeta según el tipo de archivo";
+                        subtitle: "Por ejemplo, vídeos a una carpeta y .zip a otra. Escribe las extensiones separadas por comas (mp4, mkv). Gana la primera regla que coincida; un paquete con carpeta propia no se toca.";
+                        Btn { text: "Añadir regla"; icon: "M12 5v14M5 12h14"; clicked => { root.rule-add(); } }
+                    }
+                    for r[i] in root.rules: HorizontalLayout {
+                        spacing: 8px;
+                        height: 36px;
+                        LineEdit {
+                            width: 200px;
+                            text: r.exts;
+                            placeholder-text: "mp4, mkv, avi";
+                            edited(t) => { root.rule-exts-edited(i, t); }
+                            accepted => { root.settings-changed(); }
+                        }
+                        Text { text: "→"; color: Theme.muted; vertical-alignment: center; }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: r.folder == "" ? "(elige una carpeta)" : r.folder;
+                            color: r.folder == "" ? Theme.muted : Theme.text;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            font-size: 13px;
+                        }
+                        Btn { text: "Elegir…"; clicked => { root.rule-choose(i); } }
+                        Btn { text: "Quitar"; clicked => { root.rule-remove(i); } }
+                    }
+                    SettingRow {
+                        title: "Al terminar todas las descargas";
+                        subtitle: "Qué hacer cuando no queda nada por descargar. Suspender y apagar dan 60 segundos para cancelar con un aviso.";
+                        ComboBox {
+                            width: 200px;
+                            model: ["No hacer nada", "Cerrar OmniLoad", "Suspender el equipo", "Apagar el equipo"];
+                            current-index <=> root.finish-action;
+                            selected => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Iniciar con el sistema";
+                        subtitle: "OmniLoad arranca al encender el equipo, escondido en la bandeja, y las descargas siguen sin que tengas que abrirlo.";
+                        Check {
+                            checked <=> root.autostart;
+                            label: "Iniciar con el sistema";
                             toggled => { root.settings-changed(); }
                         }
                     }

@@ -4142,11 +4142,13 @@ dependencies = [
 name = "omni-queue"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dirs",
  "omni-core",
  "omni-store",
  "omni-testserver",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",

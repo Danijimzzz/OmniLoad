@@ -26,6 +26,7 @@
 // Sin ventana de consola en Windows (solo en release, para poder depurar).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod automation;
 mod clipboard;
 mod format;
 mod manager;
@@ -49,6 +50,7 @@ use std::time::{Duration, Instant};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
+use automation::{FinishAction, FinishWatch};
 use manager::{Manager, Priority};
 use omni_api::{RemoteGrabber, TakeResponse};
 use omni_grab::{Check, Dest, GrabCommand, Pick};
@@ -84,7 +86,16 @@ struct App {
     /// La ventana está escondida en la bandeja.
     hidden: Cell<bool>,
     notes: RefCell<notify::Tracker>,
+    finish: RefCell<FinishWatch>,
+    /// Cuenta atrás de suspender o apagar: cuándo y qué.
+    countdown: Cell<Option<(Instant, FinishAction)>>,
+    rule_rows: Rc<VecModel<RuleRow>>,
+    /// Arrancó con `--minimizado` (inicio con el sistema).
+    start_hidden: bool,
 }
+
+/// Segundos que se dan para cancelar suspender o apagar.
+const COUNTDOWN: Duration = Duration::from_secs(60);
 
 impl App {
     fn ui(&self) -> Option<AppWindow> {
@@ -98,6 +109,11 @@ impl App {
             base: s.download_dir.clone(),
             per_package: s.package_folders,
             single_file_too: s.single_file_folders,
+            rules: s
+                .file_rules
+                .iter()
+                .filter_map(|r| omni_grab::FileRule::parse(&r.extensions, r.folder.clone()))
+                .collect(),
         }
     }
 
@@ -113,6 +129,7 @@ impl App {
         let Some(ui) = self.ui() else { return };
         let rows = self.manager.snapshot();
         self.notify_finished(&ui, &rows);
+        self.watch_finish(&rows);
         self.update_tray(&ui, &rows);
         if self.hidden.get() {
             // Escondida en la bandeja: no hace falta pintar las tablas (con
@@ -140,6 +157,66 @@ impl App {
                 .any(|i| i.check == Check::Checking)
         {
             self.show("", false);
+        }
+    }
+
+    /// Al terminar todas las descargas, hace lo que se eligió en Ajustes.
+    fn watch_finish(&self, rows: &[manager::RowInfo]) {
+        if !self.finish.borrow_mut().update(rows) {
+            return;
+        }
+        let action = FinishAction::from_index(self.settings.borrow().finish_action);
+        match action {
+            FinishAction::Nothing => {}
+            FinishAction::Quit => {
+                self.close_popup();
+                let _ = slint::quit_event_loop();
+            }
+            FinishAction::Suspend | FinishAction::Shutdown => {
+                self.countdown
+                    .set(Some((Instant::now() + COUNTDOWN, action)));
+                notify::send(
+                    &self.rt,
+                    notify::Note {
+                        title: "Descargas terminadas".into(),
+                        body: format!(
+                            "Se va a {} en 60 segundos. Abre OmniLoad para cancelar.",
+                            action.describe()
+                        ),
+                    },
+                );
+            }
+        }
+    }
+
+    /// Lleva la cuenta atrás y la enseña en la ventana.
+    fn tick_countdown(&self) {
+        let Some((until, action)) = self.countdown.get() else {
+            return;
+        };
+        let left = until.saturating_duration_since(Instant::now()).as_secs();
+        if Instant::now() >= until {
+            self.countdown.set(None);
+            if let Some(ui) = self.ui() {
+                ui.set_finish_text("".into());
+            }
+            automation::run_action(action);
+        } else if let Some(ui) = self.ui() {
+            ui.set_finish_text(
+                format!(
+                    "Descargas terminadas: se va a {} en {} s.",
+                    action.describe(),
+                    left + 1
+                )
+                .into(),
+            );
+        }
+    }
+
+    fn cancel_countdown(&self) {
+        self.countdown.set(None);
+        if let Some(ui) = self.ui() {
+            ui.set_finish_text("".into());
         }
     }
 
@@ -285,6 +362,7 @@ impl App {
 
     /// Lo pedido desde el icono de la bandeja o desde otra ventana.
     fn handle_events(&self) {
+        self.tick_countdown();
         while let Ok(ev) = self.tray_rx.try_recv() {
             match ev {
                 TrayEvent::Show => self.show_window(),
@@ -334,6 +412,14 @@ impl App {
         }
         if let Some(ui) = self.ui() {
             ui.set_tray_available(self.tray.borrow().is_some());
+        }
+        if self.start_hidden {
+            if self.tray.borrow().is_some() {
+                self.hidden.set(true);
+            } else {
+                // Sin bandeja no habría forma de llegar a la ventana.
+                self.show_window();
+            }
         }
         self.refresh();
     }
@@ -605,6 +691,19 @@ impl App {
         s.download_dir = PathBuf::from(ui.get_download_dir().as_str());
         s.package_folders = ui.get_package_folders();
         s.single_file_folders = ui.get_single_file_folders();
+        s.schedule_enabled = ui.get_schedule_enabled();
+        s.schedule_days = ui.get_schedule_days();
+        s.schedule_from = ui.get_schedule_from().to_string();
+        s.schedule_to = ui.get_schedule_to().to_string();
+        s.finish_action = ui.get_finish_action();
+        ui.set_schedule_error(s.schedule().is_none());
+        let autostart = ui.get_autostart();
+        if autostart != automation::autostart_enabled()
+            && let Err(e) = automation::set_autostart(autostart)
+        {
+            tracing::warn!("no se pudo cambiar el inicio con el sistema: {e}");
+            ui.set_autostart(automation::autostart_enabled());
+        }
         s.save();
         apply_queue_settings(&self.manager, &s);
     }
@@ -615,7 +714,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Si ya hay una ventana abierta (quizá escondida en la bandeja), se le
     // pasan los argumentos y esta termina.
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Al iniciar con el sistema arranca escondida en la bandeja.
+    let start_hidden = args.iter().any(|a| a == automation::AUTOSTART_FLAG);
+    args.retain(|a| a != automation::AUTOSTART_FLAG);
     let (instance_tx, instance_rx) = mpsc::channel();
     let _instance = match settings::instance_path() {
         Some(path) => match single::claim(&path, &args, instance_tx) {
@@ -649,6 +751,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let grab_rows: Rc<VecModel<GrabTreeRow>> = Rc::new(VecModel::default());
     ui.set_grabbed(ModelRc::from(grab_rows.clone()));
 
+    let rule_rows: Rc<VecModel<RuleRow>> = Rc::new(VecModel::default());
+    fill_rules(&rule_rows, &settings.file_rules);
+    ui.set_rules(ModelRc::from(rule_rows.clone()));
+
     let (tray_tx, tray_rx) = mpsc::channel();
     let app = Rc::new(App {
         ui: ui.as_weak(),
@@ -670,6 +776,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         instance_rx,
         hidden: Cell::new(false),
         notes: RefCell::default(),
+        finish: RefCell::default(),
+        countdown: Cell::new(None),
+        rule_rows,
+        start_hidden,
     });
 
     let timer = Timer::default();
@@ -717,7 +827,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // El programa sigue con la ventana escondida en la bandeja: el bucle
     // termina con «Salir» o al cerrar la ventana si no hay bandeja.
-    ui.show()?;
+    if !start_hidden {
+        ui.show()?;
+    }
     slint::run_event_loop_until_quit()?;
     let _ = ui.hide();
     let _ = app.popup.hide();
@@ -871,6 +983,10 @@ fn apply_queue_settings(manager: &Manager, s: &Settings) {
             q.speed_limit = settings::speed_limit_bytes(s.speed_limit);
         }
         q.max_per_server = s.max_per_server.max(0) as usize;
+        // Con una hora mal escrita se deja el horario como estaba.
+        if let Some(schedule) = s.schedule() {
+            q.schedule = schedule;
+        }
     });
 }
 
@@ -922,6 +1038,31 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_download_dir(s.download_dir.display().to_string().into());
     ui.set_package_folders(s.package_folders);
     ui.set_single_file_folders(s.single_file_folders);
+    ui.set_schedule_enabled(s.schedule_enabled);
+    set_schedule_days(ui, s.schedule_days);
+    ui.set_schedule_from(s.schedule_from.clone().into());
+    ui.set_schedule_to(s.schedule_to.clone().into());
+    ui.set_finish_action(s.finish_action);
+    ui.set_autostart(automation::autostart_enabled());
+}
+
+/// Los días del horario: el número y las siete casillas que se ven.
+fn set_schedule_days(ui: &AppWindow, mask: i32) {
+    ui.set_schedule_days(mask);
+    let on: Vec<bool> = (0..7).map(|d| mask & (1 << d) != 0).collect();
+    ui.set_schedule_day_on(ModelRc::from(Rc::new(VecModel::from(on))));
+}
+
+/// Pone al día la lista de reglas de Ajustes › Automático.
+fn fill_rules(model: &VecModel<RuleRow>, rules: &[settings::RuleCfg]) {
+    let rows: Vec<RuleRow> = rules
+        .iter()
+        .map(|r| RuleRow {
+            exts: r.extensions.as_str().into(),
+            folder: r.folder.display().to_string().into(),
+        })
+        .collect();
+    model.set_vec(rows);
 }
 
 /// Elige carpeta con el diálogo nativo del sistema.
@@ -1191,6 +1332,70 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
     ui.on_settings_changed({
         let app = app.clone();
         move || app.save_settings()
+    });
+    ui.on_schedule_day_toggled({
+        let app = app.clone();
+        move |day| {
+            let Some(ui) = app.ui() else { return };
+            set_schedule_days(&ui, ui.get_schedule_days() ^ (1 << day));
+            app.save_settings();
+        }
+    });
+    ui.on_rule_add({
+        let app = app.clone();
+        move || {
+            app.settings
+                .borrow_mut()
+                .file_rules
+                .push(settings::RuleCfg::default());
+            fill_rules(&app.rule_rows, &app.settings.borrow().file_rules);
+        }
+    });
+    ui.on_rule_remove({
+        let app = app.clone();
+        move |i| {
+            let mut s = app.settings.borrow_mut();
+            if (i as usize) < s.file_rules.len() {
+                s.file_rules.remove(i as usize);
+            }
+            s.save();
+            fill_rules(&app.rule_rows, &s.file_rules);
+        }
+    });
+    ui.on_rule_exts_edited({
+        let app = app.clone();
+        move |i, text| {
+            // La fila de la lista no se rehace: así no se pierde el cursor.
+            let mut s = app.settings.borrow_mut();
+            if let Some(r) = s.file_rules.get_mut(i as usize) {
+                r.extensions = text.to_string();
+            }
+            s.save();
+        }
+    });
+    ui.on_rule_choose({
+        let app = app.clone();
+        move |i| {
+            let current = app
+                .settings
+                .borrow()
+                .file_rules
+                .get(i as usize)
+                .map(|r| r.folder.display().to_string())
+                .unwrap_or_default();
+            if let Some(dir) = pick_folder(&current) {
+                let mut s = app.settings.borrow_mut();
+                if let Some(r) = s.file_rules.get_mut(i as usize) {
+                    r.folder = dir;
+                }
+                s.save();
+                fill_rules(&app.rule_rows, &s.file_rules);
+            }
+        }
+    });
+    ui.on_finish_cancel({
+        let app = app.clone();
+        move || app.cancel_countdown()
     });
     ui.on_choose_download_dir({
         let app = app.clone();

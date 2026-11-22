@@ -246,6 +246,7 @@ fn grabber_in_the_service() {
         base: dir.path().join("descargas"),
         per_package: true,
         single_file_too: false,
+        rules: Vec::new(),
     };
     let res = g.take(Pick::Selected, dest, false).unwrap();
     assert_eq!(res.ids.len(), 2, "{res:?}");

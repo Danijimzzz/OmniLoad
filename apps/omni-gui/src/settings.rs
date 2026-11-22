@@ -53,6 +53,24 @@ pub struct Settings {
     pub clip_popup_autoclose: bool,
     /// "Iniciar al añadir" del aviso completo.
     pub clip_popup_autostart: bool,
+    /// Reglas por tipo de archivo: extensiones → carpeta.
+    pub file_rules: Vec<RuleCfg>,
+    /// Horario de descargas (se pasa a la cola del servicio).
+    pub schedule_enabled: bool,
+    /// Días del horario: bit 0 lunes … bit 6 domingo.
+    pub schedule_days: i32,
+    pub schedule_from: String,
+    pub schedule_to: String,
+    /// Al terminar todo: 0 nada, 1 cerrar OmniLoad, 2 suspender, 3 apagar.
+    pub finish_action: i32,
+}
+
+/// Una regla por tipo de archivo, tal como se escribe en Ajustes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleCfg {
+    /// Extensiones separadas por comas o espacios («mp4, mkv»).
+    pub extensions: String,
+    pub folder: PathBuf,
 }
 
 impl Default for Settings {
@@ -81,7 +99,33 @@ impl Default for Settings {
             clip_popup: 1,
             clip_popup_autoclose: true,
             clip_popup_autostart: true,
+            file_rules: Vec::new(),
+            schedule_enabled: false,
+            schedule_days: i32::from(omni_queue::ALL_DAYS),
+            schedule_from: "00:00".into(),
+            schedule_to: "07:00".into(),
+            finish_action: 0,
         }
+    }
+}
+
+/// «HH:MM» (también «H:MM» o «HH.MM») a minutos desde las 00:00.
+pub fn parse_hhmm(text: &str) -> Option<u16> {
+    let (h, m) = text.trim().split_once([':', '.'])?;
+    let (h, m): (u16, u16) = (h.trim().parse().ok()?, m.trim().parse().ok()?);
+    (h < 24 && m < 60).then_some(h * 60 + m)
+}
+
+impl Settings {
+    /// El horario tal como lo entiende la cola, o `None` si las horas no son
+    /// válidas.
+    pub fn schedule(&self) -> Option<omni_queue::Schedule> {
+        Some(omni_queue::Schedule {
+            enabled: self.schedule_enabled,
+            days: (self.schedule_days & i32::from(omni_queue::ALL_DAYS)) as u8,
+            from_min: parse_hhmm(&self.schedule_from)?,
+            to_min: parse_hhmm(&self.schedule_to)?,
+        })
     }
 }
 
@@ -190,6 +234,19 @@ mod tests {
         assert!(s.notify_done);
         assert!(s.check_updates);
         assert!(!s.tray_hint_shown);
+    }
+
+    #[test]
+    fn times_parse_and_format() {
+        assert_eq!(parse_hhmm("07:30"), Some(450));
+        assert_eq!(parse_hhmm(" 7.05 "), Some(425));
+        assert_eq!(parse_hhmm("24:00"), None);
+        assert_eq!(parse_hhmm("12:60"), None);
+        assert_eq!(parse_hhmm("abc"), None);
+        let mut s = Settings::default();
+        assert!(s.schedule().is_some());
+        s.schedule_to = "mal".into();
+        assert!(s.schedule().is_none());
     }
 
     #[test]

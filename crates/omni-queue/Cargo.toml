@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+chrono.workspace = true
 dirs.workspace = true
 omni-core.workspace = true
 omni-store.workspace = true
@@ -18,5 +19,6 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 omni-testserver.workspace = true
 tempfile.workspace = true

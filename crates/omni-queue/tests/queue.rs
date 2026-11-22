@@ -341,3 +341,55 @@ async fn remove_with_files_deletes_file_state_and_empty_folder() {
     q.remove(&[id]);
     assert!(folder.join("c.bin").exists());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn schedule_blocks_and_releases_the_queue() {
+    let data = pseudo_random_bytes(3 * 1024 * 1024, 9);
+    let server = TestServer::start(data, slow_server_cfg(5)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let q = memory_queue();
+
+    // Un horario sin ningún día permitido: nada arranca.
+    q.update_settings(|s| {
+        s.schedule = omni_queue::Schedule {
+            enabled: true,
+            days: 0,
+            // Todo el día (inicio = fin) para que solo mande `days`.
+            from_min: 0,
+            to_min: 0,
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(q.blocked_by_schedule());
+    let id = q.add(new(server.url("a.bin"), dir.path(), true)).unwrap();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let r = row(&q, id);
+    assert_eq!(r.state, State::Queued);
+    assert_eq!(r.status(), "En pausa");
+
+    // Se permite todos los días: arranca solo.
+    q.update_settings(|s| s.schedule.days = omni_queue::ALL_DAYS);
+    wait_for(&q, id, State::Running).await;
+    assert!(!q.blocked_by_schedule());
+
+    // Vuelve a quedar fuera de horario con la descarga en marcha: se pausa
+    // guardando el progreso y vuelve a la cola.
+    while row(&q, id).downloaded < 256 * 1024 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    q.update_settings(|s| s.schedule.days = 0);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let r = row(&q, id);
+        if r.state == State::Queued {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no se pausó: {r:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Sin horario, termina.
+    server.set_chunk_delay(None);
+    q.update_settings(|s| s.schedule.enabled = false);
+    wait_for(&q, id, State::Done).await;
+}

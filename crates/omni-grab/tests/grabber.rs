@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use omni_core::{Network, RemoteInfo};
 use omni_grab::{
-    Check, CheckFuture, Checkers, Dest, FolderFile, Found, GrabCommand, GrabPackage, Grabber,
-    HostChecker, Pick,
+    Check, CheckFuture, Checkers, Dest, FileRule, FolderFile, Found, GrabCommand, GrabPackage,
+    Grabber, HostChecker, Pick,
 };
 use omni_queue::Priority;
 use omni_testserver::{ServerConfig, TestServer, pseudo_random_bytes};
@@ -25,6 +25,7 @@ fn dest(base: &str) -> Dest {
         base: base.into(),
         per_package: true,
         single_file_too: true,
+        rules: Vec::new(),
     }
 }
 
@@ -354,4 +355,56 @@ async fn save_and_restore() {
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), n);
+}
+
+#[test]
+fn file_rules_parse_and_match() {
+    let r = FileRule::parse(" .MP4, mkv;*avi  ", "/videos").unwrap();
+    assert_eq!(r.extensions, ["mp4", "mkv", "avi"]);
+    assert!(r.matches("peli.MKV"));
+    assert!(r.matches("a.b.mp4"));
+    assert!(!r.matches("peli.mkv.part"));
+    assert!(!r.matches("mp4"));
+    assert!(FileRule::parse("", "/x").is_none());
+    assert!(FileRule::parse("zip", "").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rules_send_files_to_their_folder_unless_the_package_has_one() {
+    let server = TestServer::start(pseudo_random_bytes(5000, 2), ServerConfig::default()).await;
+    let g = grabber(Checkers::new());
+    let text = format!(
+        "{} {} {}",
+        server.url("a.mp4"),
+        server.url("b.zip"),
+        server.url("c.mp4")
+    );
+    g.add_to_batch(&text, 0).unwrap();
+    wait_checked(&g, 3).await;
+    let mut d = dest("/descargas");
+    d.rules = vec![
+        FileRule::parse("mp4", "/videos").unwrap(),
+        FileRule::parse("mp4 zip", "/otra").unwrap(), // la primera que coincida manda
+    ];
+    let mut picked = g.take(Pick::Selected, &d);
+    picked.sort_by(|a, b| a.name.cmp(&b.name));
+    let folders: Vec<_> = picked
+        .iter()
+        .map(|p| (p.name.as_str(), &p.folder))
+        .collect();
+    assert_eq!(folders.len(), 3);
+    assert_eq!(picked[0].folder, Path::new("/videos"));
+    assert_eq!(picked[1].folder, Path::new("/otra"));
+    assert_eq!(picked[2].folder, Path::new("/videos"));
+
+    // Con carpeta elegida a mano en el paquete, las reglas no la cambian.
+    let g = grabber(Checkers::new());
+    g.add_to_batch(&server.url("d.mp4"), 0).unwrap();
+    let pkgs = wait_checked(&g, 1).await;
+    g.apply(GrabCommand::SetPackageFolder {
+        id: pkgs[0].id,
+        folder: "/mia".into(),
+    });
+    let picked = g.take(Pick::Selected, &d);
+    assert_eq!(picked[0].folder, Path::new("/mia"));
 }
