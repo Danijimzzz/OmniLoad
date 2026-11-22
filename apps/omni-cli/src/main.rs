@@ -28,7 +28,9 @@ use clap::{Args, Parser, Subcommand};
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
 use omni_api::{Client, Paths, connect_or_launch, omnid_exe};
 use omni_core::{Destination, Download, DownloadOptions, Error};
-use omni_grab::{Check, Checkers, Grabber};
+use omni_grab::{Check, Grabber};
+use omni_hosts::Hosts;
+use omni_queue::Resolver;
 use omni_queue::{JobInfo, NewJob};
 use tokio_util::sync::CancellationToken;
 
@@ -77,6 +79,16 @@ enum Command {
     Grab {
         #[arg(required = true, value_name = "URL_O_ARCHIVO")]
         links: Vec<String>,
+    },
+    /// Diagnóstico de BitTorrent: añade un magnet o un .torrent y cuenta
+    /// durante unos segundos pares, velocidad y errores. Baja datos de verdad
+    /// (un trozo del primer archivo) a una carpeta temporal que se borra.
+    TorrentDebug {
+        #[arg(value_name = "MAGNET_O_ARCHIVO_TORRENT")]
+        source: String,
+        /// Cuánto tiempo mirar, en segundos.
+        #[arg(long, default_value_t = 60)]
+        segundos: u64,
     },
     /// El servicio en segundo plano.
     Service {
@@ -184,7 +196,7 @@ fn init_logging(verbose: bool) {
     let default = if verbose {
         "info,omni_core=debug"
     } else {
-        "warn"
+        "warn,librqbit=info"
     };
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default));
@@ -200,6 +212,7 @@ async fn run(cli: Cli) -> Result<ExitCode> {
         Command::Get(args) => get(args).await,
         Command::Service { action } => service(action).await,
         Command::Check { links } => check(&links).await,
+        Command::TorrentDebug { source, segundos } => torrent_debug(&source, segundos).await,
         cmd => {
             let c = connect().await?;
             remote(&c, cmd).await?;
@@ -292,7 +305,10 @@ async fn remote(c: &Client, cmd: Command) -> Result<()> {
                 added.added
             );
         }
-        Command::Get(_) | Command::Service { .. } | Command::Check { .. } => unreachable!(),
+        Command::Get(_)
+        | Command::Service { .. }
+        | Command::Check { .. }
+        | Command::TorrentDebug { .. } => unreachable!(),
     }
     Ok(())
 }
@@ -302,7 +318,12 @@ fn links_text(args: &[String]) -> Result<String> {
     let mut out = String::new();
     for a in args {
         let path = std::path::Path::new(a);
-        if path.is_file() {
+        if path.is_file()
+            && let Some(url) = omni_grab::torrent_file_url(path)
+        {
+            out.push_str(url.as_str());
+            out.push('\n');
+        } else if path.is_file() {
             let bytes = std::fs::read(path).with_context(|| format!("no se pudo leer {a}"))?;
             let urls = omni_grab::links_from_file(a, &bytes).map_err(anyhow::Error::msg)?;
             for u in urls {
@@ -318,13 +339,27 @@ fn links_text(args: &[String]) -> Result<String> {
 }
 
 /// `omni check`: comprueba enlaces aquí mismo, sin servicio.
+async fn torrent_debug(source: &str, seconds: u64) -> Result<ExitCode> {
+    let text = links_text(&[source.to_owned()])?;
+    let url = omni_grab::extract_urls(&text)
+        .into_iter()
+        .next()
+        .context("no es un magnet ni un archivo .torrent")?;
+    let net = omni_core::Network::system_default()?;
+    println!("enlace: {url}");
+    omni_hosts::Torrents::new()
+        .debug(net.client(), &url, seconds, |l| println!("{l}"))
+        .await?;
+    Ok(ExitCode::SUCCESS)
+}
+
 async fn check(links: &[String]) -> Result<ExitCode> {
     let text = links_text(links)?;
     let net = omni_core::Network::system_default()?;
     let g = Grabber::new(
         tokio::runtime::Handle::current(),
         net.client().clone(),
-        Checkers::new(),
+        Hosts::standard().checkers(),
     );
     g.add_to_batch(&text, 0).map_err(anyhow::Error::msg)?;
     loop {
@@ -414,11 +449,20 @@ async fn get(args: GetArgs) -> Result<ExitCode> {
         overwrite: args.force,
         ..DownloadOptions::default()
     };
+    let cancel = CancellationToken::new();
+    // Pixeldrain, Mediafire…: el enlace directo se pide al plugin del host.
+    let net = omni_core::Network::system_default()?;
+    let link = Hosts::standard()
+        .resolver(net.client().clone())
+        .resolve(&args.url, &cancel)
+        .await
+        .context("no se pudo resolver el enlace")?;
+    let mut opts = opts;
+    opts.headers.extend(link.headers);
     let download =
-        Download::new(&args.url, dest, opts).context("no se pudo preparar la descarga")?;
+        Download::new(&link.url, dest, opts).context("no se pudo preparar la descarga")?;
     let progress = download.progress();
 
-    let cancel = CancellationToken::new();
     {
         let cancel = cancel.clone();
         tokio::spawn(async move {

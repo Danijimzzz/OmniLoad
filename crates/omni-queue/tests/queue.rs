@@ -393,3 +393,97 @@ async fn schedule_blocks_and_releases_the_queue() {
     q.update_settings(|s| s.schedule.enabled = false);
     wait_for(&q, id, State::Done).await;
 }
+
+/// Un programa externo (como yt-dlp) que descarga por su cuenta: aquí, un
+/// script de `sh` que cuenta el progreso y crea el archivo.
+#[cfg(unix)]
+struct Script(&'static str);
+
+#[cfg(unix)]
+impl Resolver for Script {
+    fn resolve<'a>(&'a self, _url: &'a str, _c: &'a CancellationToken) -> ResolveFuture<'a> {
+        Box::pin(async move {
+            Ok(ResolvedLink {
+                external: Some(omni_queue::ExternalJob {
+                    program: "sh".into(),
+                    args: vec!["-c".into(), self.0.into(), "sh".into(), "{dir}".into()],
+                    label: "script".into(),
+                }),
+                ..ResolvedLink::default()
+            })
+        })
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn external_program_downloads_and_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = QueueConfig::new(Arc::new(Store::open_in_memory().unwrap()));
+    cfg.base = fast_opts();
+    cfg.resolver = Arc::new(Script(
+        r#"echo "OMNI-PROGRESS 5 10"; printf 0123456789 > "$1/video.mp4"; echo "OMNI-FILE $1/video.mp4""#,
+    ));
+    let q = Queue::open(Handle::current(), cfg).unwrap();
+    let id = q
+        .add(new("https://youtube.test/v".into(), dir.path(), true))
+        .unwrap();
+    let done = wait_for(&q, id, State::Done).await;
+    assert_eq!(done.name, "video.mp4");
+    assert_eq!(
+        std::fs::read(dir.path().join("video.mp4")).unwrap().len(),
+        10
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn external_program_failure_shows_its_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = QueueConfig::new(Arc::new(Store::open_in_memory().unwrap()));
+    cfg.base = fast_opts();
+    cfg.resolver = Arc::new(Script(r#"echo "ERROR: Video unavailable" >&2; exit 1"#));
+    let q = Queue::open(Handle::current(), cfg).unwrap();
+    let id = q
+        .add(new("https://youtube.test/v".into(), dir.path(), true))
+        .unwrap();
+    let failed = wait_for(&q, id, State::Failed).await;
+    assert!(failed.detail.contains("Video unavailable"), "{failed:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pausing_kills_the_external_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = QueueConfig::new(Arc::new(Store::open_in_memory().unwrap()));
+    cfg.base = fast_opts();
+    cfg.resolver = Arc::new(Script(r#"echo "OMNI-PROGRESS 1 100"; sleep 60"#));
+    let q = Queue::open(Handle::current(), cfg).unwrap();
+    let id = q
+        .add(new("https://youtube.test/v".into(), dir.path(), true))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(row(&q, id).state.is_active());
+    q.stop(&[id]);
+    wait_for(&q, id, State::Paused).await;
+}
+
+/// Magnets y archivos .torrent no son http, pero la cola los acepta (los
+/// resuelve el plugin de torrents); cualquier otro esquema, no.
+#[tokio::test]
+async fn accepts_magnets_and_torrent_files_but_not_other_schemes() {
+    let q = memory_queue();
+    let dir = tempfile::tempdir().unwrap();
+    let job = |url: &str| NewJob {
+        start: false,
+        ..NewJob::new(url, dir.path().to_path_buf())
+    };
+    assert!(
+        q.add(job(
+            "magnet:?xt=urn:btih:cab507494d02ebb1178b38f2e9d7be299c86b862&dn=x"
+        ))
+        .is_ok()
+    );
+    assert!(q.add(job("file:///tmp/a.torrent")).is_ok());
+    assert!(q.add(job("ftp://a.com/x.zip")).is_err());
+}

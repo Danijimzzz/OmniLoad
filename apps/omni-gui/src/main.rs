@@ -2,8 +2,8 @@
 //!
 //! La ventana corre en el hilo principal. Las descargas las hace el servicio
 //! `omnid` (ver [`manager`]), que guarda la lista en SQLite: al volver a abrir
-//! todo sigue donde estaba, y con "Seguir descargando al salir"
-//! las descargas continúan con la ventana cerrada. Un temporizador de Slint
+//! todo sigue donde estaba. Con la ventana en la bandeja las descargas siguen;
+//! al salir del todo se para también el servicio. Un temporizador de Slint
 //! lee el estado cuatro veces por segundo y actualiza las tablas.
 //!
 //! Como en JDownloader, los enlaces no se descargan directamente: primero van
@@ -77,6 +77,11 @@ struct App {
     rt: tokio::runtime::Handle,
     /// Dirección de la versión nueva, si hay.
     release_url: RefCell<Option<String>>,
+    /// El instalador de la versión nueva para este sistema, si lo hay.
+    install: RefCell<Option<update::Install>>,
+    /// Instalador ya descargado y comprobado: se lanza al salir.
+    pending_update: RefCell<Option<std::path::PathBuf>>,
+    installing: Cell<bool>,
     /// Icono de la bandeja (si el sistema tiene bandeja).
     tray: RefCell<Option<Tray>>,
     tray_tx: Sender<TrayEvent>,
@@ -331,8 +336,14 @@ impl App {
         use update::Outcome::*;
         let Some(ui) = self.ui() else { return };
         let (state, text) = match outcome {
-            Newer { version, url } => {
+            Newer {
+                version,
+                url,
+                install,
+            } => {
                 *self.release_url.borrow_mut() = Some(url.clone());
+                ui.set_update_installable(install.is_some());
+                *self.install.borrow_mut() = install.clone();
                 (
                     3,
                     format!(
@@ -354,6 +365,64 @@ impl App {
         };
         ui.set_update_state(state);
         ui.set_update_text(text.into());
+    }
+
+    /// «Actualizar ahora»: baja el instalador de la versión nueva, comprueba
+    /// su suma y cierra OmniLoad para instalarlo (y volver a abrirlo).
+    fn install_update(self: &Rc<Self>) {
+        enum Msg {
+            Progress(u64, u64),
+            Done(Result<std::path::PathBuf, String>),
+        }
+        let Some(install) = self.install.borrow().clone() else {
+            return;
+        };
+        let Some(ui) = self.ui() else { return };
+        if self.installing.replace(true) {
+            return;
+        }
+        ui.set_update_busy(true);
+        ui.set_update_text(format!("Descargando {}…", install.name).into());
+        let (tx, rx) = mpsc::channel();
+        let progress_tx = tx.clone();
+        self.rt.spawn(async move {
+            let r = update::download(&install, move |done, total| {
+                let _ = progress_tx.send(Msg::Progress(done, total));
+            })
+            .await;
+            let _ = tx.send(Msg::Done(r));
+        });
+        let app = self.clone();
+        let timer = Rc::new(Timer::default());
+        let keep = timer.clone();
+        timer.start(TimerMode::Repeated, Duration::from_millis(200), move || {
+            let Some(ui) = app.ui() else { return };
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    Msg::Progress(done, total) => {
+                        let pct = (done * 100).checked_div(total).unwrap_or(0);
+                        ui.set_update_text(format!("Descargando la actualización… {pct} %").into());
+                    }
+                    Msg::Done(Ok(path)) => {
+                        keep.stop();
+                        *app.pending_update.borrow_mut() = Some(path);
+                        ui.set_update_text(
+                            "Descargada y comprobada. OmniLoad se cierra para instalarla y se abrirá solo."
+                                .into(),
+                        );
+                        let _ = slint::quit_event_loop();
+                        return;
+                    }
+                    Msg::Done(Err(e)) => {
+                        keep.stop();
+                        app.installing.set(false);
+                        ui.set_update_busy(false);
+                        ui.set_update_text(format!("No se pudo actualizar: {e}.").into());
+                        return;
+                    }
+                }
+            }
+        });
     }
 
     /// ¿Hay un icono en la bandeja donde esconder la ventana?
@@ -710,7 +779,6 @@ impl App {
         s.connections = ui.get_connections();
         s.max_per_server = ui.get_max_per_server();
         s.watch_clipboard = ui.get_watch_clipboard();
-        s.keep_downloading = ui.get_keep_downloading();
         s.check_updates = ui.get_check_updates();
         s.close_to_tray = ui.get_close_to_tray();
         s.minimize_to_tray = ui.get_minimize_to_tray();
@@ -824,6 +892,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pop_place: Cell::new(None),
         rt: rt.handle().clone(),
         release_url: RefCell::new(None),
+        install: RefCell::new(None),
+        pending_update: RefCell::new(None),
+        installing: Cell::new(false),
         tray: RefCell::new(None),
         tray_tx,
         tray_rx,
@@ -902,22 +973,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     });
 
-    // Al salir: pausar todo (salvo "Seguir descargando al salir") y dar
+    // Al salir: pausar todo y parar el servicio, y dar
     // tiempo al motor a guardar el progreso.
     drop(timer);
     drop(clip_timer);
     drop(app.tray.borrow_mut().take());
     app.save_settings();
     app.grabber.close();
-    let keep = app.settings.borrow().keep_downloading;
-    rt.block_on(manager.close(keep));
+    // Si se va a actualizar, el servicio también se para (el instalador
+    // reemplaza sus archivos).
+    let update_file = app.pending_update.borrow_mut().take();
+    rt.block_on(manager.close(false));
     rt.shutdown_timeout(Duration::from_secs(1));
+    if let Some(file) = update_file
+        && let Err(e) = update::launch_installer(&file)
+    {
+        tracing::error!("no se pudo actualizar: {e}");
+    }
     // Salir ya, sin esperar a hilos sueltos (bandeja, avisos…).
     std::process::exit(0);
 }
 
 /// Lee los enlaces de un archivo `.txt`, `.html`…
 fn read_link_file(path: &std::path::Path) -> Result<Vec<url::Url>, String> {
+    if let Some(url) = omni_grab::torrent_file_url(path) {
+        return Ok(vec![url]);
+    }
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -952,6 +1033,10 @@ fn connect_updates(ui: &AppWindow, app: &Rc<App>) {
     ui.on_check_updates_now({
         let app = app.clone();
         move || app.check_updates(false)
+    });
+    ui.on_install_update({
+        let app = app.clone();
+        move || app.install_update()
     });
     ui.on_open_release({
         let app = app.clone();
@@ -1099,7 +1184,6 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_connections(s.connections);
     ui.set_max_per_server(s.max_per_server);
     ui.set_watch_clipboard(s.watch_clipboard);
-    ui.set_keep_downloading(s.keep_downloading);
     ui.set_check_updates(s.check_updates);
     ui.set_close_to_tray(s.close_to_tray);
     ui.set_minimize_to_tray(s.minimize_to_tray);
@@ -1282,6 +1366,13 @@ fn connect_downloads(ui: &AppWindow, app: &Rc<App>) {
         move |i| {
             app.manager
                 .set_priority(&app.selected_ids(), Priority::from_index(i as usize));
+            app.refresh();
+        }
+    });
+    ui.on_sel_close({
+        let app = app.clone();
+        move || {
+            app.state.borrow_mut().dl_selected = None;
             app.refresh();
         }
     });

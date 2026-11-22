@@ -26,6 +26,7 @@ reqwest.workspace = true
 rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 slint = { workspace = true, features = ["unstable-winit-030"] }
 tokio.workspace = true
 tokio-util.workspace = true
@@ -46,3 +47,7 @@ tempfile.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
+
+# Icono y datos del programa dentro de omniload.exe (ver build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

@@ -27,10 +27,12 @@ pub use grabber::{
     Added, Check, Dest, FileRule, GrabCommand, GrabItem, GrabPackage, Grabber, KnownLinks,
     PARALLEL_CHECKS, Pick, Picked, Saved, package_name, short_error,
 };
-pub use import::{LINK_FILE_EXTENSIONS, MAX_LINK_FILE, links_from_file};
+pub use import::{
+    LINK_FILE_EXTENSIONS, MAX_LINK_FILE, links_from_file, torrent_file_url, torrent_paths_to_urls,
+};
 pub use inspect::{FolderFile, Found, MAX_LINKS_PER_PAGE, inspect};
 pub use links::{
     FILE_HOSTS, clipboard_urls, extract_hrefs, extract_links, extract_urls, is_file_host,
-    page_title,
+    is_magnet, is_torrent_file, page_title,
 };
 pub use omni_core::RemoteInfo;

@@ -556,6 +556,12 @@ component ColsHeader inherits Rectangle {
     in-out property <length> pointer-x;
     height: 34px;
     background: Theme.head;
+    // ¿Va la columna «Nombre» (la elástica) antes que la columna `i`?
+    pure function name-before(i: int) -> bool {
+        (i > 0 && cols[0].id == 0) || (i > 1 && cols[1].id == 0) || (i > 2 && cols[2].id == 0)
+            || (i > 3 && cols[3].id == 0) || (i > 4 && cols[4].id == 0)
+            || (i > 5 && cols[5].id == 0) || (i > 6 && cols[6].id == 0) || (i > 7 && cols[7].id == 0)
+    }
     HorizontalLayout {
         for c[i] in root.cols: ColSlot {
             spec: c;
@@ -567,6 +573,7 @@ component ColsHeader inherits Rectangle {
             property <length> w0;
             property <length> x0;
             property <bool> sizing: false;
+            property <bool> is-name: c.id == 0;
             Rectangle {
                 background: root.dragging == i ? Theme.accent.with-alpha(0.28)
                     : hot ? Theme.accent.with-alpha(0.16)
@@ -627,9 +634,14 @@ component ColsHeader inherits Rectangle {
                     }
                 }
             }
-            // Asa para el ancho, siempre encima.
-            TouchArea {
-                x: parent.width - 6px;
+            // Asa para el ancho, siempre encima. «Nombre» se estira con lo que
+            // sobra, así que su borde derecho no se puede mover: en las columnas
+            // que van detrás de «Nombre» el asa está en su borde izquierdo (que
+            // es el que se mueve con el ratón) y al arrastrar a la izquierda
+            // crecen.
+            if !is-name: TouchArea {
+                property <bool> after: root.name-before(i);
+                x: after ? -6px : parent.width - 6px;
                 width: 12px;
                 mouse-cursor: col-resize;
                 Rectangle {
@@ -651,7 +663,8 @@ component ColsHeader inherits Rectangle {
                 }
                 moved => {
                     if sizing {
-                        root.resize(i, max(48px, w0 + (self.absolute-position.x + self.mouse-x - x0)));
+                        let dx = self.absolute-position.x + self.mouse-x - x0;
+                        root.resize(i, max(48px, after ? w0 - dx : w0 + dx));
                     }
                 }
             }
@@ -1573,7 +1586,6 @@ export component AppWindow inherits Window {
     callback win-close();
     callback win-resize(int);
     in-out property <int> max-per-server: 8;
-    in-out property <bool> keep-downloading: false;
     in-out property <bool> close-to-tray: true;
     in-out property <bool> minimize-to-tray: true;
     in-out property <bool> notify-done: true;
@@ -1587,6 +1599,10 @@ export component AppWindow inherits Window {
     // versiones publicadas, 5 error.
     in property <int> update-state: 0;
     in property <string> update-text;
+    // Hay instalador de la versión nueva para este sistema (se puede
+    // actualizar sin salir de la app) y se está descargando.
+    in property <bool> update-installable: false;
+    in property <bool> update-busy: false;
     in-out property <bool> check-updates: true;
     // Automático: horario, reglas por tipo, acción al terminar, inicio con el sistema.
     in-out property <bool> schedule-enabled: false;
@@ -1612,6 +1628,7 @@ export component AppWindow inherits Window {
     callback finish-cancel();
     callback check-updates-now();
     callback open-release();
+    callback install-update();
     in-out property <bool> watch-clipboard: true;
     in-out property <int> clip-popup: 1;
     in-out property <bool> package-folders: true;
@@ -1667,6 +1684,8 @@ export component AppWindow inherits Window {
     in-out property <bool> remove-dialog-open: false;
     callback change-sel-priority(int);
     callback sel-open-folder();
+    // Cierra el panel de detalles (quita la selección).
+    callback sel-close();
 
     callback grab-click(int, bool);
     callback grab-toggle(int);
@@ -1969,12 +1988,17 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         padding: 16px;
                         spacing: 10px;
-                        Text {
-                            text: root.sel-title;
-                            font-size: 14px * Theme.fscale;
-                            font-weight: 700;
-                            color: Theme.text;
-                            wrap: word-wrap;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: root.sel-title;
+                                font-size: 14px * Theme.fscale;
+                                font-weight: 700;
+                                color: Theme.text;
+                                wrap: word-wrap;
+                                horizontal-stretch: 1;
+                            }
+                            Btn { label: "Cerrar detalles"; icon: "M6 6l12 12M18 6L6 18"; clicked => { root.sel-close(); } }
                         }
                         for l in root.sel-lines: VerticalLayout {
                             spacing: 2px;
@@ -2053,6 +2077,7 @@ export component AppWindow inherits Window {
                         }
                         Btn { text: "Abrir carpeta"; clicked => { root.sel-open-folder(); } }
                         Btn { text: "Quitar"; clicked => { root.remove-dialog-open = true; } }
+                        Btn { label: "Cerrar detalles"; icon: "M6 6l12 12M18 6L6 18"; clicked => { root.sel-close(); } }
                     }
                     HorizontalLayout {
                         spacing: 24px;
@@ -2410,15 +2435,6 @@ export component AppWindow inherits Window {
                         }
                     }
                     SettingRow {
-                        title: "Seguir descargando al salir";
-                        subtitle: "Al salir de OmniLoad las descargas continúan en segundo plano. Al volver a abrirlo las verás tal cual. Desde la terminal: «omni service stop» para pararlas.";
-                        Check {
-                            checked <=> root.keep-downloading;
-                            label: "Seguir descargando al salir";
-                            toggled => { root.settings-changed(); }
-                        }
-                    }
-                    SettingRow {
                         title: "Vigilar portapapeles";
                         subtitle: "Los enlaces que copies aparecen solos en el Capturador de enlaces.";
                         Check {
@@ -2577,21 +2593,29 @@ export component AppWindow inherits Window {
                     SettingRow {
                         title: "OmniLoad " + root.app-version + (root.app-pr > 0 ? " · PR #" + root.app-pr : "");
                         subtitle: root.update-text;
+                        if root.update-state == 3 && root.update-installable: Btn {
+                            text: root.update-busy ? "Actualizando…" : "Actualizar ahora";
+                            primary: true;
+                            enabled: !root.update-busy;
+                            icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
+                            clicked => { root.install-update(); }
+                        }
                         if root.update-state == 3: Btn {
                             text: "Ver la versión nueva";
-                            primary: true;
+                            primary: !root.update-installable;
+                            enabled: !root.update-busy;
                             icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
                             clicked => { root.open-release(); }
                         }
                         Btn {
                             text: root.update-state == 1 ? "Comprobando…" : "Buscar actualizaciones";
-                            enabled: root.update-state != 1;
+                            enabled: root.update-state != 1 && !root.update-busy;
                             clicked => { root.check-updates-now(); }
                         }
                     }
                     SettingRow {
                         title: "Buscar al abrir";
-                        subtitle: "Al abrir OmniLoad pregunta a GitHub cuál es la última versión y te avisa si hay una nueva. No descarga ni instala nada: tú decides si actualizas. Solo envía el nombre y el número de versión del programa.";
+                        subtitle: "Al abrir OmniLoad pregunta a GitHub cuál es la última versión y te avisa si hay una nueva. No descarga ni instala nada hasta que pulses «Actualizar ahora»: entonces baja el instalador, comprueba su suma de seguridad, se cierra, se actualiza y se vuelve a abrir. Solo envía el nombre y el número de versión del programa.";
                         Check {
                             checked <=> root.check-updates;
                             label: "Buscar actualizaciones al abrir";

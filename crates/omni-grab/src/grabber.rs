@@ -421,9 +421,10 @@ impl Grabber {
     /// Como [`Self::add_links`], en una tanda que ya existe (0: ninguna).
     /// Devuelve cuántos enlaces nuevos se van a comprobar.
     pub fn add_to_batch(&self, text: &str, batch: u64) -> Result<usize, String> {
-        let urls = extract_urls(text);
+        let text = crate::import::torrent_paths_to_urls(text);
+        let urls = extract_urls(&text);
         if urls.is_empty() {
-            return Err("No encuentro ningún enlace http o https en lo que has pegado.".into());
+            return Err("No encuentro ningún enlace (http, https o magnet) ni archivo .torrent en lo que has pegado.".into());
         }
         let mut added = 0;
         for url in urls {
@@ -942,6 +943,7 @@ pub fn short_error(e: &omni_core::Error) -> String {
         Error::LinkExpired { status } => format!("acceso denegado ({status})"),
         Error::HttpStatus { status } => format!("error del servidor ({status})"),
         Error::RetriesExhausted(inner) => short_error(inner),
+        Error::Host { message, .. } => message.clone(),
         other => other.to_string(),
     }
 }

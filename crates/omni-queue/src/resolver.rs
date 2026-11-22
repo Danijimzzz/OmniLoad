@@ -10,7 +10,10 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use omni_core::HeaderMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use omni_core::{DownloadOutcome, HeaderMap, Progress};
 use tokio_util::sync::CancellationToken;
 
 /// Lo que hace falta para descargar un enlace.
@@ -22,6 +25,44 @@ pub struct ResolvedLink {
     pub headers: HeaderMap,
     /// Nombre del archivo, si el host lo dice (si no, lo decide el motor).
     pub filename: Option<String>,
+    /// Si el archivo no se baja por HTTP con el motor (vídeo de yt-dlp,
+    /// que descarga y une audio y vídeo por su cuenta), el programa que lo
+    /// descarga. `url` se ignora.
+    pub external: Option<ExternalJob>,
+    /// Si lo descarga otro motor del propio programa (BitTorrent), ese
+    /// motor. `url` se ignora.
+    pub custom: Option<Arc<dyn CustomDownload>>,
+}
+
+/// Futuro que devuelve [`CustomDownload::run`].
+pub type RunFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<DownloadOutcome, omni_core::Error>> + Send + 'a>>;
+
+/// Un motor de descarga que no es HTTP (BitTorrent). Comparte con el resto
+/// la cola, los límites y la ventana: la cola le da la carpeta, un
+/// [`Progress`] que ir rellenando y un permiso para cancelar (pausar es
+/// cancelar y reanudar es volver a llamar a `run`).
+pub trait CustomDownload: Send + Sync + std::fmt::Debug + 'static {
+    fn run<'a>(
+        &'a self,
+        dir: &'a Path,
+        progress: Arc<Progress>,
+        cancel: CancellationToken,
+    ) -> RunFuture<'a>;
+}
+
+/// Una descarga hecha por un programa externo.
+///
+/// El programa habla con la cola por su salida estándar, una línea por
+/// aviso: `OMNI-PROGRESS <bytes bajados> <total o 0> [<total estimado>]` y, al terminar,
+/// `OMNI-FILE <ruta del archivo>`. En `args`, `{dir}` se cambia por la
+/// carpeta de destino.
+#[derive(Clone, Debug, Default)]
+pub struct ExternalJob {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    /// Nombre para los mensajes de error ("yt-dlp").
+    pub label: String,
 }
 
 /// Futuro que devuelve un [`Resolver`].

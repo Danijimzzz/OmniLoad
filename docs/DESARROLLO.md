@@ -46,8 +46,8 @@ igual, pero las descargas se paran al cerrarla.
 Cerrar o minimizar la ventana la esconde en la bandeja del sistema (si el
 escritorio tiene bandeja) y las descargas siguen. Al salir de verdad («Salir»
 en el menú del icono, o cerrar la ventana si no hay bandeja) se para el
-servicio (guardando el progreso) salvo que esté activado "Seguir descargando
-al salir". `omnid` escribe su
+servicio (guardando el progreso); no hay opción de dejarlo en segundo plano.
+`omnid` escribe su
 registro en `omnid.log`, junto a la base de datos; para verlo en directo,
 ejecútalo en una terminal (`RUST_LOG=debug omnid`; Ctrl+C lo para).
 
@@ -280,21 +280,44 @@ en el servicio `omnid`. Detalles:
   van cifrados con una clave que solo da su servidor: se explica y no se
   abren.
 
-### Preparado para los plugins de hosts (fase 5)
+## Los hosts (`omni-hosts`, fase 5)
 
-Cada host (Mega, Gofile, Google Drive, Mediafire…) tendrá un plugin con dos
-caras:
+Cada host es un tipo que implementa `omni_hosts::Host` y sirve a la vez de
+`HostChecker` (capturador: reconoce, comprueba, devuelve carpetas) y de
+`Resolver` (cola: enlace directo justo antes de bajar). `Hosts::standard()`
+los registra todos: Pixeldrain, Archive.org, Dropbox, Mediafire, Google Drive,
+Gofile, Mega, yt-dlp, OneDrive, 1fichier y torrents. `omni-api` y `omni` lo
+usan; para añadir uno, crea el módulo y añádelo ahí (y a la prueba de la lista
+estándar en `tests/hosts.rs`).
 
-- `omni_grab::HostChecker` para el capturador: reconoce sus enlaces, los
-  comprueba (nombre, tamaño, caído) y puede devolver una carpeta entera ya
-  comprobada (`Found::Folder`). Se registra en `Checkers` en
-  `omni-api/src/server.rs` (`open_grabber`). La prueba `host_plugins_check_their_links`
-  usa uno de mentira.
-- `omni_queue::Resolver` para la descarga: el enlace directo, justo antes de
-  bajar.
+Un `ResolvedLink` puede traer, además de URL y cabeceras, uno de dos motores
+que no son el HTTP por bloques:
 
-El cliente HTTP con el que se comprueba es el de una `Network`, igual que en
-el motor, así que la multi-red no cambia nada aquí.
+- `external`: un programa externo (yt-dlp). Habla por stdout con líneas
+  `OMNI-PROGRESS` y `OMNI-FILE`; se mata al cancelar y los errores llevan la
+  cola de stderr (`omni-queue/src/external.rs`).
+- `custom`: un motor propio (`CustomDownload`): torrents con librqbit (una sola
+  sesión) y Mega (descifrado AES al vuelo, sin comprobar el MAC).
+
+Las páginas de los hosts cambian: Gofile (token), Mediafire y 1fichier (HTML)
+son lo más frágil. Las pruebas usan servidores falsos (`tests/hosts.rs`,
+`tests/mega.rs`); la de torrents se salta si no hay IPv6 (librqbit lo exige).
+
+El cliente HTTP es el de una `Network`, así que la multi-red no cambia nada.
+
+## Instaladores y actualización
+
+`.github/workflows/release.yml` construye, al subir una etiqueta `vX.Y.Z`
+(tiene que coincidir con la versión de `Cargo.toml`), el instalador de Windows
+(Inno Setup, por usuario), el `.dmg` de macOS (firma ad-hoc) y los `.deb`,
+`.tar.gz` y `.AppImage` de Linux, y los publica en la Release con
+`SHA256SUMS.txt`. En los PR que tocan `installer/` solo se construyen, sin
+publicar. Los scripts están en `installer/`.
+
+Dentro de la app (`apps/omni-gui/src/update.rs`), «Actualizar ahora» elige el
+archivo del sistema, lo baja a una carpeta temporal, comprueba su SHA-256 con
+`SHA256SUMS.txt`, lo ejecuta (instalación silenciosa en Windows) y reabre la
+app. Solo sigue enlaces de GitHub y solo con la aceptación del usuario.
 
 ### Preparado para varias redes
 
@@ -318,7 +341,8 @@ cola ni el motor.
 crates/
   omni-core/        motor de descarga (biblioteca)
     src/platform/   todo el código propio de cada sistema operativo
-  omni-grab/        capturador de enlaces: comprobación, paquetes, plugins de hosts
+  omni-grab/        capturador de enlaces: comprobación, paquetes
+  omni-hosts/       plugins de hosts (Mega, Drive, torrents, yt-dlp…)
   omni-store/       base de datos SQLite (lista, ajustes, servidores)
   omni-queue/       cola de descargas con límites y persistencia
   omni-api/         servicio (API local) y sus clientes

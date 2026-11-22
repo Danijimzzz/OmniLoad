@@ -12,7 +12,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use omni_core::{DownloadOptions, Network, ServerStatus};
-use omni_grab::{Added, Checkers, GrabCommand, Grabber};
+use omni_grab::{Added, GrabCommand, Grabber};
+use omni_hosts::Hosts;
 use omni_queue::{JobInfo, NewJob, Queue, QueueConfig, QueueSettings};
 use omni_store::Store;
 use tokio::net::TcpListener;
@@ -100,8 +101,13 @@ impl Service {
         let store = Arc::new(Store::open(&paths.db)?);
         let mut cfg = QueueConfig::new(store.clone());
         cfg.base = base;
+        // Los plugins de hosts (Pixeldrain, Mediafire…) sirven al capturador
+        // para comprobar los enlaces y a la cola para pedir el enlace directo.
+        let net = Network::system_default()?;
+        let hosts = Hosts::standard();
+        cfg.resolver = Arc::new(hosts.resolver(net.client().clone()));
         let queue = Queue::open(Handle::current(), cfg)?;
-        let grabber = open_grabber(&queue, &store)?;
+        let grabber = open_grabber(&queue, &store, &net, &hosts)?;
 
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let port = listener.local_addr()?.port();
@@ -183,11 +189,14 @@ impl Service {
 
 /// El capturador, con lo que quedó la última vez. Avisa de los enlaces que
 /// ya están en la lista de descargas.
-fn open_grabber(queue: &Queue, store: &Store) -> Result<Grabber, ServiceError> {
-    let net = Network::system_default()?;
+fn open_grabber(
+    queue: &Queue,
+    store: &Store,
+    net: &Network,
+    hosts: &Hosts,
+) -> Result<Grabber, ServiceError> {
     let known = queue.clone();
-    // Los plugins de hosts (fase 5) se añadirán aquí con `Checkers::with`.
-    let grabber = Grabber::new(Handle::current(), net.client().clone(), Checkers::new())
+    let grabber = Grabber::new(Handle::current(), net.client().clone(), hosts.checkers())
         .with_known_links(Arc::new(move |url| known.contains_url(url)));
     match store.setting(GRABBER_KEY) {
         Ok(Some(saved)) => grabber.restore(saved),

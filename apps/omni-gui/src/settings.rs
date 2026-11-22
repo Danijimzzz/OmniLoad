@@ -33,8 +33,6 @@ pub struct Settings {
     /// Conexiones como mucho a un mismo servidor (0 = sin tope).
     pub max_per_server: i32,
     pub watch_clipboard: bool,
-    /// Al salir de OmniLoad, dejar que `omnid` siga descargando.
-    pub keep_downloading: bool,
     /// Cerrar la ventana la esconde en la bandeja (si hay bandeja).
     pub close_to_tray: bool,
     /// Minimizar la ventana también la esconde en la bandeja.
@@ -215,7 +213,6 @@ impl Default for Settings {
             connections: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             max_per_server: omni_core::DEFAULT_CONNECTIONS_PER_NETWORK as i32,
             watch_clipboard: true,
-            keep_downloading: false,
             close_to_tray: true,
             minimize_to_tray: true,
             notify_done: true,

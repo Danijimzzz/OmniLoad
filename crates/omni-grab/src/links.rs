@@ -16,7 +16,7 @@ pub fn extract_urls(text: &str) -> Vec<Url> {
         // la URL.
         let candidate = tail[..end].trim_end_matches(['.', ',', ';', ':', ')', ']', '!', '?']);
         if let Ok(u) = Url::parse(candidate)
-            && u.host_str().is_some()
+            && (u.host_str().is_some() || is_magnet(&u) || is_torrent_file(&u))
             && !out.contains(&u)
         {
             out.push(u);
@@ -26,12 +26,22 @@ pub fn extract_urls(text: &str) -> Vec<Url> {
     out
 }
 
+/// ¿Es un enlace magnet (`magnet:?xt=urn:btih:…`) de BitTorrent?
+pub fn is_magnet(url: &Url) -> bool {
+    url.scheme() == "magnet" && url.query().is_some_and(|q| q.contains("xt="))
+}
+
+/// ¿Es un `.torrent` del disco (`file:///…/a.torrent`)?
+pub fn is_torrent_file(url: &Url) -> bool {
+    url.scheme() == "file" && url.path().to_ascii_lowercase().ends_with(".torrent")
+}
+
 fn find_scheme(s: &str) -> Option<usize> {
     let lower = s.to_ascii_lowercase();
-    match (lower.find("http://"), lower.find("https://")) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    }
+    ["http://", "https://", "magnet:?", "file:///"]
+        .iter()
+        .filter_map(|p| lower.find(p))
+        .min()
 }
 
 /// Extensiones de páginas web y de sus recursos (estilos, scripts, fuentes
@@ -79,7 +89,8 @@ pub fn extract_hrefs(html: &str, base: Option<&Url>) -> Vec<Url> {
         };
         // El `#fragmento` se conserva: en Mega es la clave del archivo.
         let Ok(url) = parsed else { continue };
-        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        let web = matches!(url.scheme(), "http" | "https") && url.host_str().is_some();
+        if !(web || is_magnet(&url)) {
             continue;
         }
         if !out.contains(&url) {
@@ -126,7 +137,7 @@ pub fn clipboard_urls(text: &str, html: Option<&str>) -> Vec<Url> {
     let mut out = extract_urls(text);
     let hidden = html.map(|h| extract_hrefs(h, None)).unwrap_or_default();
     for url in hidden {
-        if (looks_like_file(&url) || is_file_host(&url)) && !out.contains(&url) {
+        if (looks_like_file(&url) || is_file_host(&url) || is_magnet(&url)) && !out.contains(&url) {
             out.push(url);
         }
     }
@@ -239,6 +250,18 @@ mod tests {
             ]
         );
         assert!(extract_urls("nada por aquí").is_empty());
+        let magnet = "magnet:?xt=urn:btih:cab507494d02ebb1178b38f2e9d7be299c86b862&dn=Ubuntu&tr=udp%3A%2F%2Ft.org%3A1";
+        assert_eq!(
+            urls(extract_urls(&format!(
+                "mira {magnet}. y https://a.com/x.zip"
+            ))),
+            [magnet.to_owned(), "https://a.com/x.zip".to_owned()]
+        );
+        assert!(extract_urls("magnet:?dn=sin-hash").is_empty());
+        assert_eq!(
+            urls(extract_urls("file:///tmp/a%20b.torrent file:///etc/passwd")),
+            ["file:///tmp/a%20b.torrent"]
+        );
         assert_eq!(urls(extract_urls("HTTPS://A.COM/B")), ["https://a.com/B"]);
     }
 

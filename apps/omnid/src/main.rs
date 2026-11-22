@@ -30,7 +30,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    rt.block_on(async {
+    let code = rt.block_on(async {
         let service = match Service::start(&paths, DownloadOptions::default()).await {
             Ok(s) => s,
             Err(ServiceError::AlreadyRunning) => {
@@ -52,9 +52,21 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // Red de seguridad: si algo se atasca al parar (un hilo del sistema,
+        // una conexión abierta), el proceso se termina igualmente a los 12 s
+        // en vez de quedarse en el Administrador de tareas.
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(12));
+            error!("el cierre tardó demasiado; se termina el proceso");
+            std::process::exit(0);
+        });
         service.stop().await;
         ExitCode::SUCCESS
-    })
+    });
+    // Sin esperar a tareas sueltas del runtime: el progreso ya está guardado.
+    rt.shutdown_timeout(std::time::Duration::from_secs(1));
+    // Y salir ya: en Windows un hilo suelto basta para dejar el proceso vivo.
+    std::process::exit(if code == ExitCode::SUCCESS { 0 } else { 1 });
 }
 
 fn init_logging() {
