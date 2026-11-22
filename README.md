@@ -84,7 +84,8 @@ Al copiar enlaces aparece un pequeño aviso abajo a la derecha, sin taparte lo
 que estés haciendo. La rueda se llena de **verde** con los enlaces buenos y de
 **rojo** con los caídos, y con el botón ▶ empiezas a descargar al momento.
 Puedes elegir el aviso **compacto**, el **completo** con la lista de enlaces, o
-quitarlo. Se cierra solo al terminar de comprobar.
+quitarlo. Al terminar de comprobar se desvanece poco a poco (y si pasas el
+ratón por encima, se queda).
 
 ### Descargas
 
@@ -102,6 +103,14 @@ quitarlo. Se cierra solo al terminar de comprobar.
   abrir como mucho a una misma web, y las descargas a la misma web se reparten
   las conexiones de forma justa.
 - Si un enlace caduca, te lo dice claramente.
+- **Quitar con calma.** Al quitar una descarga eliges: «Quitar de la lista»
+  (lo normal: los archivos se quedan en tu carpeta) o «Quitar y borrar
+  archivos» (también borra lo descargado y la carpeta del paquete si queda
+  vacía; nunca toca tu carpeta de descargas ni otras carpetas con tus cosas).
+- **Tu carpeta, limpia.** Mientras descarga solo ves el archivo a medias
+  (`.part`); lo que OmniLoad necesita para reanudar lo guarda aparte.
+- **Números que se leen bien.** La velocidad y el tiempo restante se
+  actualizan una vez por segundo y no dan saltos.
 
 ### Junto al reloj (bandeja del sistema)
 
@@ -116,6 +125,13 @@ del sistema, junto al reloj, y sigue descargando y vigilando lo que copias.
   tenías.
 - ¿Prefieres que la X cierre el programa? Desactívalo en **Ajustes ›
   General**.
+
+### Versión
+
+En **Ajustes › Versión** ves qué versión tienes. Al abrir, OmniLoad mira en
+GitHub si hay una nueva y, si la hay, te lo dice con un botón en la barra de
+arriba. Nunca descarga ni instala nada por su cuenta: tú decides. Si no quieres
+que mire, se desactiva ahí mismo.
 
 ### Apariencia
 

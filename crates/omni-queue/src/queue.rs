@@ -462,6 +462,67 @@ impl Queue {
         self.pump();
     }
 
+    /// Quita descargas y además borra del disco lo suyo: el archivo (o el
+    /// `.part` si iba a medias) y el estado para reanudar. Las carpetas que
+    /// se queden vacías también se borran, salvo `keep` (la carpeta de
+    /// descargas que eligió el usuario) y las carpetas personales del
+    /// sistema. Nunca borra una carpeta con algo dentro. Devuelve cuántos
+    /// archivos borró.
+    pub async fn remove_with_files(&self, ids: &[u64], keep: Option<PathBuf>) -> usize {
+        let mut gone = Vec::new();
+        self.entries().retain_mut(|e| {
+            if !ids.contains(&e.id) {
+                return true;
+            }
+            if let Some(c) = &e.cancel {
+                c.cancel();
+            }
+            gone.push((e.dir.clone(), e.name.clone(), e.task.take()));
+            false
+        });
+        if let Err(e) = self.inner.store.delete_jobs(ids) {
+            warn!("no se pudieron borrar descargas de la base de datos: {e}");
+        }
+        self.pump();
+        let still_used: Vec<PathBuf> = self.entries().iter().map(|e| e.dir.clone()).collect();
+
+        let mut deleted = 0;
+        let mut dirs = Vec::new();
+        for (dir, name, task) in gone {
+            // Esperar a que la descarga suelte el archivo (en Windows no se
+            // puede borrar abierto) y no vuelva a guardar su estado.
+            if let Some(t) = task {
+                let _ = t.await;
+            }
+            let file = dir.join(&name);
+            for p in [
+                file.clone(),
+                omni_core::part_path_for(&file),
+                omni_core::state_path_for(&file),
+                omni_core::legacy_state_path_for(&file),
+            ] {
+                match std::fs::remove_file(&p) {
+                    Ok(()) => deleted += 1,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => warn!("no se pudo borrar {}: {e}", p.display()),
+                }
+            }
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+        for dir in dirs {
+            if still_used.contains(&dir) || protected_dir(&dir, keep.as_deref()) {
+                continue;
+            }
+            // remove_dir solo borra carpetas vacías.
+            if std::fs::remove_dir(&dir).is_ok() {
+                info!("carpeta vacía borrada: {}", dir.display());
+            }
+        }
+        deleted
+    }
+
     pub fn set_priority(&self, ids: &[u64], priority: Priority) {
         for e in self.entries().iter_mut().filter(|e| ids.contains(&e.id)) {
             e.priority = priority;
@@ -821,6 +882,29 @@ fn info(e: &Entry, held: bool) -> JobInfo {
         speed_limit: e.rate.get(),
         detail: e.detail.clone(),
     }
+}
+
+/// Carpetas que nunca se borran aunque se queden vacías.
+fn protected_dir(dir: &std::path::Path, keep: Option<&std::path::Path>) -> bool {
+    let same = |other: &std::path::Path| {
+        let a = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        let b = std::fs::canonicalize(other).unwrap_or_else(|_| other.to_path_buf());
+        a == b
+    };
+    keep.is_some_and(same)
+        || [
+            dirs::download_dir(),
+            dirs::home_dir(),
+            dirs::desktop_dir(),
+            dirs::document_dir(),
+            dirs::video_dir(),
+            dirs::audio_dir(),
+            dirs::picture_dir(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|d| same(&d))
+        || dir.parent().is_none()
 }
 
 #[cfg(test)]

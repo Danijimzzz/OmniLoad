@@ -22,7 +22,7 @@ use tracing::{info, warn};
 
 use crate::paths::{Endpoint, Paths};
 use crate::types::{
-    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest,
+    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest, RemoveRequest,
     SpeedLimitRequest, Status, TakeRequest, TakeResponse,
 };
 
@@ -286,8 +286,12 @@ async fn stop(State(app): State<App>, Json(r): Json<Ids>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
-async fn remove(State(app): State<App>, Json(r): Json<Ids>) -> StatusCode {
-    app.queue.remove(&r.ids);
+async fn remove(State(app): State<App>, Json(r): Json<RemoveRequest>) -> StatusCode {
+    if r.files {
+        app.queue.remove_with_files(&r.ids, r.keep).await;
+    } else {
+        app.queue.remove(&r.ids);
+    }
     StatusCode::NO_CONTENT
 }
 

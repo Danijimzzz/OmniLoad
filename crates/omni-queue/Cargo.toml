@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+dirs.workspace = true
 omni-core.workspace = true
 omni-store.workspace = true
 serde.workspace = true

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use slint::{ModelRc, SharedString, VecModel};
 
 use crate::manager::{RowInfo, State, sizes};
+use crate::smooth::{Shown, Smoother};
 use crate::{AppWindow, DlRow, GrabTreeRow, Stat, format, sync_model};
 use omni_grab::{Check, Dest, GrabItem, GrabPackage};
 
@@ -47,6 +48,7 @@ pub struct UiState {
     /// pisar lo que el usuario está tecleando.
     pushed_pkg: Option<(u64, String, String)>,
     speed: VecDeque<f64>,
+    smooth: Smoother,
     last_sample: Option<Instant>,
 }
 
@@ -172,6 +174,7 @@ fn stat(label: &str, value: impl Into<SharedString>) -> Stat {
 
 /// Tabla de descargas, resumen, cabecera y panel de propiedades.
 pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo], st: &mut UiState) {
+    let now = Instant::now();
     // Paquetes en el orden en que llegaron.
     let mut packages: Vec<(String, Vec<&RowInfo>)> = Vec::new();
     for r in rows {
@@ -198,11 +201,15 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
             .iter()
             .map(|r| r.downloaded.min(r.total.unwrap_or(u64::MAX)))
             .sum();
-        let rate: f64 = files.iter().map(|r| r.rate).sum();
+        let raw_rate: f64 = files.iter().map(|r| r.rate).sum();
         let fraction = (total > 0).then(|| (downloaded as f64 / total as f64).min(1.0) as f32);
         let (fraction, progress) = pct(fraction);
-        let eta = (rate > 0.0 && total > downloaded)
-            .then(|| Duration::from_secs_f64((total - downloaded) as f64 / rate));
+        let Shown { rate, eta } = st.smooth.shown(
+            &format!("p:{name}"),
+            now,
+            raw_rate,
+            (total > 0).then(|| total.saturating_sub(downloaded)),
+        );
         let (status, tone) = package_status(files);
         let expanded = !st.dl_collapsed.contains(name) || !st.dl_search.is_empty();
         out.push(DlRow {
@@ -236,6 +243,12 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
         }
         for r in shown {
             let (fraction, progress) = pct(r.fraction());
+            let one = st.smooth.shown(
+                &format!("f:{}", r.id),
+                now,
+                r.rate,
+                r.total.map(|t| t.saturating_sub(r.downloaded)),
+            );
             out.push(DlRow {
                 key: r.id as i32,
                 is_package: false,
@@ -246,8 +259,8 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
                 size: sizes(r).into(),
                 fraction,
                 progress,
-                speed: speed_text(r.rate),
-                eta: eta_text(r.eta()),
+                speed: speed_text(one.rate),
+                eta: eta_text(one.eta),
                 priority: r.priority.label().into(),
                 status: r.status().into(),
                 tone: file_tone(r),
@@ -262,13 +275,11 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
         .iter()
         .map(|r| r.downloaded.min(r.total.unwrap_or(u64::MAX)))
         .sum();
-    let rate: f64 = rows.iter().map(|r| r.rate).sum();
+    let raw_rate: f64 = rows.iter().map(|r| r.rate).sum();
     let remaining = total.saturating_sub(downloaded);
-    let eta = if rate > 0.0 && remaining > 0 {
-        format::duration(Duration::from_secs_f64(remaining as f64 / rate))
-    } else {
-        "—".into()
-    };
+    let Shown { rate, eta } = st.smooth.shown("total", now, raw_rate, Some(remaining));
+    st.smooth.forget_stale(now);
+    let eta = eta.map_or_else(|| "—".to_owned(), format::duration);
     let totals = vec![
         stat("Paquetes", packages.len().to_string()),
         stat("Archivos", rows.len().to_string()),
@@ -293,7 +304,6 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
     });
 
     // Gráfica: una muestra por segundo.
-    let now = Instant::now();
     if st
         .last_sample
         .is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1))

@@ -24,7 +24,7 @@ use crate::blocks::{BlockQueue, Commit, Lease};
 use crate::limiter::{Limiter, REGROW_AFTER};
 use crate::probe::{parse_content_range, probe_with, status_error};
 use crate::retry::{Backoff, retry_after};
-use crate::state::{SavedState, part_path_for, state_path_for};
+use crate::state::{SavedState, legacy_state_path_for, part_path_for, state_path_for};
 use crate::{
     DEFAULT_BLOCK_SIZE, DEFAULT_CONNECTIONS_PER_NETWORK, DEFAULT_MIN_BLOCK_SIZE, Error, Network,
     NetworkId, Progress, RateLimit, RemoteInfo, Result, ServerLimits, platform,
@@ -184,6 +184,7 @@ impl Download {
         };
         let part = part_path_for(&path);
         let state = state_path_for(&path);
+        adopt_legacy_state(&path, &state);
         if path.exists() && !part.exists() && !self.opts.overwrite {
             return Err(Error::AlreadyExists(path.display().to_string()));
         }
@@ -881,5 +882,58 @@ impl Writer<'_> {
             }
             return Ok(commit);
         }
+    }
+}
+
+/// Lo descargado a medias con una versión anterior tenía el estado junto al
+/// archivo: se lleva a su sitio nuevo para poder reanudar.
+fn adopt_legacy_state(dest: &Path, state: &Path) {
+    let legacy = legacy_state_path_for(dest);
+    if legacy == state || !legacy.exists() {
+        return;
+    }
+    if !state.exists()
+        && let Some(saved) = SavedState::load(&legacy)
+        && let Err(e) = saved.save_atomic(state)
+    {
+        warn!("no se pudo mover el estado de {}: {e}", legacy.display());
+        return;
+    }
+    let _ = fs::remove_file(&legacy);
+    let _ = fs::remove_file(append_tmp(&legacy));
+}
+
+fn append_tmp(p: &Path) -> PathBuf {
+    let mut s = p.as_os_str().to_owned();
+    s.push(".tmp");
+    s.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blocks::Block;
+
+    #[test]
+    fn legacy_state_is_adopted() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("viejo.bin");
+        let legacy = legacy_state_path_for(&dest);
+        let saved = SavedState::new(
+            "http://x/viejo.bin".into(),
+            10,
+            None,
+            None,
+            vec![Block {
+                start: 0,
+                end: 10,
+                written: 3,
+            }],
+        );
+        saved.save_atomic(&legacy).unwrap();
+        let state = dir.path().join("nuevo").join("estado.json");
+        adopt_legacy_state(&dest, &state);
+        assert!(!legacy.exists());
+        assert_eq!(SavedState::load(&state).unwrap(), saved);
     }
 }

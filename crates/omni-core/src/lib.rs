@@ -45,7 +45,7 @@ pub use progress::{NetworkStats, Progress};
 pub use rate::RateLimit;
 pub use reqwest::header::HeaderMap;
 pub use servers::{ServerLimit, ServerLimits, ServerStatus};
-pub use state::state_path_for;
+pub use state::{legacy_state_path_for, part_path_for, state_path_for};
 
 /// Tamaño de bloque por defecto: 8 MiB.
 pub const DEFAULT_BLOCK_SIZE: u64 = 8 * 1024 * 1024;

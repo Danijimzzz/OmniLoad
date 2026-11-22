@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 
 use crate::paths::{Endpoint, Paths};
 use crate::types::{
-    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest,
+    AddLinksRequest, AddResponse, ErrorResponse, GrabberView, Ids, PriorityRequest, RemoveRequest,
     SpeedLimitRequest, Status, TakeRequest, TakeResponse,
 };
 use omni_grab::{Added, GrabCommand};
@@ -121,7 +121,23 @@ impl Client {
     }
 
     pub async fn remove(&self, ids: &[u64]) -> Result<(), ClientError> {
-        self.post("/jobs/remove", &Ids { ids: ids.to_vec() }).await
+        self.remove_with(ids, false, None).await
+    }
+
+    /// Quita descargas; con `files` borra también sus archivos (y la carpeta
+    /// si queda vacía, salvo `keep`).
+    pub async fn remove_with(
+        &self,
+        ids: &[u64],
+        files: bool,
+        keep: Option<std::path::PathBuf>,
+    ) -> Result<(), ClientError> {
+        let req = RemoveRequest {
+            ids: ids.to_vec(),
+            files,
+            keep,
+        };
+        self.post("/jobs/remove", &req).await
     }
 
     pub async fn set_priority(&self, ids: &[u64], priority: Priority) -> Result<(), ClientError> {

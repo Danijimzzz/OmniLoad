@@ -728,6 +728,15 @@ export component AppWindow inherits Window {
     in-out property <bool> notify-done: true;
     // Hay icono en la bandeja del sistema.
     in property <bool> tray-available: false;
+    // Versión y aviso de versión nueva.
+    in property <string> app-version;
+    // 0 sin comprobar, 1 comprobando, 2 al día, 3 hay una nueva, 4 aún no hay
+    // versiones publicadas, 5 error.
+    in property <int> update-state: 0;
+    in property <string> update-text;
+    in-out property <bool> check-updates: true;
+    callback check-updates-now();
+    callback open-release();
     in-out property <bool> watch-clipboard: true;
     in-out property <int> clip-popup: 1;
     in-out property <bool> package-folders: true;
@@ -778,7 +787,9 @@ export component AppWindow inherits Window {
     callback queue-settings-changed();
     callback sel-start();
     callback sel-stop();
-    callback sel-remove();
+    // Quitar la selección de Descargas; con `true` también borra los archivos.
+    callback sel-remove(bool);
+    in-out property <bool> remove-dialog-open: false;
     callback change-sel-priority(int);
     callback sel-open-folder();
 
@@ -898,6 +909,14 @@ export component AppWindow inherits Window {
                     color: Theme.text;
                     vertical-alignment: center;
                     horizontal-alignment: center;
+                }
+                if root.update-state == 3: Btn {
+                    y: (parent.height - self.height) / 2;
+                    text: "Hay una versión nueva";
+                    icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
+                    icon-color: Theme.ok;
+                    label: root.update-text;
+                    clicked => { root.settings-section = 2; root.tab = 2; }
                 }
                 Btn {
                     y: (parent.height - self.height) / 2;
@@ -1052,7 +1071,7 @@ export component AppWindow inherits Window {
                         HorizontalLayout {
                             spacing: 6px;
                             Btn { text: "Abrir carpeta"; clicked => { root.sel-open-folder(); } }
-                            Btn { text: "Quitar"; clicked => { root.sel-remove(); } }
+                            Btn { text: "Quitar"; clicked => { root.remove-dialog-open = true; } }
                         }
                         Rectangle { vertical-stretch: 1; }
                     }
@@ -1097,7 +1116,7 @@ export component AppWindow inherits Window {
                             selected => { root.change-sel-priority(self.current-index); }
                         }
                         Btn { text: "Abrir carpeta"; clicked => { root.sel-open-folder(); } }
-                        Btn { text: "Quitar"; clicked => { root.sel-remove(); } }
+                        Btn { text: "Quitar"; clicked => { root.remove-dialog-open = true; } }
                     }
                     HorizontalLayout {
                         spacing: 24px;
@@ -1330,7 +1349,7 @@ export component AppWindow inherits Window {
                         color: Theme.text;
                     }
                     Rectangle { height: 12px; }
-                    for s[i] in ["General", "Apariencia"]: Rectangle {
+                    for s[i] in ["General", "Apariencia", "Versión"]: Rectangle {
                         height: 40px;
                         border-radius: Theme.r2;
                         background: i == root.settings-section ? Theme.panel2 : transparent;
@@ -1455,6 +1474,37 @@ export component AppWindow inherits Window {
                         }
                     }
                   }
+                }
+
+                if root.settings-section == 2: VerticalLayout {
+                    padding: 28px;
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: "Versión"; font-size: 28px; font-weight: 700; color: Theme.text; }
+                    SettingRow {
+                        title: "OmniLoad " + root.app-version;
+                        subtitle: root.update-text;
+                        if root.update-state == 3: Btn {
+                            text: "Ver la versión nueva";
+                            primary: true;
+                            icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
+                            clicked => { root.open-release(); }
+                        }
+                        Btn {
+                            text: root.update-state == 1 ? "Comprobando…" : "Buscar actualizaciones";
+                            enabled: root.update-state != 1;
+                            clicked => { root.check-updates-now(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Buscar al abrir";
+                        subtitle: "Al abrir OmniLoad pregunta a GitHub cuál es la última versión y te avisa si hay una nueva. No descarga ni instala nada: tú decides si actualizas. Solo envía el nombre y el número de versión del programa.";
+                        Check {
+                            checked <=> root.check-updates;
+                            label: "Buscar actualizaciones al abrir";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
                 }
 
                 if root.settings-section == 1: apariencia := ScrollView {
@@ -1584,7 +1634,7 @@ export component AppWindow inherits Window {
                             }
                             SettingRow {
                                 title: "Cerrar el aviso automáticamente";
-                                subtitle: "1 s después de terminar la comprobación";
+                                subtitle: "Unos segundos después de terminar la comprobación se desvanece poco a poco (si pasas el ratón por encima, se queda)";
                                 Check {
                                     checked <=> root.clip-autoclose;
                                     label: "Cerrar el aviso automáticamente";
@@ -1593,6 +1643,55 @@ export component AppWindow inherits Window {
                             }
                         }
                 
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Diálogo "Quitar descargas" ----
+    if root.remove-dialog-open: Rectangle {
+        background: #00000066;
+        TouchArea { }
+        Panel {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(520px, parent.width - 40px);
+            height: 230px;
+            background: Theme.glass ? (Theme.dark ? #1c2236f2 : #fffffff2) : Theme.panel;
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text { text: "Quitar descargas"; font-size: 18px; font-weight: 700; color: Theme.text; }
+                Text {
+                    text: "«" + root.sel-title + "»";
+                    color: Theme.text;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                Text {
+                    text: "«Quitar de la lista» solo las saca de OmniLoad: los archivos descargados se quedan en tu carpeta. «Quitar y borrar archivos» también borra del disco lo descargado (y la carpeta del paquete si se queda vacía).";
+                    wrap: word-wrap;
+                    color: Theme.muted;
+                }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Btn {
+                        text: "Quitar y borrar archivos";
+                        icon: "M6 7h12M9 7V5h6v2M8 7l1 12h6l1-12";
+                        icon-color: Theme.err;
+                        clicked => { root.remove-dialog-open = false; root.sel-remove(true); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Btn {
+                        text: "Cancelar";
+                        clicked => { root.remove-dialog-open = false; }
+                    }
+                    Btn {
+                        text: "Quitar de la lista";
+                        primary: true;
+                        clicked => { root.remove-dialog-open = false; root.sel-remove(false); }
                     }
                 }
             }
@@ -1700,6 +1799,9 @@ export component ClipPopup inherits Window {
     background: transparent;
 
     in property <bool> compact: true;
+    // Desvanecerse para cerrarse (dura `fade-ms`; igual que popup::FADE).
+    in property <bool> fading: false;
+    property <duration> fade-ms: 1000ms;
     in property <[PopRow]> rows;
     in property <int> total;
     in property <int> ok;
@@ -1733,6 +1835,8 @@ export component ClipPopup inherits Window {
     hover := TouchArea { }
 
     Panel {
+        opacity: root.fading ? 0 : 1;
+        animate opacity { duration: root.fading ? root.fade-ms : 150ms; easing: ease-in-out; }
         background: Theme.glass ? (Theme.dark ? #1c2236f5 : #fffffff5) : Theme.panel;
         drop-shadow-blur: 0px;
         drop-shadow-offset-y: 0px;

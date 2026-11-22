@@ -4,8 +4,20 @@ use std::io;
 use std::path::Path;
 use std::process::Command;
 
+/// Abre una página web en el navegador del sistema (solo `https://`).
+pub fn open_url(url: &str) -> io::Result<()> {
+    if !url.starts_with("https://") {
+        return Err(io::Error::other("solo se abren enlaces https"));
+    }
+    open_with_system(Path::new(url))
+}
+
 /// Abre una carpeta en el explorador de archivos del sistema.
 pub fn open_folder(path: &Path) -> io::Result<()> {
+    open_with_system(path)
+}
+
+fn open_with_system(path: &Path) -> io::Result<()> {
     #[cfg(target_os = "windows")]
     let mut cmd = Command::new("explorer");
     #[cfg(target_os = "macos")]

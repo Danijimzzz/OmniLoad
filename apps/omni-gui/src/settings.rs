@@ -43,11 +43,13 @@ pub struct Settings {
     pub minimize_to_tray: bool,
     /// Notificación del sistema al terminar descargas.
     pub notify_done: bool,
+    /// Al abrir, mirar en GitHub si hay una versión nueva (solo avisa).
+    pub check_updates: bool,
     /// Ya se avisó una vez de que OmniLoad sigue en la bandeja.
     pub tray_hint_shown: bool,
     /// Aviso al copiar enlaces: 0 completo, 1 compacto, 2 desactivado.
     pub clip_popup: i32,
-    /// Cerrar el aviso 1 s después de terminar la comprobación.
+    /// Desvanecer y cerrar el aviso unos segundos después de terminar la comprobación.
     pub clip_popup_autoclose: bool,
     /// "Iniciar al añadir" del aviso completo.
     pub clip_popup_autostart: bool,
@@ -74,6 +76,7 @@ impl Default for Settings {
             close_to_tray: true,
             minimize_to_tray: true,
             notify_done: true,
+            check_updates: true,
             tray_hint_shown: false,
             clip_popup: 1,
             clip_popup_autoclose: true,
@@ -185,6 +188,7 @@ mod tests {
         assert!(s.close_to_tray);
         assert!(s.minimize_to_tray);
         assert!(s.notify_done);
+        assert!(s.check_updates);
         assert!(!s.tray_hint_shown);
     }
 
