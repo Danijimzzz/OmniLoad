@@ -1455,6 +1455,60 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             app.save_columns();
         }
     });
+    // Barra de título propia: mover, redimensionar, minimizar, maximizar, cerrar.
+    ui.on_win_drag({
+        let app = app.clone();
+        move || {
+            if let Some(ui) = app.ui() {
+                ui.window().with_winit_window(|w| {
+                    let _ = w.drag_window();
+                });
+            }
+        }
+    });
+    ui.on_win_resize({
+        let app = app.clone();
+        move |edge| {
+            use slint::winit_030::winit::window::ResizeDirection as D;
+            let dir = match edge {
+                0 => D::North,
+                1 => D::NorthEast,
+                2 => D::East,
+                3 => D::SouthEast,
+                4 => D::South,
+                5 => D::SouthWest,
+                6 => D::West,
+                _ => D::NorthWest,
+            };
+            if let Some(ui) = app.ui() {
+                ui.window().with_winit_window(|w| {
+                    let _ = w.drag_resize_window(dir);
+                });
+            }
+        }
+    });
+    ui.on_win_minimize({
+        let app = app.clone();
+        move || {
+            if let Some(ui) = app.ui() {
+                ui.window().set_minimized(true);
+            }
+        }
+    });
+    ui.on_win_toggle_maximize({
+        let app = app.clone();
+        move || {
+            if let Some(ui) = app.ui() {
+                let w = ui.window();
+                w.set_maximized(!w.is_maximized());
+                ui.set_maximized(w.is_maximized());
+            }
+        }
+    });
+    ui.on_win_close({
+        let app = app.clone();
+        move || app.close_requested()
+    });
     ui.on_speed_text_accepted({
         let app = app.clone();
         move |text| {
