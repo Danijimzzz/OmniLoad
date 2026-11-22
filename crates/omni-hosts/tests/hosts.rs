@@ -10,7 +10,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use omni_core::{Error, Network};
 use omni_grab::Found;
-use omni_hosts::{ArchiveOrg, Dropbox, Gofile, GoogleDrive, Hosts, Mediafire, Pixeldrain};
+use omni_hosts::{
+    ArchiveOrg, Dropbox, Gofile, GoogleDrive, Hosts, Mediafire, OneDrive, OneFichier, Pixeldrain,
+};
 use omni_queue::Resolver;
 use omni_testserver::{ServerConfig, TestServer, pseudo_random_bytes};
 use serde_json::{Value, json};
@@ -371,10 +373,12 @@ async fn standard_set_has_all_hosts() {
             "Google Drive",
             "Gofile",
             "yt-dlp",
+            "OneDrive",
+            "1fichier",
             "Torrent"
         ]
     );
-    assert_eq!(hosts.checkers().names().len(), 8);
+    assert_eq!(hosts.checkers().names().len(), 10);
 }
 
 // -------------------------------------------------------------- Google Drive
@@ -531,4 +535,146 @@ async fn gofile_uses_a_guest_token_and_walks_folders() {
     assert!(matches!(err, Error::LinkExpired { status: 404 }), "{err}");
     let err = check(&hosts, "https://gofile.io/d/pass").await.unwrap_err();
     assert!(err.to_string().contains("contraseña"), "{err}");
+}
+
+// ------------------------------------------------------------------ OneDrive
+
+#[tokio::test]
+async fn onedrive_files_and_folders() {
+    use base64::Engine;
+    fn link_of(tok: &str) -> String {
+        let b = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(tok.strip_prefix("u!").unwrap())
+            .unwrap();
+        String::from_utf8(b).unwrap()
+    }
+    let app = Router::new()
+        .route(
+            "/shares/{tok}/root",
+            get(|Path(tok): Path<String>| async move {
+                match link_of(&tok).as_str() {
+                    "https://1drv.ms/u/file1" => (
+                        StatusCode::OK,
+                        Json(json!({"name": "a.zip", "size": 10, "file": {}})),
+                    ),
+                    "https://1drv.ms/f/dir" => (
+                        StatusCode::OK,
+                        Json(json!({"name": "Carpeta", "size": 15, "folder": {"childCount": 2}})),
+                    ),
+                    _ => (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"error": {"code": "itemNotFound"}})),
+                    ),
+                }
+            }),
+        )
+        .route(
+            "/shares/{tok}/root/children",
+            get(|Path(_tok): Path<String>| async move {
+                Json(json!({"value": [
+                    {"id": "I1", "name": "x.bin", "size": 5, "file": {},
+                     "@content.downloadUrl": "https://dl.example/x"},
+                    {"id": "I2", "name": "sub", "folder": {}}
+                ]}))
+            }),
+        );
+    let api = serve(app).await;
+    let hosts = Hosts::empty().with(OneDrive::with_api(&api));
+
+    let Found::File(f) = check(&hosts, "https://1drv.ms/u/file1").await.unwrap() else {
+        panic!("se esperaba un archivo")
+    };
+    assert_eq!(f.filename, "a.zip");
+    assert_eq!(f.size, Some(10));
+    assert!(f.url.as_str().ends_with("/root/content"));
+
+    let Found::Folder { name, files } = check(&hosts, "https://1drv.ms/f/dir").await.unwrap()
+    else {
+        panic!("se esperaba una carpeta")
+    };
+    assert_eq!(name.as_deref(), Some("Carpeta"));
+    assert_eq!(files.len(), 1, "las subcarpetas no cuentan como archivos");
+    assert_eq!(files[0].url.as_str(), "https://1drv.ms/f/dir#omni-item=I1");
+
+    let resolver = hosts.resolver(client());
+    let cancel = CancellationToken::new();
+    let link = resolver
+        .resolve(files[0].url.as_str(), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(link.url, "https://dl.example/x");
+    let link = resolver
+        .resolve("https://1drv.ms/u/file1", &cancel)
+        .await
+        .unwrap();
+    assert!(link.url.contains("/shares/u!") && link.url.ends_with("/root/content"));
+
+    let err = check(&hosts, "https://1drv.ms/u/borrado")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::LinkExpired { status: 404 }), "{err}");
+}
+
+// ------------------------------------------------------------------ 1fichier
+
+#[tokio::test]
+async fn fichier_free_download_with_a_wait() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let posts = Arc::new(AtomicUsize::new(0));
+    let posts2 = posts.clone();
+    let page = |id: &str| {
+        if id == "gone00000000" {
+            return "<p>The requested file could not be found</p>".to_owned();
+        }
+        r#"<table><tr><td>Filename :</td><td class="normal">peli.mkv</td></tr>
+           <tr><td>Size :</td><td class="normal">2 GB</td></tr></table>
+           <form method="post"><input type="hidden" name="adz" value="XYZ"></form>"#
+            .to_owned()
+    };
+    let app = Router::new().route(
+        "/",
+        get(move |Query(q): Query<std::collections::HashMap<String, String>>| async move {
+            let id = q.keys().next().cloned().unwrap_or_default();
+            page(&id)
+        })
+        .post(move |body: String| {
+            let posts = posts2.clone();
+            async move {
+                assert!(body.contains("adz=XYZ"), "{body}");
+                if posts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    "<div>Warning ! You must wait 5 minutes before downloading</div>".to_owned()
+                } else {
+                    r#"<a href="https://a-1.1fichier.com/c987654321" class="ok btn-orange">Click</a>"#
+                        .to_owned()
+                }
+            }
+        }),
+    );
+    let base = serve(app).await;
+    let hosts = Hosts::empty().with(OneFichier::with_base(&base).without_waits());
+
+    let Found::File(f) = check(&hosts, "https://1fichier.com/?abcdefghij12")
+        .await
+        .unwrap()
+    else {
+        panic!("se esperaba un archivo")
+    };
+    assert_eq!(f.filename, "peli.mkv");
+    assert_eq!(f.size, Some(2_000_000_000));
+    let err = check(&hosts, "https://1fichier.com/?gone00000000")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::LinkExpired { status: 404 }), "{err}");
+
+    // La primera vez pide esperar; tras la espera da el enlace.
+    let link = hosts
+        .resolver(client())
+        .resolve(
+            "https://1fichier.com/?abcdefghij12",
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(link.url, "https://a-1.1fichier.com/c987654321");
+    assert_eq!(posts.load(Ordering::SeqCst), 2);
 }

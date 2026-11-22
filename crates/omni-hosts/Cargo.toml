@@ -15,7 +15,7 @@ omni-core.workspace = true
 omni-grab.workspace = true
 omni-queue.workspace = true
 percent-encoding.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "form"] }
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true

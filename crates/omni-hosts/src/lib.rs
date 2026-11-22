@@ -19,10 +19,12 @@
 
 mod archive;
 mod dropbox;
+mod fichier;
 mod gdrive;
 mod gofile;
 mod html;
 mod mediafire;
+mod onedrive;
 mod pixeldrain;
 mod torrent;
 mod ytdlp;
@@ -38,9 +40,11 @@ use url::Url;
 
 pub use archive::ArchiveOrg;
 pub use dropbox::Dropbox;
+pub use fichier::OneFichier;
 pub use gdrive::GoogleDrive;
 pub use gofile::Gofile;
 pub use mediafire::Mediafire;
+pub use onedrive::OneDrive;
 pub use pixeldrain::Pixeldrain;
 pub use torrent::Torrents;
 pub use ytdlp::YtDlp;
@@ -88,6 +92,8 @@ impl Hosts {
             .with(GoogleDrive::new())
             .with(Gofile::new())
             .with(YtDlp::new())
+            .with(OneDrive::new())
+            .with(OneFichier::new())
             .with(Torrents::new())
     }
 
