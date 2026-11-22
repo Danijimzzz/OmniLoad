@@ -292,6 +292,7 @@ impl Host for Gofile {
                 url: link,
                 headers: Self::headers(&token),
                 filename: Some(chosen.name.clone()),
+                ..ResolvedLink::default()
             })
         })
     }

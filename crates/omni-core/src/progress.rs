@@ -57,6 +57,15 @@ impl Progress {
             .clone()
     }
 
+    /// Para quien descarga por su cuenta (un programa externo como yt-dlp):
+    /// pone los bytes bajados y el total si se sabe.
+    pub fn report(&self, downloaded: u64, total: Option<u64>) {
+        self.downloaded.store(downloaded, Ordering::Relaxed);
+        if total.is_some() || self.total_known.load(Ordering::Relaxed) {
+            self.set_total(total.or_else(|| self.total()));
+        }
+    }
+
     pub(crate) fn set_total(&self, total: Option<u64>) {
         self.total.store(total.unwrap_or(0), Ordering::Relaxed);
         self.total_known.store(total.is_some(), Ordering::Relaxed);

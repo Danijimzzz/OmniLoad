@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use omni_core::DownloadOptions;
 use omni_queue::{
-    JobInfo, NewJob, Priority, Queue, QueueConfig, ResolveFuture, ResolvedLink, Resolver, State,
+    ExternalJob, JobInfo, NewJob, Priority, Queue, QueueConfig, ResolveFuture, ResolvedLink,
+    Resolver, State,
 };
 use omni_store::Store;
 use omni_testserver::{ServerConfig, TestServer, pseudo_random_bytes};
@@ -392,4 +393,78 @@ async fn schedule_blocks_and_releases_the_queue() {
     server.set_chunk_delay(None);
     q.update_settings(|s| s.schedule.enabled = false);
     wait_for(&q, id, State::Done).await;
+}
+
+/// Un programa externo (como yt-dlp) que descarga por su cuenta: aquí, un
+/// script de `sh` que cuenta el progreso y crea el archivo.
+#[cfg(unix)]
+struct Script(&'static str);
+
+#[cfg(unix)]
+impl Resolver for Script {
+    fn resolve<'a>(&'a self, _url: &'a str, _c: &'a CancellationToken) -> ResolveFuture<'a> {
+        Box::pin(async move {
+            Ok(ResolvedLink {
+                external: Some(ExternalJob {
+                    program: "sh".into(),
+                    args: vec!["-c".into(), self.0.into(), "sh".into(), "{dir}".into()],
+                    label: "script".into(),
+                }),
+                ..ResolvedLink::default()
+            })
+        })
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn external_program_downloads_and_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = QueueConfig::new(Arc::new(Store::open_in_memory().unwrap()));
+    cfg.base = fast_opts();
+    cfg.resolver = Arc::new(Script(
+        r#"echo "OMNI-PROGRESS 5 10"; printf 0123456789 > "$1/video.mp4"; echo "OMNI-FILE $1/video.mp4""#,
+    ));
+    let q = Queue::open(Handle::current(), cfg).unwrap();
+    let id = q
+        .add(new("https://youtube.test/v".into(), dir.path(), true))
+        .unwrap();
+    let done = wait_for(&q, id, State::Done).await;
+    assert_eq!(done.name, "video.mp4");
+    assert_eq!(
+        std::fs::read(dir.path().join("video.mp4")).unwrap().len(),
+        10
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn external_program_failure_shows_its_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = QueueConfig::new(Arc::new(Store::open_in_memory().unwrap()));
+    cfg.base = fast_opts();
+    cfg.resolver = Arc::new(Script(r#"echo "ERROR: Video unavailable" >&2; exit 1"#));
+    let q = Queue::open(Handle::current(), cfg).unwrap();
+    let id = q
+        .add(new("https://youtube.test/v".into(), dir.path(), true))
+        .unwrap();
+    let failed = wait_for(&q, id, State::Failed).await;
+    assert!(failed.detail.contains("Video unavailable"), "{failed:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pausing_kills_the_external_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = QueueConfig::new(Arc::new(Store::open_in_memory().unwrap()));
+    cfg.base = fast_opts();
+    cfg.resolver = Arc::new(Script(r#"echo "OMNI-PROGRESS 1 100"; sleep 60"#));
+    let q = Queue::open(Handle::current(), cfg).unwrap();
+    let id = q
+        .add(new("https://youtube.test/v".into(), dir.path(), true))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(row(&q, id).state.is_active());
+    q.stop(&[id]);
+    wait_for(&q, id, State::Paused).await;
 }

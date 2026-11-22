@@ -25,3 +25,5 @@ url.workspace = true
 [dev-dependencies]
 axum.workspace = true
 omni-testserver.workspace = true
+omni-store.workspace = true
+tempfile.workspace = true

@@ -740,6 +740,11 @@ impl Inner {
             _ = cancel.cancelled() => return Err(Error::Cancelled),
             r = self.resolver.resolve(url, &cancel) => r?,
         };
+        if let Some(job) = link.external {
+            // Lo descarga un programa externo; el progreso que ve la
+            // interfaz es el que él va diciendo.
+            return crate::external::run(job, &dir, shown, cancel).await;
+        }
         opts.headers.extend(link.headers);
         let dest = match link.filename {
             Some(name) => Destination::File(dir.join(omni_core::filename::sanitize(&name))),

@@ -24,6 +24,7 @@ mod gofile;
 mod html;
 mod mediafire;
 mod pixeldrain;
+mod ytdlp;
 
 use std::sync::Arc;
 
@@ -40,6 +41,7 @@ pub use gdrive::GoogleDrive;
 pub use gofile::Gofile;
 pub use mediafire::Mediafire;
 pub use pixeldrain::Pixeldrain;
+pub use ytdlp::YtDlp;
 
 /// Un host de descarga.
 pub trait Host: Send + Sync + 'static {
@@ -83,6 +85,7 @@ impl Hosts {
             .with(Mediafire::new())
             .with(GoogleDrive::new())
             .with(Gofile::new())
+            .with(YtDlp::new())
     }
 
     /// Añade un plugin. Los añadidos antes tienen preferencia.

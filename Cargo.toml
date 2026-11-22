@@ -60,7 +60,7 @@ slint = "~1.16"
 slint-build = "~1.16"
 tempfile = "3"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "net", "signal", "process", "io-util"] }
 tokio-util = "0.7"
 tracing = "0.1"
 # Bandeja del sistema en Windows y macOS (Win32 y AppKit, sin navegador).
