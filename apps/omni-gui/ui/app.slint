@@ -71,8 +71,8 @@ export global Theme {
     // Cuadros de texto y selectores: algo más hundidos que el panel.
     out property <color> field: [#ffffffb3, #0f1424a6, #ffffff, #181b20, #000000][pal];
     // Barra de título: se funde con la ventana en cada tema.
-    out property <color> bar: [#ffffff40, #ffffff0a, #f3f4f7, #1a1d22, #000000][eff];
-    out property <color> bar-line: [#141e3c14, #ffffff14, #d9dde4, #2b3039, #ffffff][eff];
+    out property <color> bar: [#ffffffb3, #1c2236b0, #f3f4f7, #1a1d22, #000000][eff];
+    out property <color> bar-line: [#141e3c24, #ffffff1f, #d9dde4, #2b3039, #ffffff][eff];
     // Anillo de foco (teclado) y halo del campo enfocado.
     out property <color> ring: accent.with-alpha(0.55);
     // Fondo (opaco) de los menús desplegables.
@@ -220,6 +220,7 @@ component LineEdit inherits Rectangle {
         spacing: 6px;
         Rectangle {
             horizontal-stretch: 1;
+            min-width: 0px;
             clip: true;
             if input.text == "" && root.placeholder-text != "": Text {
                 text: root.placeholder-text;
@@ -228,18 +229,33 @@ component LineEdit inherits Rectangle {
                 vertical-alignment: center;
                 overflow: elide;
             }
-            input := TextInput {
-                width: parent.width;
-                height: parent.height;
-                single-line: true;
-                enabled: root.enabled;
-                font-size: Theme.font;
-                color: Theme.text;
-                vertical-alignment: center;
-                selection-background-color: Theme.accent.with-alpha(0.35);
-                selection-foreground-color: Theme.text;
-                edited => { root.edited(self.text); }
-                accepted => { root.accepted(self.text); }
+            // El texto largo se desplaza dentro de la caja (no se sale de ella).
+            flick := Flickable {
+                interactive: false;
+                viewport-width: input.width;
+                viewport-height: self.height;
+                input := TextInput {
+                    x: 0px;
+                    y: 0px;
+                    width: max(flick.width, self.preferred-width + 2px);
+                    height: flick.height;
+                    single-line: true;
+                    enabled: root.enabled;
+                    font-size: Theme.font;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                    selection-background-color: Theme.accent.with-alpha(0.35);
+                    selection-foreground-color: Theme.text;
+                    edited => { root.edited(self.text); }
+                    accepted => { root.accepted(self.text); }
+                    cursor-position-changed(p) => {
+                        if p.x + flick.viewport-x < 0px {
+                            flick.viewport-x = -p.x;
+                        } else if p.x + flick.viewport-x > flick.width - 3px {
+                            flick.viewport-x = -(p.x - flick.width + 3px);
+                        }
+                    }
+                }
             }
         }
         if root.clearable && input.text != "": VerticalLayout {
@@ -532,17 +548,15 @@ component ColsHeader inherits Rectangle {
     // Nuevo ancho (absoluto) de la columna `i` mientras se arrastra su borde.
     callback resize(int, length);
     callback resize-done();
-    callback reorder(int, int);
+    // Columna que se suelta y posición del ratón dentro de la cabecera.
+    callback reorder(int, length);
     in-out property <int> dragging: -1;
-    in-out property <int> drop-from: -1;
     in-out property <length> pointer-x;
-    in-out property <int> drop-seq: 0;
     height: 34px;
     background: Theme.head;
     HorizontalLayout {
         for c[i] in root.cols: ColSlot {
             spec: c;
-            property <int> seq: root.drop-seq;
             property <bool> hot: root.dragging >= 0 && root.dragging != i
                 && root.pointer-x >= self.absolute-position.x
                 && root.pointer-x < self.absolute-position.x + self.width;
@@ -551,13 +565,6 @@ component ColsHeader inherits Rectangle {
             property <length> w0;
             property <length> x0;
             property <bool> sizing: false;
-            changed seq => {
-                if root.drop-from >= 0 && root.drop-from != i
-                    && root.pointer-x >= self.absolute-position.x
-                    && root.pointer-x < self.absolute-position.x + self.width {
-                    root.reorder(root.drop-from, i);
-                }
-            }
             Rectangle {
                 background: root.dragging == i ? Theme.accent.with-alpha(0.28)
                     : hot ? Theme.accent.with-alpha(0.16)
@@ -595,9 +602,8 @@ component ColsHeader inherits Rectangle {
                             press-x = self.absolute-position.x + self.mouse-x;
                         } else if e.kind == PointerEventKind.up {
                             if root.dragging == i {
-                                root.drop-from = i;
                                 root.dragging = -1;
-                                root.drop-seq += 1;
+                                root.reorder(i, root.pointer-x - root.absolute-position.x);
                             }
                             pressing = false;
                         }
@@ -702,14 +708,14 @@ export global DlCols {
     in-out property <[ColState]> cols;
     callback resize(int, length);
     callback resize-done();
-    callback reorder(int, int);
+    callback reorder(int, length);
 }
 
 export global GrabCols {
     in-out property <[ColState]> cols;
     callback resize(int, length);
     callback resize-done();
-    callback reorder(int, int);
+    callback reorder(int, length);
 }
 
 component DlLine inherits Rectangle {
@@ -1417,7 +1423,7 @@ export component AppWindow inherits Window {
     no-frame: true;
     preferred-width: 1280px;
     preferred-height: 800px;
-    min-width: 980px;
+    min-width: 1100px;
     min-height: 560px;
     background: Theme.wall;
     default-font-family: "Inter";
@@ -1814,6 +1820,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Panel {
                     horizontal-stretch: 1;
+                    min-width: 0px;
                     clip: true;
                     VerticalLayout {
                         ColsHeader {
@@ -1990,6 +1997,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Panel {
                     horizontal-stretch: 1;
+                    min-width: 0px;
                     clip: true;
                     VerticalLayout {
                         ColsHeader {

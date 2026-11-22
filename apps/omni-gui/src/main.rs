@@ -1446,13 +1446,28 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             });
             ui.global::<$global>().on_reorder({
                 let app = app.clone();
-                move |from, to| {
-                    let (from, to) = (from as usize, to as usize);
-                    let n = app.$rows.row_count();
-                    if from >= n || to >= n || from == to {
+                move |from, x| {
+                    let from = from as usize;
+                    let mut all: Vec<ColState> = app.$rows.iter().collect();
+                    if from >= all.len() {
                         return;
                     }
-                    let mut all: Vec<ColState> = app.$rows.iter().collect();
+                    // Destino: la columna visible sobre la que se suelta.
+                    let mut edge = 0.0;
+                    let mut to = None;
+                    for (i, c) in all.iter().enumerate() {
+                        if c.shown {
+                            edge += c.width;
+                            if x < edge {
+                                to = Some(i);
+                                break;
+                            }
+                        }
+                    }
+                    let to = to.unwrap_or_else(|| all.iter().rposition(|c| c.shown).unwrap_or(0));
+                    if to == from {
+                        return;
+                    }
                     let c = all.remove(from);
                     all.insert(to, c);
                     app.$rows.set_vec(all);
