@@ -417,14 +417,6 @@ impl App {
             self.show_window();
             self.open_args(args);
         }
-        // Minimizar = esconder en la bandeja, si así se eligió.
-        if !self.hidden.get()
-            && self.settings.borrow().minimize_to_tray
-            && self.tray_available()
-            && self.ui().is_some_and(|ui| ui.window().is_minimized())
-        {
-            self.hide_to_tray();
-        }
     }
 
     /// El botón de cerrar de la ventana.
@@ -1551,7 +1543,15 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
         let app = app.clone();
         move || {
             if let Some(ui) = app.ui() {
-                ui.window().set_minimized(true);
+                // Solo el botón de la propia barra esconde en la bandeja. Una
+                // minimización de fuera (Win+D, la barra de tareas) deja la
+                // ventana minimizada de verdad, para que el sistema pueda
+                // restaurarla.
+                if app.settings.borrow().minimize_to_tray && app.tray_available() {
+                    app.hide_to_tray();
+                } else {
+                    ui.window().set_minimized(true);
+                }
             }
         }
     });

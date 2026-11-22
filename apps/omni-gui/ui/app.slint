@@ -72,6 +72,7 @@ export global Theme {
     out property <color> field: [#ffffffb3, #0f1424a6, #ffffff, #181b20, #000000][pal];
     // Barra de título: se funde con la ventana en cada tema.
     out property <color> bar: [#ffffffb3, #1c2236b0, #f3f4f7, #1a1d22, #000000][eff];
+    out property <color> window-edge: [#141e3c59, #ffffff47, #aeb5c2, #4a5160, #ffffff][eff];
     out property <color> bar-line: [#141e3c24, #ffffff1f, #d9dde4, #2b3039, #ffffff][eff];
     // Anillo de foco (teclado) y halo del campo enfocado.
     out property <color> ring: accent.with-alpha(0.55);
@@ -2850,6 +2851,15 @@ export component AppWindow inherits Window {
         minimize => { root.win-minimize(); }
         toggle-maximize => { root.win-toggle-maximize(); }
         close => { root.win-close(); }
+    }
+    // Borde fino de toda la ventana (encima de todo, sin capturar el ratón).
+    Rectangle {
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        border-width: root.maximized ? 0px : 1px;
+        border-color: Theme.window-edge;
     }
     if !root.maximized: Rectangle {
         // 0 N, 1 NE, 2 E, 3 SE, 4 S, 5 SW, 6 W, 7 NW.
