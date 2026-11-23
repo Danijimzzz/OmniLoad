@@ -33,56 +33,94 @@ export global Theme {
     out property <float> fscale: [0.9, 1.0, 1.15][font-level];
     out property <length> shadow-blur: [14px, 32px, 56px][blur-level];
 
+    // ---- Colores y transparencias del usuario (encima del tema) ----
+    // Cada color personalizado tiene su valor y un «activo»: apagado, manda el tema.
+    in-out property <bool> c-accent-on: false;
+    in-out property <color> c-accent: #3b82f6;
+    in-out property <bool> c-bg-on: false;
+    in-out property <color> c-bg: #eef1f6;
+    in-out property <bool> c-panel-on: false;
+    in-out property <color> c-panel: #ffffff;
+    in-out property <bool> c-text-on: false;
+    in-out property <color> c-text: #14181f;
+    in-out property <bool> c-bar-on: false;
+    in-out property <color> c-bar: #3b82f6;
+    in-out property <bool> c-ok-on: false;
+    in-out property <color> c-ok: #127a46;
+    in-out property <bool> c-warn-on: false;
+    in-out property <color> c-warn: #93560a;
+    in-out property <bool> c-err-on: false;
+    in-out property <color> c-err: #b3261e;
+    in-out property <bool> c-alt-on: false;
+    in-out property <color> c-alt: #7f8cb02e;
+    in-out property <bool> c-sel-on: false;
+    in-out property <color> c-sel: #3b82f640;
+    // Opacidad de los paneles (20 a 100) y fuerza de los brillos del fondo (0 a 100).
+    in-out property <int> panel-opacity: 100;
+    in-out property <int> glow: 100;
+    // Esquinas y bordes: 0, 1 (normal), 2.
+    in-out property <int> radius-level: 1;
+    in-out property <int> border-level: 1;
+    // Icono de la aplicación (lo pone el programa según lo elegido en Ajustes).
+    in-out property <image> app-icon: @image-url("icon.png");
+
     // Tema efectivo: con "según el sistema", cada tema pasa a su pareja
     // clara u oscura (Cristal claro ↔ Cristal oscuro, Claro ↔ Grafito).
     out property <int> eff: !follow-system || kind == 4 ? kind
         : kind <= 1 ? (system-dark ? 1 : 0)
         : (system-dark ? 3 : 2);
-    out property <bool> dark: eff == 1 || eff == 3 || eff == 4;
+    out property <bool> dark0: eff == 1 || eff == 3 || eff == 4;
+    // Con un fondo propio, claro u oscuro lo decide su luminosidad.
+    out property <bool> dark: c-bg-on ? (c-bg.red * 299 + c-bg.green * 587 + c-bg.blue * 114) < 128000 : dark0;
     out property <bool> glass: eff <= 1 && !reduce-transparency;
     // Paleta de los paneles: "Reducir transparencia" usa la plana equivalente.
     out property <int> pal: glass || eff > 1 ? eff : (eff == 0 ? 2 : 3);
+    out property <float> po: panel-opacity / 100.0;
 
-    out property <color> wall: [#eef1f6, #0d1017, #eef0f3, #121418, #000000][eff];
-    out property <color> blob1: [#78a0f029, #5078dc1f, #00000000, #00000000, #00000000][eff];
-    out property <color> blob2: [#beaaf01f, #8c64dc17, #00000000, #00000000, #00000000][eff];
-    out property <color> panel: [#ffffff80, #1c223685, #ffffff, #1c1f25, #000000][pal];
-    out property <color> panel2: [#ffffff5c, #28304a61, #f7f8fa, #22262d, #0d0d0d][pal];
-    out property <color> head: [#ffffff8c, #323a5880, #f3f4f7, #252930, #000000][pal];
+    out property <color> wall: c-bg-on ? c-bg : [#eef1f6, #0d1017, #eef0f3, #121418, #000000][eff];
+    out property <color> blob1: [#78a0f029, #5078dc1f, #00000000, #00000000, #00000000][eff].transparentize(1 - glow / 100.0);
+    out property <color> blob2: [#beaaf01f, #8c64dc17, #00000000, #00000000, #00000000][eff].transparentize(1 - glow / 100.0);
+    out property <color> panel: (c-panel-on ? c-panel : [#ffffff80, #1c223685, #ffffff, #1c1f25, #000000][pal]).transparentize(1 - po);
+    out property <color> panel2: (c-panel-on ? c-panel.mix(text, 0.05) : [#ffffff5c, #28304a61, #f7f8fa, #22262d, #0d0d0d][pal]).transparentize(1 - po);
+    out property <color> head: (c-panel-on ? c-panel.mix(text, 0.08) : [#ffffff8c, #323a5880, #f3f4f7, #252930, #000000][pal]).transparentize(1 - po);
     out property <color> rim: [#ffffffc7, #ffffff29, #d9dde4, #323844, #ffffff][pal];
     out property <color> spec: [#fffffff2, #ffffff42, #00000000, #00000000, #00000000][pal];
     out property <color> shadow: [#1e285029, #00000073, #0000000d, #00000000, #00000000][pal];
-    out property <color> text: [#0d1424, #f2f5fb, #14181f, #e9ecf2, #ffffff][pal];
-    out property <color> muted: [#3e4a5f, #b3bdd0, #4f5867, #a3acbb, #e6e6e6][pal];
+    out property <color> text: c-text-on ? c-text : [#0d1424, #f2f5fb, #14181f, #e9ecf2, #ffffff][pal];
+    out property <color> muted: c-text-on ? c-text.mix(wall, 0.35) : [#3e4a5f, #b3bdd0, #4f5867, #a3acbb, #e6e6e6][pal];
     out property <color> line: [#141e3c1a, #ffffff14, #e8eaef, #2b3039, #666666][pal];
     out property <color> track: [#141e3c1f, #ffffff24, #e3e6ec, #323844, #4d4d4d][pal];
 
-    out property <color> accent: eff == 4 ? #ffd400 : dark
+    out property <color> accent: c-accent-on ? c-accent : eff == 4 ? #ffd400 : dark
         ? [#6fb1ff, #b39bff, #5fd49a, #ffab6b, #ff8fc0, #c9d1de][accent-index]
         : [#0a5fd0, #6a3fd6, #137a4b, #b4500a, #b8306a, #3d4654][accent-index];
-    out property <color> on-accent: eff == 4 ? #000000 : dark ? #06142b : #ffffff;
-    out property <color> selbg: eff == 4 ? #332b00 : accent.with-alpha(0.16);
-    out property <color> ok: eff == 4 ? #6dff9e : dark ? #5fd49a : #127a46;
-    out property <color> warn: eff == 4 ? #ffd400 : dark ? #f3b860 : #93560a;
-    out property <color> err: eff == 4 ? #ff7b7b : dark ? #ff8a80 : #b3261e;
+    // Texto sobre el acento: oscuro si el acento es claro y claro si es oscuro.
+    out property <color> on-accent: (accent.red * 299 + accent.green * 587 + accent.blue * 114) > 150000 ? #06142b : #ffffff;
+    out property <color> selbg: c-sel-on ? c-sel : eff == 4 ? #332b00 : accent.with-alpha(0.16);
+    out property <color> bar-fill: c-bar-on ? c-bar : accent;
+    out property <color> alt-row: c-alt-on ? c-alt : transparent;
+    out property <color> ok: c-ok-on ? c-ok : eff == 4 ? #6dff9e : dark ? #5fd49a : #127a46;
+    out property <color> warn: c-warn-on ? c-warn : eff == 4 ? #ffd400 : dark ? #f3b860 : #93560a;
+    out property <color> err: c-err-on ? c-err : eff == 4 ? #ff7b7b : dark ? #ff8a80 : #b3261e;
 
     // Capas de estado (pasar el ratón, pulsar) que funcionan en cualquier tema:
     // una película del color del texto sobre lo que haya debajo.
     out property <color> hover: text.with-alpha(eff == 4 ? 0.22 : 0.07);
     out property <color> press: text.with-alpha(eff == 4 ? 0.34 : 0.13);
     // Cuadros de texto y selectores: algo más hundidos que el panel.
-    out property <color> field: [#ffffffb3, #0f1424a6, #ffffff, #181b20, #000000][pal];
+    out property <color> field: (c-panel-on ? c-panel.mix(wall, 0.4) : [#ffffffb3, #0f1424a6, #ffffff, #181b20, #000000][pal]).transparentize(1 - po);
     // Barra de título: se funde con la ventana en cada tema.
-    out property <color> bar: [#ffffffb3, #1c2236b0, #f3f4f7, #1a1d22, #000000][eff];
+    out property <color> bar: c-bg-on ? c-bg.mix(text, 0.04) : [#ffffffb3, #1c2236b0, #f3f4f7, #1a1d22, #000000][eff];
     out property <color> window-edge: [#141e3c59, #ffffff47, #aeb5c2, #4a5160, #ffffff][eff];
     out property <color> bar-line: [#141e3c24, #ffffff1f, #d9dde4, #2b3039, #ffffff][eff];
     // Anillo de foco (teclado) y halo del campo enfocado.
     out property <color> ring: accent.with-alpha(0.55);
     // Fondo (opaco) de los menús desplegables.
-    out property <color> menu-bg: eff == 4 ? #000000 : eff == 1 ? #1c2236 : eff == 3 ? #22262d : #ffffff;
-    out property <length> r: eff <= 1 ? 18px : eff == 4 ? 2px : 8px;
-    out property <length> r2: eff <= 1 ? 10px : eff == 4 ? 2px : 6px;
-    out property <length> lw: eff == 4 ? 2px : 1px;
+    out property <color> menu-bg: c-panel-on ? c-panel : c-bg-on ? c-bg.mix(text, 0.06) : eff == 4 ? #000000 : eff == 1 ? #1c2236 : eff == 3 ? #22262d : #ffffff;
+    out property <float> rk: [0.3, 1.0, 1.7][radius-level];
+    out property <length> r: (eff <= 1 ? 18px : eff == 4 ? 2px : 8px) * (eff == 4 ? 1.0 : rk);
+    out property <length> r2: (eff <= 1 ? 10px : eff == 4 ? 2px : 6px) * (eff == 4 ? 1.0 : rk);
+    out property <length> lw: (eff == 4 ? 2px : 1px) * [0.5, 1.0, 2.0][border-level];
     out property <length> row-h: (compact ? 26px : 34px) * fscale;
     out property <length> font: (compact ? 12.5px : 13px) * fscale;
 
@@ -132,6 +170,19 @@ export struct GrabTreeRow {
     tone: int,
     priority: string,
     dest: string,
+}
+
+// Un estilo de icono con su miniatura y un color de la lista de iconos.
+export struct IconStyle {
+    name: string,
+    image: image,
+}
+
+export struct IconPal {
+    idx: int,
+    name: string,
+    c1: color,
+    c2: color,
 }
 
 export struct Stat {
@@ -513,7 +564,7 @@ component Sep inherits Rectangle {
 component Bar inherits Rectangle {
     in property <float> fraction;
     in property <string> text;
-    in property <color> fill: Theme.accent;
+    in property <color> fill: Theme.bar-fill;
     height: [8px, 18px, 26px][Theme.bar-style];
     border-radius: self.height / 2;
     background: Theme.track;
@@ -891,12 +942,13 @@ export global GrabCols {
 }
 
 component DlLine inherits Rectangle {
+    in property <bool> odd;
     in property <DlRow> item;
     in property <[ColState]> cols;
     callback clicked();
     callback toggle();
     height: Theme.row-h;
-    background: item.selected ? Theme.selbg : touch.has-hover ? Theme.hover : item.is-package ? Theme.panel2 : transparent;
+    background: item.selected ? Theme.selbg : touch.has-hover ? Theme.hover : item.is-package ? Theme.panel2 : odd ? Theme.alt-row : transparent;
     animate background { duration: 70ms; }
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
@@ -933,7 +985,7 @@ component DlLine inherits Rectangle {
                 Bar {
                     fraction: item.fraction;
                     text: item.progress;
-                    fill: Theme.tone(item.tone);
+                    fill: item.tone == 0 ? Theme.bar-fill : Theme.tone(item.tone);
                 }
             }
             if c.id == 4: Cell { x: 12px; width: parent.width - 16px; text: item.speed; }
@@ -956,13 +1008,14 @@ component DlLine inherits Rectangle {
 }
 
 component GrabLine inherits Rectangle {
+    in property <bool> odd;
     in property <GrabTreeRow> item;
     in property <[ColState]> cols;
     callback clicked();
     callback toggle();
     callback check(bool);
     height: Theme.row-h;
-    background: item.selected ? Theme.selbg : touch.has-hover ? Theme.hover : item.is-package ? Theme.panel2 : transparent;
+    background: item.selected ? Theme.selbg : touch.has-hover ? Theme.hover : item.is-package ? Theme.panel2 : odd ? Theme.alt-row : transparent;
     animate background { duration: 70ms; }
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
@@ -1191,6 +1244,86 @@ component Swatch inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.picked(); }
     }
+}
+
+// Deslizador propio (0 a 1): `moved` solo se llama cuando lo mueve el usuario.
+component Slide inherits Rectangle {
+    in-out property <float> value;
+    in property <brush> back: Theme.track;
+    in property <brush> fill: Theme.accent;
+    in property <bool> filled: true;
+    callback moved(float);
+    accessible-role: slider;
+    accessible-value: Math.round(root.value * 100) + " %";
+    height: 24px;
+    min-width: 140px;
+    horizontal-stretch: 1;
+    function update() {
+        root.value = Math.clamp((ta.mouse-x - 9px) / (root.width - 18px), 0, 1);
+        root.moved(root.value);
+    }
+    Rectangle {
+        y: (parent.height - 8px) / 2;
+        height: 8px;
+        border-radius: 4px;
+        background: root.back;
+        if root.filled: Rectangle {
+            x: 0px;
+            width: 9px + (parent.width - 18px) * root.value;
+            border-radius: 4px;
+            background: root.fill;
+        }
+    }
+    Rectangle {
+        x: (root.width - 18px) * root.value;
+        y: (parent.height - 18px) / 2;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: #ffffff;
+        border-width: 2px;
+        border-color: Theme.text.with-alpha(0.55);
+        drop-shadow-blur: 4px;
+        drop-shadow-color: #00000040;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => { if e.kind == PointerEventKind.down && e.button == PointerEventButton.left { root.update(); } }
+        moved => { if self.pressed { root.update(); } }
+    }
+}
+
+// Casilla de color de la lista de colores personalizables.
+component ColorChip inherits Rectangle {
+    in property <color> c;
+    in property <bool> custom;
+    in property <bool> selected;
+    in property <string> name;
+    callback picked();
+    accessible-role: button;
+    accessible-label: name;
+    width: 76px;
+    height: 32px;
+    border-radius: Theme.r2;
+    background: Theme.field;
+    border-width: selected ? 2px : Theme.lw;
+    border-color: selected ? Theme.accent : Theme.rim;
+    HorizontalLayout {
+        padding: 4px;
+        spacing: 6px;
+        Rectangle {
+            width: 24px;
+            border-radius: Theme.r2 - 3px;
+            background: root.c;
+            border-width: 1px;
+            border-color: Theme.text.with-alpha(0.3);
+        }
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.custom ? @tr("Mío") : @tr("Tema"); font-size: 11px * Theme.fscale; color: Theme.muted; }
+        }
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { root.picked(); } }
 }
 
 component TabBtn inherits Rectangle {
@@ -1543,7 +1676,7 @@ component TitleBar inherits Rectangle {
         spacing: 8px;
         VerticalLayout {
             alignment: center;
-            Image { width: 18px; height: 18px; source: @image-url("icon.png"); image-fit: contain; }
+            Image { width: 18px; height: 18px; source: Theme.app-icon; image-fit: contain; }
         }
         Text { text: root.title-text; font-size: 12px * Theme.fscale; color: Theme.muted; vertical-alignment: center; }
         Rectangle { horizontal-stretch: 1; }
@@ -1570,7 +1703,7 @@ component ResizeEdge inherits TouchArea {
 
 export component AppWindow inherits Window {
     title: @tr("OmniLoad");
-    icon: @image-url("icon.png");
+    icon: Theme.app-icon;
     no-frame: true;
     preferred-width: 1280px;
     preferred-height: 800px;
@@ -1747,6 +1880,82 @@ export component AppWindow inherits Window {
     callback pkg-remove();
 
     callback settings-changed();
+
+    // ---- Colores, transparencias e icono personalizados ----
+    // Color que se está editando (0 acento … 9 fila seleccionada; -1 ninguno).
+    in-out property <int> editing: -1;
+    in-out property <string> editor-hex;
+    pure callback to-hex(color) -> string;
+    callback hex-typed(int, string);
+    // Combinaciones guardadas.
+    in property <[string]> look-names;
+    in-out property <string> look-name-text;
+    callback look-save(string);
+    callback look-apply(int);
+    callback look-delete(int);
+    callback look-export();
+    callback look-import();
+    callback look-reset();
+    // Icono de la aplicación: estilo y colores.
+    in property <[IconStyle]> icon-styles;
+    in property <[IconPal]> icon-pals-a;
+    in property <[IconPal]> icon-pals-b;
+    in-out property <int> icon-style: 0;
+    in-out property <int> icon-palette: 0;
+    callback icon-changed();
+    // Valor que se enseña en el editor para el color `id` (el propio o el del tema).
+    function edit-value(id: int) -> color {
+        if id == 0 { return Theme.c-accent-on ? Theme.c-accent : Theme.accent; }
+        if id == 1 { return Theme.c-bg-on ? Theme.c-bg : Theme.wall; }
+        if id == 2 { return Theme.c-panel-on ? Theme.c-panel : Theme.panel.with-alpha(1.0); }
+        if id == 3 { return Theme.c-text-on ? Theme.c-text : Theme.text; }
+        if id == 4 { return Theme.c-bar-on ? Theme.c-bar : Theme.accent; }
+        if id == 5 { return Theme.c-ok-on ? Theme.c-ok : Theme.ok; }
+        if id == 6 { return Theme.c-warn-on ? Theme.c-warn : Theme.warn; }
+        if id == 7 { return Theme.c-err-on ? Theme.c-err : Theme.err; }
+        if id == 8 { return Theme.c-alt-on ? Theme.c-alt.with-alpha(1.0) : Theme.muted; }
+        return Theme.c-sel-on ? Theme.c-sel.with-alpha(1.0) : Theme.accent;
+    }
+    function is-custom(id: int) -> bool {
+        if id == 0 { return Theme.c-accent-on; }
+        if id == 1 { return Theme.c-bg-on; }
+        if id == 2 { return Theme.c-panel-on; }
+        if id == 3 { return Theme.c-text-on; }
+        if id == 4 { return Theme.c-bar-on; }
+        if id == 5 { return Theme.c-ok-on; }
+        if id == 6 { return Theme.c-warn-on; }
+        if id == 7 { return Theme.c-err-on; }
+        if id == 8 { return Theme.c-alt-on; }
+        return Theme.c-sel-on;
+    }
+    function set-color(id: int, c: color) {
+        if id == 0 { Theme.c-accent = c; Theme.c-accent-on = true; }
+        else if id == 1 { Theme.c-bg = c; Theme.c-bg-on = true; }
+        else if id == 2 { Theme.c-panel = c; Theme.c-panel-on = true; }
+        else if id == 3 { Theme.c-text = c; Theme.c-text-on = true; }
+        else if id == 4 { Theme.c-bar = c; Theme.c-bar-on = true; }
+        else if id == 5 { Theme.c-ok = c; Theme.c-ok-on = true; }
+        else if id == 6 { Theme.c-warn = c; Theme.c-warn-on = true; }
+        else if id == 7 { Theme.c-err = c; Theme.c-err-on = true; }
+        else if id == 8 { Theme.c-alt = c.with-alpha(0.18); Theme.c-alt-on = true; }
+        else { Theme.c-sel = c.with-alpha(0.25); Theme.c-sel-on = true; }
+        root.editor-hex = root.to-hex(c);
+        root.settings-changed();
+    }
+    function clear-color(id: int) {
+        if id == 0 { Theme.c-accent-on = false; }
+        else if id == 1 { Theme.c-bg-on = false; }
+        else if id == 2 { Theme.c-panel-on = false; }
+        else if id == 3 { Theme.c-text-on = false; }
+        else if id == 4 { Theme.c-bar-on = false; }
+        else if id == 5 { Theme.c-ok-on = false; }
+        else if id == 6 { Theme.c-warn-on = false; }
+        else if id == 7 { Theme.c-err-on = false; }
+        else if id == 8 { Theme.c-alt-on = false; }
+        else { Theme.c-sel-on = false; }
+        root.editor-hex = root.to-hex(root.edit-value(id));
+        root.settings-changed();
+    }
     callback choose-download-dir();
 
     private property <[string]> priorities: ["Alta", "Normal", "Baja"];
@@ -1787,7 +1996,7 @@ export component AppWindow inherits Window {
             height: 52px;
             HorizontalLayout {
                 padding: 7px;
-                padding-left: 12px;
+                padding-left: 20px;
                 spacing: 6px;
                 // Dentro de un HorizontalLayout la `y` se ignora: el logo va en un
                 // VerticalLayout que lo centra.
@@ -1796,7 +2005,7 @@ export component AppWindow inherits Window {
                     Image {
                         width: 26px;
                         height: 26px;
-                        source: @image-url("icon.png");
+                        source: Theme.app-icon;
                         image-fit: contain;
                         accessible-role: image;
                         accessible-label: @tr("OmniLoad");
@@ -1844,13 +2053,15 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                     horizontal-alignment: center;
                 }
-                if root.update-state == 3: Btn {
-                    y: (parent.height - self.height) / 2;
-                    text: @tr("Hay una versión nueva");
-                    icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
-                    icon-color: Theme.ok;
-                    label: root.update-text;
-                    clicked => { root.settings-section = 2; root.tab = 2; }
+                if root.update-state == 3: VerticalLayout {
+                    alignment: center;
+                    Btn {
+                        text: @tr("Hay una versión nueva");
+                        icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
+                        icon-color: Theme.ok;
+                        label: root.update-text;
+                        clicked => { root.settings-section = 2; root.tab = 2; }
+                    }
                 }
                 VerticalLayout { alignment: center;
                 Btn {
@@ -2017,7 +2228,8 @@ export component AppWindow inherits Window {
                         }
                         if root.downloads.length > 0: ListView {
                             vertical-stretch: 1;
-                            for row in root.downloads: DlLine {
+                            for row[ri] in root.downloads: DlLine {
+                                odd: Math.mod(ri, 2) == 1;
                                 item: row;
                                 cols: DlCols.cols;
                                 clicked => { root.dl-click(row.key, row.is-package); }
@@ -2204,7 +2416,8 @@ export component AppWindow inherits Window {
                         }
                         if root.grabbed.length > 0: ListView {
                             vertical-stretch: 1;
-                            for row in root.grabbed: GrabLine {
+                            for row[ri] in root.grabbed: GrabLine {
+                                odd: Math.mod(ri, 2) == 1;
                                 item: row;
                                 cols: GrabCols.cols;
                                 clicked => { root.grab-click(row.key, row.is-package); }
@@ -2365,11 +2578,16 @@ export component AppWindow inherits Window {
                     padding-right: 10px;
                     spacing: 2px;
                     alignment: start;
-                    Text {
-                        text: @tr("Ajustes");
-                        font-size: 20px * Theme.fscale;
-                        font-weight: 700;
-                        color: Theme.text;
+                    // Con el mismo margen que el texto de las opciones de abajo.
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        padding-top: 4px;
+                        Text {
+                            text: @tr("Ajustes");
+                            font-size: 20px * Theme.fscale;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
                     }
                     Rectangle { height: 12px; }
                     for s[i] in ["General", "Apariencia", "Versión", "Automático"]: Rectangle {
@@ -2975,6 +3193,283 @@ export component AppWindow inherits Window {
                                     options: [@tr("Suave"), @tr("Normal"), @tr("Fuerte")];
                                     current: Theme.blur-level;
                                     changed-by-user(i) => { Theme.blur-level = i; root.settings-changed(); }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            SectionTitle { text: @tr("Transparencias y formas"); }
+                            SettingRow {
+                                title: @tr("Opacidad de los paneles");
+                                subtitle: @tr("Cuanto más baja, más se ve el fondo a través de las tablas y los paneles");
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    width: 280px;
+                                    Slide {
+                                        value: (Theme.panel-opacity - 20) / 80.0;
+                                        moved(v) => { Theme.panel-opacity = 20 + Math.round(v * 80); root.settings-changed(); }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        width: 44px;
+                                        Text { text: Theme.panel-opacity + " %"; color: Theme.muted; horizontal-alignment: right; }
+                                    }
+                                }
+                            }
+                            SettingRow {
+                                title: @tr("Brillos de color del fondo");
+                                subtitle: @tr("Las manchas suaves de color detrás de los paneles de cristal: de apagadas a intensas");
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    width: 280px;
+                                    Slide {
+                                        value: Theme.glow / 100.0;
+                                        moved(v) => { Theme.glow = Math.round(v * 100); root.settings-changed(); }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        width: 44px;
+                                        Text { text: Theme.glow + " %"; color: Theme.muted; horizontal-alignment: right; }
+                                    }
+                                }
+                            }
+                            SettingRow {
+                                title: @tr("Esquinas");
+                                subtitle: @tr("Qué tan redondeados son los paneles, botones y cuadros");
+                                Segmented {
+                                    options: [@tr("Rectas"), @tr("Normales"), @tr("Redondas")];
+                                    current: Theme.radius-level;
+                                    changed-by-user(i) => { Theme.radius-level = i; root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: @tr("Bordes");
+                                subtitle: @tr("Grosor de las líneas que separan paneles y cuadros");
+                                Segmented {
+                                    options: [@tr("Finos"), @tr("Normales"), @tr("Gruesos")];
+                                    current: Theme.border-level;
+                                    changed-by-user(i) => { Theme.border-level = i; root.settings-changed(); }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            SectionTitle { text: @tr("Colores"); }
+                            Text {
+                                text: @tr("Pulsa un color para cambiarlo. «Tema» es el del tema elegido; «Mío» es uno que has cambiado tú.");
+                                font-size: 13px * Theme.fscale;
+                                color: Theme.muted;
+                                wrap: word-wrap;
+                            }
+                            for name[i] in [
+                                @tr("Acento"), @tr("Fondo de la ventana"), @tr("Paneles"), @tr("Texto"),
+                                @tr("Barras de progreso"), @tr("Terminado"), @tr("Aviso"), @tr("Error"),
+                                @tr("Filas alternas"), @tr("Fila seleccionada"),
+                            ]: VerticalLayout {
+                                SettingRow {
+                                    title: name;
+                                    ColorChip {
+                                        name: name;
+                                        c: root.edit-value(i);
+                                        custom: root.is-custom(i);
+                                        selected: root.editing == i;
+                                        picked => {
+                                            root.editing = root.editing == i ? -1 : i;
+                                            root.editor-hex = root.to-hex(root.edit-value(i));
+                                        }
+                                    }
+                                }
+                                if root.editing == i: Panel {
+                                    height: 250px;
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        spacing: 10px;
+                                        Text { text: @tr("Elegir color"); font-weight: 600; color: Theme.text; }
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            Text { text: @tr("Tono"); width: 90px; color: Theme.muted; vertical-alignment: center; }
+                                            Slide {
+                                                filled: false;
+                                                back: @linear-gradient(90deg, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+                                                value: root.edit-value(root.editing).to-hsv().hue / 360.0;
+                                                moved(v) => {
+                                                    root.set-color(root.editing, Colors.hsv(v * 360.0,
+                                                        max(0.35, root.edit-value(root.editing).to-hsv().saturation),
+                                                        max(0.35, root.edit-value(root.editing).to-hsv().value), 1.0));
+                                                }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            Text { text: @tr("Intensidad"); width: 90px; color: Theme.muted; vertical-alignment: center; }
+                                            Slide {
+                                                filled: false;
+                                                back: @linear-gradient(90deg, #808080 0%, root.edit-value(root.editing).with-alpha(1.0) 100%);
+                                                value: root.edit-value(root.editing).to-hsv().saturation;
+                                                moved(v) => {
+                                                    root.set-color(root.editing, Colors.hsv(root.edit-value(root.editing).to-hsv().hue,
+                                                        v, max(0.2, root.edit-value(root.editing).to-hsv().value), 1.0));
+                                                }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            Text { text: @tr("Luminosidad"); width: 90px; color: Theme.muted; vertical-alignment: center; }
+                                            Slide {
+                                                filled: false;
+                                                back: @linear-gradient(90deg, #000000 0%, #ffffff 100%);
+                                                value: root.edit-value(root.editing).to-hsv().value;
+                                                moved(v) => {
+                                                    root.set-color(root.editing, Colors.hsv(root.edit-value(root.editing).to-hsv().hue,
+                                                        root.edit-value(root.editing).to-hsv().saturation, v, 1.0));
+                                                }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            Text { text: @tr("Código"); width: 90px; color: Theme.muted; vertical-alignment: center; }
+                                            LineEdit {
+                                                max-width: 120px;
+                                                text <=> root.editor-hex;
+                                                placeholder-text: "#3b82f6";
+                                                accepted(t) => { root.hex-typed(root.editing, t); }
+                                            }
+                                            Btn {
+                                                text: @tr("Poner");
+                                                clicked => { root.hex-typed(root.editing, root.editor-hex); }
+                                            }
+                                            Btn {
+                                                text: @tr("Usar el del tema");
+                                                enabled: root.is-custom(root.editing);
+                                                clicked => { root.clear-color(root.editing); }
+                                            }
+                                            Rectangle { horizontal-stretch: 1; }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            alignment: start;
+                                            for c[k] in [#3b82f6, #6366f1, #8b5cf6, #d946ef, #ec4899, #ef4444, #f97316, #f59e0b, #eab308, #84cc16, #22c55e, #14b8a6, #06b6d4, #e5e7eb, #6b7280, #111827]: Swatch {
+                                                c: c;
+                                                name: "#" + k;
+                                                selected: false;
+                                                picked => { root.set-color(root.editing, c); }
+                                            }
+                                        }
+                                    }
+                                }
+    
+                            }
+                        }
+
+                        VerticalLayout {
+                            SectionTitle { text: @tr("Temas propios"); }
+                            Text {
+                                text: @tr("Guarda tus colores, transparencias, formas e icono con un nombre para volver a ellos cuando quieras, o compártelos en un archivo.");
+                                font-size: 13px * Theme.fscale;
+                                color: Theme.muted;
+                                wrap: word-wrap;
+                            }
+                            for n[i] in root.look-names: SettingRow {
+                                title: n;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Btn { text: @tr("Aplicar"); clicked => { root.look-apply(i); } }
+                                    Btn { text: @tr("Borrar"); clicked => { root.look-delete(i); } }
+                                }
+                            }
+                            SettingRow {
+                                title: @tr("Guardar la combinación actual");
+                                subtitle: @tr("Escribe un nombre. Si ya existe, se sustituye.");
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    LineEdit {
+                                        max-width: 180px;
+                                        text <=> root.look-name-text;
+                                        placeholder-text: @tr("Mi tema");
+                                        accepted(t) => { root.look-save(t); }
+                                    }
+                                    Btn { text: @tr("Guardar"); primary: true; clicked => { root.look-save(root.look-name-text); } }
+                                }
+                            }
+                            SettingRow {
+                                title: @tr("Archivo y valores originales");
+                                subtitle: @tr("Exporta o importa una combinación, o vuelve a los colores del tema");
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Btn { text: @tr("Exportar…"); clicked => { root.look-export(); } }
+                                    Btn { text: @tr("Importar…"); clicked => { root.look-import(); } }
+                                    Btn { text: @tr("Restaurar valores"); clicked => { root.look-reset(); } }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            SectionTitle { text: @tr("Icono de la aplicación"); }
+                            Text {
+                                text: @tr("Se cambia al momento en la ventana y en la bandeja. El icono del archivo .exe, del instalador y del acceso directo es el de por defecto: lo fija el sistema.");
+                                font-size: 13px * Theme.fscale;
+                                color: Theme.muted;
+                                wrap: word-wrap;
+                            }
+                            SettingRow {
+                                title: @tr("Estilo");
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    for st[i] in root.icon-styles: Rectangle {
+                                        width: 74px;
+                                        height: 104px;
+                                        border-radius: Theme.r2;
+                                        background: i == root.icon-style ? Theme.selbg : sta.has-hover ? Theme.hover : transparent;
+                                        border-width: i == root.icon-style ? 2px : Theme.lw;
+                                        border-color: i == root.icon-style ? Theme.accent : Theme.rim;
+                                        accessible-role: button;
+                                        accessible-label: st.name;
+                                        VerticalLayout {
+                                            padding: 6px;
+                                            spacing: 4px;
+                                            Image { source: st.image; width: 60px; height: 60px; image-fit: contain; }
+                                            Text { text: st.name; font-size: 10px * Theme.fscale; color: Theme.muted; horizontal-alignment: center; wrap: word-wrap; }
+                                        }
+                                        sta := TouchArea { mouse-cursor: pointer; clicked => { root.icon-style = i; root.icon-changed(); } }
+                                    }
+                                }
+                            }
+                            Text {
+                                text: @tr("Colores del icono (el primero sigue tu color de acento)");
+                                font-size: 14px * Theme.fscale;
+                                font-weight: 600;
+                                color: Theme.text;
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                for pl in root.icon-pals-a: Rectangle {
+                                    width: 34px;
+                                    height: 34px;
+                                    border-radius: 17px;
+                                    background: @linear-gradient(135deg, pl.c1 0%, pl.c2 100%);
+                                    border-width: pl.idx == root.icon-palette ? 3px : 1px;
+                                    border-color: pl.idx == root.icon-palette ? Theme.text : Theme.rim;
+                                    accessible-role: button;
+                                    accessible-label: pl.name;
+                                    if pl.idx == 0: Text { text: "A"; color: #ffffff; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { mouse-cursor: pointer; clicked => { root.icon-palette = pl.idx; root.icon-changed(); } }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                for pl in root.icon-pals-b: Rectangle {
+                                    width: 34px;
+                                    height: 34px;
+                                    border-radius: 17px;
+                                    background: @linear-gradient(135deg, pl.c1 0%, pl.c2 100%);
+                                    border-width: pl.idx == root.icon-palette ? 3px : 1px;
+                                    border-color: pl.idx == root.icon-palette ? Theme.text : Theme.rim;
+                                    accessible-role: button;
+                                    accessible-label: pl.name;
+                                    if pl.idx == 0: Text { text: "A"; color: #ffffff; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { mouse-cursor: pointer; clicked => { root.icon-palette = pl.idx; root.icon-changed(); } }
                                 }
                             }
                         }

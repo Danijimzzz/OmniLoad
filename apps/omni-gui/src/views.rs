@@ -381,6 +381,36 @@ fn sparkline(samples: &VecDeque<f64>) -> String {
     s
 }
 
+/// Cuántos compañeros se listan por nombre en el panel.
+const PEERS_SHOWN: usize = 10;
+
+fn swarm_summary(s: &omni_core::Swarm) -> String {
+    let mut t = format!("{} conectados", s.live.len());
+    if s.seeders > 0 {
+        t.push_str(&format!(" · {} con el archivo entero", s.seeders));
+    }
+    t.push_str(&format!(" · {} conocidos", s.known));
+    if s.live.len() > PEERS_SHOWN {
+        t.push_str(&format!(" · se muestran {PEERS_SHOWN}"));
+    }
+    crate::i18n::tr(&t).into_owned()
+}
+
+fn peer_line(p: &omni_core::PeerInfo) -> String {
+    let client = if p.client.is_empty() {
+        crate::i18n::tr("programa desconocido").into_owned()
+    } else {
+        p.client.clone()
+    };
+    format!(
+        "{} · {} · ↓ {} · ↑ {}",
+        p.addr,
+        client,
+        crate::format::bytes(p.downloaded),
+        crate::format::bytes(p.uploaded)
+    )
+}
+
 fn fill_selection(ui: &AppWindow, rows: &[RowInfo], st: &mut UiState) {
     let mut lines = Vec::new();
     let (kind, title, prio, can_start, can_stop, folder) = match &st.dl_selected {
@@ -405,6 +435,12 @@ fn fill_selection(ui: &AppWindow, rows: &[RowInfo], st: &mut UiState) {
                         c.push_str(&format!(" · {} reintentos", r.retries));
                     }
                     lines.push(stat("Conexiones", c));
+                }
+                if r.state.is_active() && r.swarm.known > 0 {
+                    lines.push(stat("Compañeros", swarm_summary(&r.swarm)));
+                    for p in r.swarm.live.iter().take(PEERS_SHOWN) {
+                        lines.push(stat("Compañero", peer_line(p)));
+                    }
                 }
                 if !r.detail.is_empty() {
                     lines.push(stat("Detalle", r.detail.clone()));
@@ -684,6 +720,7 @@ mod tests {
             started_once: false,
             speed_limit: None,
             detail: String::new(),
+            swarm: Default::default(),
         }
     }
 

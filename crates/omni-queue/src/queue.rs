@@ -1002,6 +1002,7 @@ fn info(e: &Entry, held: bool) -> JobInfo {
     let mut receiving = 0;
     let mut server_limit = 0;
     let mut retries = 0;
+    let mut swarm = omni_core::Swarm::default();
     if let Some(p) = &e.progress
         && e.state.is_active()
     {
@@ -1009,6 +1010,7 @@ fn info(e: &Entry, held: bool) -> JobInfo {
         receiving = stats.values().map(|s| s.receiving).sum();
         server_limit = stats.values().map(|s| s.limit).sum();
         retries = stats.values().map(|s| s.retries).sum();
+        swarm = p.swarm();
     }
     let rate = match e.state {
         State::Starting | State::Running => e.speed.rate,
@@ -1037,6 +1039,7 @@ fn info(e: &Entry, held: bool) -> JobInfo {
         started_once: e.started_once,
         speed_limit: e.rate.get(),
         detail: e.detail.clone(),
+        swarm,
     }
 }
 

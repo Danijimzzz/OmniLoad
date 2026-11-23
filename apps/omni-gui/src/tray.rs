@@ -55,14 +55,23 @@ pub struct Tray {
 impl Tray {
     /// Pone el icono. En macOS hay que llamarlo con el bucle de eventos ya en
     /// marcha (desde un temporizador de Slint, por ejemplo).
-    pub fn new(rt: &Handle, events: Sender<TrayEvent>) -> Result<Self, String> {
+    pub fn new(
+        rt: &Handle,
+        events: Sender<TrayEvent>,
+        icons: Vec<(u32, u32, Vec<u8>)>,
+    ) -> Result<Self, String> {
         let available = Arc::new(AtomicBool::new(true));
-        let imp = imp::Tray::new(rt, events, available.clone())?;
+        let imp = imp::Tray::new(rt, events, available.clone(), icons)?;
         Ok(Self {
             imp,
             available,
             last: Default::default(),
         })
+    }
+
+    /// Cambia el dibujo del icono (32 y 256 píxeles, RGBA) sin quitarlo.
+    pub fn set_icon(&self, icons: Vec<(u32, u32, Vec<u8>)>) {
+        self.imp.set_icon(icons);
     }
 
     /// ¿Se ve el icono? Si no, no se debe esconder la ventana.
@@ -195,6 +204,7 @@ mod imp {
             _rt: &Handle,
             events: Sender<TrayEvent>,
             _available: Arc<AtomicBool>,
+            icons: Vec<(u32, u32, Vec<u8>)>,
         ) -> Result<Self, String> {
             let open =
                 MenuItem::with_id("abrir", crate::i18n::tr(labels::OPEN).as_ref(), true, None);
@@ -265,7 +275,7 @@ mod imp {
                 }
             }));
 
-            let (w, h, rgba) = super::icon_rgba().swap_remove(0);
+            let (w, h, rgba) = icons.into_iter().next().ok_or("sin icono")?;
             let icon = Icon::from_rgba(rgba, w, h).map_err(|e| e.to_string())?;
             let builder = TrayIconBuilder::new()
                 .with_id("omniload")
@@ -283,6 +293,14 @@ mod imp {
                 pause,
                 clipboard,
             })
+        }
+
+        pub fn set_icon(&self, icons: Vec<(u32, u32, Vec<u8>)>) {
+            if let Some((w, h, rgba)) = icons.into_iter().next()
+                && let Ok(icon) = Icon::from_rgba(rgba, w, h)
+            {
+                let _ = self.icon.set_icon(Some(icon));
+            }
         }
 
         pub fn update(&self, s: &TrayStatus) {
@@ -310,6 +328,23 @@ mod imp {
     use tokio::runtime::Handle;
 
     use super::{TrayEvent, TrayStatus, labels};
+
+    /// StatusNotifierItem quiere ARGB en orden de red.
+    fn to_ksni(icons: Vec<(u32, u32, Vec<u8>)>) -> Vec<ksni::Icon> {
+        icons
+            .into_iter()
+            .map(|(w, h, rgba)| ksni::Icon {
+                width: w as i32,
+                height: h as i32,
+                data: rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .flat_map(|&[r, g, b, a]| [a, r, g, b])
+                    .collect(),
+            })
+            .collect()
+    }
 
     struct Sni {
         events: Sender<TrayEvent>,
@@ -402,25 +437,12 @@ mod imp {
             rt: &Handle,
             events: Sender<TrayEvent>,
             available: Arc<AtomicBool>,
+            icons: Vec<(u32, u32, Vec<u8>)>,
         ) -> Result<Self, String> {
-            let icons = super::icon_rgba()
-                .into_iter()
-                .map(|(w, h, rgba)| ksni::Icon {
-                    width: w as i32,
-                    height: h as i32,
-                    // StatusNotifierItem quiere ARGB en orden de red.
-                    data: rgba
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .flat_map(|&[r, g, b, a]| [a, r, g, b])
-                        .collect(),
-                })
-                .collect();
             let sni = Sni {
                 events,
                 status: TrayStatus::default(),
-                icons,
+                icons: to_ksni(icons),
                 available,
             };
             let handle = rt.block_on(sni.spawn()).map_err(|e| e.to_string())?;
@@ -428,6 +450,14 @@ mod imp {
                 rt: rt.clone(),
                 handle,
             })
+        }
+
+        pub fn set_icon(&self, icons: Vec<(u32, u32, Vec<u8>)>) {
+            let handle = self.handle.clone();
+            let icons = to_ksni(icons);
+            self.rt.spawn(async move {
+                handle.update(move |t| t.icons = icons).await;
+            });
         }
 
         pub fn update(&self, s: &TrayStatus) {
@@ -464,9 +494,11 @@ mod tests {
         let (w, h, big) = &icons[1];
         assert_eq!((*w, *h), (256, 256));
         assert_eq!(big.len(), 256 * 256 * 4);
-        // El centro del icono es azul y opaco (no el cuadrado de reserva:
-        // el PNG se leyó bien si hay píxeles blancos de la flecha).
-        assert!(big.as_chunks::<4>().0.contains(&[255, 255, 255, 255]));
+        // El PNG se leyó bien si no es el cuadrado azul de reserva: tiene
+        // más de un color y las esquinas transparentes.
+        let first = &big[..4];
+        assert!(big.as_chunks::<4>().0.iter().any(|p| p != first));
+        assert_eq!(big[3], 0);
         assert_eq!(small[(16 * 32 + 2) * 4 + 3], 255);
     }
 

@@ -630,3 +630,150 @@ msgstr "Open in the grabber"
 
 msgid "Descartar"
 msgstr "Dismiss"
+
+msgid "Transparencias y formas"
+msgstr "Transparency and shapes"
+
+msgid "Opacidad de los paneles"
+msgstr "Panel opacity"
+
+msgid "Cuanto más baja, más se ve el fondo a través de las tablas y los paneles"
+msgstr "The lower it is, the more of the background shows through tables and panels"
+
+msgid "Brillos de color del fondo"
+msgstr "Background color glow"
+
+msgid "Las manchas suaves de color detrás de los paneles de cristal: de apagadas a intensas"
+msgstr "The soft color patches behind the glass panels: from off to intense"
+
+msgid "Esquinas"
+msgstr "Corners"
+
+msgid "Qué tan redondeados son los paneles, botones y cuadros"
+msgstr "How rounded panels, buttons and boxes are"
+
+msgid "Rectas"
+msgstr "Sharp"
+
+msgid "Normales"
+msgstr "Normal"
+
+msgid "Redondas"
+msgstr "Round"
+
+msgid "Bordes"
+msgstr "Borders"
+
+msgid "Grosor de las líneas que separan paneles y cuadros"
+msgstr "Thickness of the lines around panels and boxes"
+
+msgid "Finos"
+msgstr "Thin"
+
+msgid "Gruesos"
+msgstr "Thick"
+
+msgid "Colores"
+msgstr "Colors"
+
+msgid "Pulsa un color para cambiarlo. «Tema» es el del tema elegido; «Mío» es uno que has cambiado tú."
+msgstr "Click a color to change it. “Theme” is the one from the chosen theme; “Mine” is one you changed."
+
+msgid "Acento"
+msgstr "Accent"
+
+msgid "Fondo de la ventana"
+msgstr "Window background"
+
+msgid "Paneles"
+msgstr "Panels"
+
+msgid "Texto"
+msgstr "Text"
+
+msgid "Barras de progreso"
+msgstr "Progress bars"
+
+msgid "Terminado"
+msgstr "Finished"
+
+msgid "Aviso"
+msgstr "Warning"
+
+msgid "Error"
+msgstr "Error"
+
+msgid "Filas alternas"
+msgstr "Alternate rows"
+
+msgid "Fila seleccionada"
+msgstr "Selected row"
+
+msgid "Mío"
+msgstr "Mine"
+
+msgid "Elegir color"
+msgstr "Pick a color"
+
+msgid "Tono"
+msgstr "Hue"
+
+msgid "Intensidad"
+msgstr "Intensity"
+
+msgid "Luminosidad"
+msgstr "Brightness"
+
+msgid "Código"
+msgstr "Code"
+
+msgid "Poner"
+msgstr "Set"
+
+msgid "Usar el del tema"
+msgstr "Use the theme's"
+
+msgid "Temas propios"
+msgstr "My themes"
+
+msgid "Guarda tus colores, transparencias, formas e icono con un nombre para volver a ellos cuando quieras, o compártelos en un archivo."
+msgstr "Save your colors, transparency, shapes and icon under a name to come back to them any time, or share them as a file."
+
+msgid "Guardar la combinación actual"
+msgstr "Save the current combination"
+
+msgid "Escribe un nombre. Si ya existe, se sustituye."
+msgstr "Type a name. If it already exists, it is replaced."
+
+msgid "Mi tema"
+msgstr "My theme"
+
+msgid "Guardar"
+msgstr "Save"
+
+msgid "Archivo y valores originales"
+msgstr "File and original values"
+
+msgid "Exporta o importa una combinación, o vuelve a los colores del tema"
+msgstr "Export or import a combination, or go back to the theme's colors"
+
+msgid "Exportar…"
+msgstr "Export…"
+
+msgid "Importar…"
+msgstr "Import…"
+
+msgid "Restaurar valores"
+msgstr "Reset values"
+
+msgid "Icono de la aplicación"
+msgstr "App icon"
+
+msgid "Se cambia al momento en la ventana y en la bandeja. El icono del archivo .exe, del instalador y del acceso directo es el de por defecto: lo fija el sistema."
+msgstr "It changes instantly in the window and the tray. The icon of the .exe file, the installer and the shortcut is the default one: the system fixes it."
+
+msgid "Estilo"
+msgstr "Style"
+
+msgid "Colores del icono (el primero sigue tu color de acento)"
+msgstr "Icon colors (the first one follows your accent color)"

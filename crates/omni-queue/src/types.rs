@@ -236,6 +236,9 @@ pub struct JobInfo {
     /// Límite de velocidad propio, en bytes por segundo.
     pub speed_limit: Option<u64>,
     pub detail: String,
+    /// Compañeros, si es un torrent.
+    #[serde(default)]
+    pub swarm: omni_core::Swarm,
 }
 
 impl JobInfo {

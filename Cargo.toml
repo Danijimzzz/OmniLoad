@@ -15,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
@@ -57,6 +57,8 @@ rfd = "0.15"
 # 0.40: la última que compila con Rust 1.88. "bundled" compila SQLite dentro
 # del programa, así no hace falta instalar nada en Windows, macOS ni Linux.
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Dibuja el icono de la aplicación (ver apps/omni-gui/src/icon.rs). 0.45.1: compatible con Rust 1.88, sin texto ni imágenes.
+resvg = { version = "0.45.1", default-features = false }
 reqwest = { version = "0.13", features = ["stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

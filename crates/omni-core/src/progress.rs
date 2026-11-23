@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use serde::{Deserialize, Serialize};
+
 use crate::NetworkId;
 
 /// Progreso de una descarga, compartido con quien la muestra (la CLI hoy, la
@@ -13,6 +15,31 @@ pub struct Progress {
     downloaded: AtomicU64,
     resumed_from: AtomicU64,
     per_network: Mutex<BTreeMap<NetworkId, NetworkStats>>,
+    swarm: Mutex<Swarm>,
+}
+
+/// Un compañero (peer) de un torrent con el que hay conexión.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerInfo {
+    /// Dirección IP y puerto.
+    pub addr: String,
+    /// Nombre del programa que usa (qBittorrent, Transmission…), si lo dijo.
+    pub client: String,
+    /// Bytes que nos ha mandado.
+    pub downloaded: u64,
+    /// Bytes que le hemos mandado.
+    pub uploaded: u64,
+}
+
+/// Compañeros de un torrent.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Swarm {
+    /// Conectados ahora mismo.
+    pub live: Vec<PeerInfo>,
+    /// Conocidos en total (conectados, en cola, probando o caídos).
+    pub known: usize,
+    /// Conectados que ya tienen el torrent entero (semillas).
+    pub seeders: usize,
 }
 
 /// Bytes y conexiones de una red.
@@ -55,6 +82,16 @@ impl Progress {
             .lock()
             .expect("progreso envenenado")
             .clone()
+    }
+
+    /// Compañeros del torrent (vacío si no es un torrent).
+    pub fn swarm(&self) -> Swarm {
+        self.swarm.lock().expect("progreso envenenado").clone()
+    }
+
+    /// Lo pone el torrent en cada vuelta.
+    pub fn set_swarm(&self, swarm: Swarm) {
+        *self.swarm.lock().expect("progreso envenenado") = swarm;
     }
 
     /// Para quien descarga por su cuenta (un programa externo como yt-dlp):

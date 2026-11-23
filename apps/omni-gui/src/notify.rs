@@ -173,6 +173,7 @@ mod tests {
             started_once: true,
             speed_limit: None,
             detail: String::new(),
+            swarm: Default::default(),
         }
     }
 

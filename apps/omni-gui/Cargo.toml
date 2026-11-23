@@ -22,6 +22,7 @@ omni-grab.workspace = true
 omni-api.workspace = true
 omni-queue.workspace = true
 png.workspace = true
+resvg.workspace = true
 reqwest.workspace = true
 rfd.workspace = true
 serde.workspace = true

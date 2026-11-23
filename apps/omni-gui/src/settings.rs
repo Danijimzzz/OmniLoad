@@ -106,6 +106,95 @@ pub struct Settings {
     pub shortcuts: Vec<String>,
     /// Idioma de la interfaz: 0 automático, 1 español, 2 English.
     pub language: i32,
+    /// Colores, transparencias e icono personalizados.
+    pub look: Look,
+    /// Combinaciones guardadas con nombre («temas propios»).
+    pub looks: Vec<NamedLook>,
+}
+
+/// Cuántos colores se pueden personalizar (ver [`COLOR_NAMES`]).
+pub const COLOR_COUNT: usize = 10;
+
+/// Colores, transparencias, formas e icono que elige el usuario encima del
+/// tema. Un color vacío es «el del tema».
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Look {
+    /// «#rrggbb» por color; vacío = el del tema.
+    pub colors: Vec<String>,
+    /// Opacidad de los paneles, de 20 a 100.
+    pub panel_opacity: i32,
+    /// Intensidad de los brillos de color del fondo, de 0 a 100.
+    pub glow: i32,
+    /// Esquinas: 0 rectas, 1 normales, 2 redondas.
+    pub radius: i32,
+    /// Bordes: 0 finos, 1 normales, 2 gruesos.
+    pub border: i32,
+    /// Estilo del icono (ver `icon::STYLES`).
+    pub icon_style: i32,
+    /// Colores del icono: 0 según el acento, 1.. las de `icon::NAMED`.
+    pub icon_palette: i32,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            colors: vec![String::new(); COLOR_COUNT],
+            panel_opacity: 100,
+            glow: 100,
+            radius: 1,
+            border: 1,
+            icon_style: 0,
+            icon_palette: 0,
+        }
+    }
+}
+
+impl Look {
+    /// Deja los valores dentro de su rango y con un color por casilla.
+    pub fn fixed(mut self) -> Self {
+        self.colors.resize(COLOR_COUNT, String::new());
+        for c in &mut self.colors {
+            if parse_hex(c).is_none() {
+                c.clear();
+            }
+        }
+        self.panel_opacity = self.panel_opacity.clamp(20, 100);
+        self.glow = self.glow.clamp(0, 100);
+        self.radius = self.radius.clamp(0, 2);
+        self.border = self.border.clamp(0, 2);
+        self.icon_style = self
+            .icon_style
+            .clamp(0, crate::icon::STYLES.len() as i32 - 1);
+        self.icon_palette = self.icon_palette.clamp(0, crate::icon::NAMED.len() as i32);
+        self
+    }
+}
+
+/// Una combinación de colores guardada por el usuario.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NamedLook {
+    pub name: String,
+    pub look: Look,
+}
+
+/// «#rrggbb» (o «rrggbb», o «#rgb») a 0xRRGGBB.
+pub fn parse_hex(text: &str) -> Option<u32> {
+    let t = text.trim().trim_start_matches('#');
+    match t.len() {
+        6 => u32::from_str_radix(t, 16).ok(),
+        3 => {
+            let v = u32::from_str_radix(t, 16).ok()?;
+            let (r, g, b) = ((v >> 8) & 15, (v >> 4) & 15, v & 15);
+            Some((r * 17) << 16 | (g * 17) << 8 | (b * 17))
+        }
+        _ => None,
+    }
+}
+
+/// 0xRRGGBB a «#rrggbb».
+pub fn to_hex(c: u32) -> String {
+    format!("#{:06x}", c & 0xff_ffff)
 }
 
 /// Acciones con atajo de teclado, en el orden de `Settings::shortcuts`, y su
@@ -350,6 +439,8 @@ impl Default for Settings {
             limit_schedule_rate: "1 MB/s".into(),
             shortcuts: fix_shortcuts(&[]),
             language: 0,
+            look: Look::default(),
+            looks: Vec::new(),
         }
     }
 }
@@ -454,6 +545,11 @@ impl Settings {
             Err(_) => Self::default(),
         };
         s.shortcuts = fix_shortcuts(&s.shortcuts);
+        s.look = s.look.clone().fixed();
+        s.looks.retain(|l| !l.name.trim().is_empty());
+        for l in &mut s.looks {
+            l.look = l.look.clone().fixed();
+        }
         s
     }
 
@@ -504,6 +600,43 @@ fn default_download_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hex_colors_roundtrip() {
+        assert_eq!(parse_hex("#3b82f6"), Some(0x3b82f6));
+        assert_eq!(parse_hex(" 3B82F6 "), Some(0x3b82f6));
+        assert_eq!(parse_hex("#fa0"), Some(0xffaa00));
+        assert_eq!(parse_hex("#12345"), None);
+        assert_eq!(parse_hex("rojo"), None);
+        assert_eq!(to_hex(0x0a5fd0), "#0a5fd0");
+    }
+
+    #[test]
+    fn look_is_fixed_to_valid_values() {
+        let l = Look {
+            colors: vec!["#zzzzzz".into(), "#112233".into()],
+            panel_opacity: 5,
+            glow: 900,
+            radius: 7,
+            border: -1,
+            icon_style: 99,
+            icon_palette: 99,
+        }
+        .fixed();
+        assert_eq!(l.colors.len(), COLOR_COUNT);
+        assert_eq!(l.colors[0], "");
+        assert_eq!(l.colors[1], "#112233");
+        assert_eq!(
+            (l.panel_opacity, l.glow, l.radius, l.border),
+            (20, 100, 2, 0)
+        );
+        assert_eq!(l.icon_style, crate::icon::STYLES.len() as i32 - 1);
+        assert_eq!(l.icon_palette, crate::icon::NAMED.len() as i32);
+        // Un ajustes.json antiguo, sin «look», sigue leyéndose.
+        let s: Settings = serde_json::from_str("{\"theme\":2}").unwrap();
+        assert_eq!(s.look, Look::default());
+        assert!(s.looks.is_empty());
+    }
 
     #[test]
     fn missing_fields_take_defaults() {
