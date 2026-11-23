@@ -1962,7 +1962,7 @@ export component AppWindow inherits Window {
                                 VerticalLayout {
                                     padding: 4px;
                                     // Mismo orden que SPEED_LIMITS en settings.rs.
-                                    for l[i] in ["Sin límite", "256 KB/s", "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s", "50 MB/s", "100 MB/s"]: Rectangle {
+                                    for l[i] in [@tr("Sin límite"), "256 KB/s", "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s", "50 MB/s", "100 MB/s"]: Rectangle {
                                         height: 28px;
                                         background: ta.has-hover ? Theme.selbg : transparent;
                                         border-radius: 6px;
@@ -3131,7 +3131,7 @@ export component AppWindow inherits Window {
         y: 0;
         width: root.width;
         maximized: root.maximized;
-        title-text: root.app-pr > 0 ? "OmniLoad " + root.app-version + " · PR #" + root.app-pr + " sin aprobar" : "OmniLoad " + root.app-version;
+        title-text: root.app-pr > 0 ? @tr("OmniLoad {} · PR #{} sin aprobar", root.app-version, root.app-pr) : "OmniLoad " + root.app-version;
         drag => { root.win-drag(); }
         minimize => { root.win-minimize(); }
         toggle-maximize => { root.win-toggle-maximize(); }

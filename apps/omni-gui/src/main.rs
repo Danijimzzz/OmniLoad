@@ -865,6 +865,8 @@ impl App {
         s.finish_action = ui.get_finish_action();
         s.language = ui.get_language();
         i18n::apply(s.language);
+        relabel_columns(Table::Downloads, &self.col_rows);
+        relabel_columns(Table::Grabber, &self.grab_col_rows);
         s.speed_unit = ui.get_speed_unit();
         format::set_speed_unit(s.speed_unit);
         s.bar_style = theme.get_bar_style();
@@ -1303,7 +1305,11 @@ fn sync_queue_settings(ui: &AppWindow, manager: &Manager) {
     // El límite también lo cambia la terminal; no se pisa lo que se está
     // escribiendo.
     if !ui.get_speed_editing() && settings::parse_speed(&ui.get_speed_text()) != Ok(q.speed_limit) {
-        ui.set_speed_text(settings::speed_text(q.speed_limit).into());
+        ui.set_speed_text(
+            i18n::tr(&settings::speed_text(q.speed_limit))
+                .as_ref()
+                .into(),
+        );
     }
     let max_active = q.max_active.min(i32::MAX as usize) as i32;
     if ui.get_max_active() != max_active {
@@ -1382,12 +1388,22 @@ fn fill_columns(table: Table, model: &VecModel<ColState>, cols: &[settings::ColC
         cols.iter()
             .map(|c| ColState {
                 id: c.id,
-                name: settings::column_name(table, c.id).into(),
+                name: i18n::tr(settings::column_name(table, c.id)).as_ref().into(),
                 width: c.width,
                 shown: c.shown,
             })
             .collect::<Vec<_>>(),
     );
+}
+
+/// Vuelve a poner el nombre de las columnas (al cambiar de idioma).
+fn relabel_columns(table: Table, model: &VecModel<ColState>) {
+    for i in 0..model.row_count() {
+        if let Some(mut c) = model.row_data(i) {
+            c.name = i18n::tr(settings::column_name(table, c.id)).as_ref().into();
+            model.set_row_data(i, c);
+        }
+    }
 }
 
 /// Lo que hay ahora en el modelo, para guardarlo.
@@ -1861,7 +1877,7 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             match settings::parse_speed(&text) {
                 Ok(limit) => {
                     app.manager.update_settings(|q| q.speed_limit = limit);
-                    ui.set_speed_text(settings::speed_text(limit).into());
+                    ui.set_speed_text(i18n::tr(&settings::speed_text(limit)).as_ref().into());
                     app.show("", false);
                 }
                 Err(()) => {
@@ -1870,7 +1886,7 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
                         true,
                     );
                     let current = app.manager.settings().speed_limit;
-                    ui.set_speed_text(settings::speed_text(current).into());
+                    ui.set_speed_text(i18n::tr(&settings::speed_text(current)).as_ref().into());
                 }
             }
         }
@@ -1881,7 +1897,7 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             let Some(ui) = app.ui() else { return };
             let limit = settings::speed_limit_bytes(i);
             app.manager.update_settings(|q| q.speed_limit = limit);
-            ui.set_speed_text(settings::speed_text(limit).into());
+            ui.set_speed_text(i18n::tr(&settings::speed_text(limit)).as_ref().into());
         }
     });
     ui.on_schedule_day_toggled({

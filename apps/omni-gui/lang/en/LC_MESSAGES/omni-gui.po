@@ -82,6 +82,9 @@ msgstr "Limit"
 msgid "Límites habituales"
 msgstr "Common limits"
 
+msgid "Sin límite"
+msgstr "No limit"
+
 msgid "Todas"
 msgstr "All"
 
@@ -597,6 +600,9 @@ msgstr "Open file…"
 
 msgid "Analizar enlaces"
 msgstr "Analyze links"
+
+msgid "OmniLoad {} · PR #{} sin aprobar"
+msgstr "OmniLoad {} · PR #{} unapproved"
 
 msgid "OmniLoad · enlaces copiados"
 msgstr "OmniLoad · copied links"
