@@ -518,7 +518,11 @@ async fn finished_zip_is_extracted_with_password_and_deleted() {
     wait_for(&q, id, State::Done).await;
     let out = dir.path().join("datos").join("dentro.txt");
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !out.exists() {
+    // El archivo aparece vacío un instante antes de llenarse: se espera al contenido.
+    while std::fs::read(&out)
+        .map(|c| c != b"contenido")
+        .unwrap_or(true)
+    {
         assert!(Instant::now() < deadline, "no se descomprimió");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }

@@ -111,17 +111,23 @@ impl State {
         let started = *self.started.get_or_insert(now);
         if c.checking > 0 {
             self.done = None;
-            return format!("Comprobando… {}", seconds(now - started));
+            return crate::i18n::tr(&format!("Comprobando… {}", seconds(now - started)))
+                .into_owned();
         }
         let (_, took) = *self.done.get_or_insert((now, now - started));
-        format!("Comprobado en {}", seconds(took))
+        crate::i18n::tr(&format!("Comprobado en {}", seconds(took))).into_owned()
     }
 
     /// Si toca empezar a cerrarlo solo: [`LINGER`] después de terminar de
     /// comprobar.
     pub fn should_autoclose(&self, now: Instant) -> bool {
+        self.should_autoclose_after(now, LINGER)
+    }
+
+    /// Lo mismo con la espera que elija el usuario.
+    pub fn should_autoclose_after(&self, now: Instant, linger: Duration) -> bool {
         self.done
-            .is_some_and(|(at, _)| now.duration_since(at) >= LINGER)
+            .is_some_and(|(at, _)| now.duration_since(at) >= linger)
     }
 }
 
@@ -239,9 +245,12 @@ fn popup_attributes(attrs: winit::window::WindowAttributes) -> winit::window::Wi
 pub fn corner(
     monitor: &winit::monitor::MonitorHandle,
     size: slint::PhysicalSize,
+    which: i32,
 ) -> slint::PhysicalPosition {
     let scale = monitor.scale_factor();
     let px = |l: f64| (l * scale).round() as i32;
+    // Margen de la barra de tareas o del Dock (abajo) y de la barra de
+    // menús (arriba).
     let bottom = if cfg!(target_os = "windows") {
         px(60.0)
     } else if cfg!(target_os = "macos") {
@@ -249,11 +258,31 @@ pub fn corner(
     } else {
         px(56.0)
     };
+    let top = if cfg!(target_os = "macos") {
+        px(40.0)
+    } else {
+        px(16.0)
+    };
     let pos = monitor.position();
     let area = monitor.size();
+    let (width, height) = (area.width as i32, area.height as i32);
+    // 0 abajo a la derecha, 1 abajo a la izquierda, 2 arriba a la derecha,
+    // 3 arriba a la izquierda.
+    let right = which == 0 || which == 2;
+    let down = which == 0 || which == 1;
     slint::PhysicalPosition::new(
-        pos.x + area.width as i32 - size.width as i32 - px(16.0),
-        pos.y + area.height as i32 - size.height as i32 - bottom,
+        pos.x
+            + if right {
+                width - size.width as i32 - px(16.0)
+            } else {
+                px(16.0)
+            },
+        pos.y
+            + if down {
+                height - size.height as i32 - bottom
+            } else {
+                top
+            },
     )
 }
 

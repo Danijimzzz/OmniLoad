@@ -1,0 +1,632 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Borrar"
+msgstr "Delete"
+
+msgid "Ocultar esta columna"
+msgstr "Hide this column"
+
+msgid "Mostrar columnas"
+msgstr "Show columns"
+
+msgid "Restablecer columnas"
+msgstr "Reset columns"
+
+msgid "Contraer paquete"
+msgstr "Collapse package"
+
+msgid "Desplegar paquete"
+msgstr "Expand package"
+
+msgid "Incluir {}"
+msgstr "Include {}"
+
+msgid "Minimizar"
+msgstr "Minimize"
+
+msgid "Restaurar"
+msgstr "Restore"
+
+msgid "Maximizar"
+msgstr "Maximize"
+
+msgid "Cerrar"
+msgstr "Close"
+
+msgid "OmniLoad"
+msgstr "OmniLoad"
+
+msgid "Descargas"
+msgstr "Downloads"
+
+msgid "Capturador de enlaces"
+msgstr "Link grabber"
+
+msgid "Velocidad de los últimos 60 segundos"
+msgstr "Speed over the last 60 seconds"
+
+msgid "Hay una versión nueva"
+msgstr "A new version is available"
+
+msgid "Ajustes"
+msgstr "Settings"
+
+msgid "Cancelar"
+msgstr "Cancel"
+
+msgid "Añadir enlaces"
+msgstr "Add links"
+
+msgid "Iniciar descargas"
+msgstr "Start downloads"
+
+msgid "Pausar descargas"
+msgstr "Pause downloads"
+
+msgid "Detener descargas"
+msgstr "Stop downloads"
+
+msgid "Simultáneas"
+msgstr "Simultaneous"
+
+msgid "Conexiones por archivo"
+msgstr "Connections per file"
+
+msgid "Límite"
+msgstr "Limit"
+
+msgid "Límites habituales"
+msgstr "Common limits"
+
+msgid "Sin límite"
+msgstr "No limit"
+
+msgid "Todas"
+msgstr "All"
+
+msgid "En curso"
+msgstr "In progress"
+
+msgid "Terminadas"
+msgstr "Finished"
+
+msgid "Con error"
+msgstr "With errors"
+
+msgid "En espera"
+msgstr "Waiting"
+
+msgid "Buscar paquetes o archivos"
+msgstr "Search packages or files"
+
+msgid "Aún no hay descargas.\nPulsa «Añadir enlaces» y elige qué bajar en el Capturador de enlaces."
+msgstr "There are no downloads yet.\nClick “Add links” and choose what to download in the Link grabber."
+
+msgid "Cerrar detalles"
+msgstr "Close details"
+
+msgid "Prioridad"
+msgstr "Priority"
+
+msgid "Iniciar"
+msgstr "Start"
+
+msgid "Detener"
+msgstr "Stop"
+
+msgid "Abrir carpeta"
+msgstr "Open folder"
+
+msgid "Quitar"
+msgstr "Remove"
+
+msgid "Paquete: "
+msgstr "Package: "
+
+msgid "Archivo: "
+msgstr "File: "
+
+msgid "Redes en uso"
+msgstr "Networks in use"
+
+msgid "Pulsa «Añadir enlaces» o copia un enlace.\nAquí verás los archivos que contiene, agrupados en paquetes, antes de descargar nada."
+msgstr "Click “Add links” or copy a link.\nHere you will see the files it contains, grouped into packages, before downloading anything."
+
+msgid "Propiedades del paquete"
+msgstr "Package properties"
+
+msgid "Nombre del paquete"
+msgstr "Package name"
+
+msgid "Guardar en"
+msgstr "Save to"
+
+msgid "Elegir carpeta…"
+msgstr "Choose folder…"
+
+msgid "Quitar paquete"
+msgstr "Remove package"
+
+msgid "Propiedades del paquete: {}"
+msgstr "Package properties: {}"
+
+msgid "Elegir…"
+msgstr "Choose…"
+
+msgid "Todos"
+msgstr "All"
+
+msgid "Ninguno"
+msgstr "None"
+
+msgid "Reintentar caídos"
+msgstr "Retry offline"
+
+msgid "Quitar caídos"
+msgstr "Remove offline"
+
+msgid "Vaciar"
+msgstr "Clear"
+
+msgid "Buscar"
+msgstr "Search"
+
+msgid "Añadir a descargas"
+msgstr "Add to downloads"
+
+msgid "General"
+msgstr "General"
+
+msgid "Carpeta de descargas"
+msgstr "Downloads folder"
+
+msgid "Donde se guarda todo lo que descargas."
+msgstr "Where everything you download is saved."
+
+msgid "Una carpeta por paquete"
+msgstr "One folder per package"
+
+msgid "Cada paquete va a una subcarpeta con su nombre (se quitan los caracteres que el sistema no admite). Se puede cambiar en el panel del paquete del Capturador."
+msgstr "Each package goes into a subfolder with its name (characters the system does not allow are removed). It can be changed in the package panel of the Link grabber."
+
+msgid "También para un solo archivo"
+msgstr "Also for a single file"
+
+msgid "Si se desactiva, los paquetes de un archivo van directos a la carpeta de descargas."
+msgstr "If turned off, single-file packages go straight to the downloads folder."
+
+msgid "Carpeta también para paquetes de un solo archivo"
+msgstr "Folder also for single-file packages"
+
+msgid "Conexiones por servidor"
+msgstr "Connections per server"
+
+msgid "Cuántas conexiones se abren como mucho a una misma web sumando todas las descargas (0 = sin tope). Si el servidor acepta menos, OmniLoad lo aprende solo y lo recuerda."
+msgstr "The most connections opened to the same site, adding up all downloads (0 = no limit). If the server accepts fewer, OmniLoad learns it by itself and remembers."
+
+msgid "Reintentos si falla la conexión"
+msgstr "Retries if the connection fails"
+
+msgid "Cuántas veces vuelve a intentar una descarga cuando se corta o el servidor da error, esperando cada vez un poco más. Vale para las descargas que empiecen después de cambiarlo."
+msgstr "How many times a download is retried when it drops or the server returns an error, waiting a bit longer each time. Applies to downloads started after changing it."
+
+msgid "Descargar por varias redes a la vez"
+msgstr "Download over several networks at once"
+
+msgid "Marca dos o más para sumar su velocidad (por ejemplo, wifi y cable, o el móvil por USB). Con una o ninguna se usa la red normal del sistema. Cada red abre sus propias conexiones por archivo. Solo cuentan las descargas que se empiecen después de cambiarlo."
+msgstr "Tick two or more to add up their speed (for example wifi and cable, or a phone over USB). With one or none, the system's normal network is used. Each network opens its own connections per file. Only downloads started after changing it count."
+
+msgid "Buscar de nuevo"
+msgstr "Search again"
+
+msgid "Esconder a la bandeja"
+msgstr "Hide to the tray"
+
+msgid "Al cerrar (X) o minimizar, la ventana se esconde junto al reloj y las descargas siguen. Para salir del todo: «Salir» en el menú del icono."
+msgstr "When closing (X) or minimizing, the window hides next to the clock and downloads continue. To quit completely: “Quit” in the icon menu."
+
+msgid "Este escritorio no tiene bandeja del sistema: cerrar la ventana sale de OmniLoad. En GNOME, instala la extensión «AppIndicator» para tenerla."
+msgstr "This desktop has no system tray: closing the window quits OmniLoad. On GNOME, install the “AppIndicator” extension to get one."
+
+msgid "Avisar al terminar"
+msgstr "Notify when finished"
+
+msgid "Una notificación del sistema cuando termina un archivo o un paquete entero, o si falla (solo si no estás mirando la ventana)."
+msgstr "A system notification when a file or a whole package finishes, or fails (only if you are not looking at the window)."
+
+msgid "Avisar solo si falla"
+msgstr "Notify only on failure"
+
+msgid "No avisa de lo que termina bien, solo de lo que da error."
+msgstr "Does not notify about what finishes fine, only what fails."
+
+msgid "Sonido en los avisos"
+msgstr "Sound on notifications"
+
+msgid "La notificación del sistema suena al aparecer."
+msgstr "The system notification makes a sound when it appears."
+
+msgid "Vigilar portapapeles"
+msgstr "Watch clipboard"
+
+msgid "Los enlaces que copies aparecen solos en el Capturador de enlaces."
+msgstr "Links you copy show up by themselves in the Link grabber."
+
+msgid "Automático"
+msgstr "Automatic"
+
+msgid "Horario de descargas"
+msgstr "Download schedule"
+
+msgid "Solo descarga en los días y las horas que elijas. Fuera de ellas todo queda en pausa (con el progreso guardado) y sigue solo al llegar la hora. Si la hora de fin es menor que la de inicio, el tramo acaba al día siguiente (por ejemplo, de 23:00 a 07:00)."
+msgstr "Only downloads on the days and hours you choose. Outside them everything is paused (progress saved) and resumes by itself when the time comes. If the end time is earlier than the start, the period ends the next day (for example, from 23:00 to 07:00)."
+
+msgid "Usar horario"
+msgstr "Use schedule"
+
+msgid "De"
+msgstr "From"
+
+msgid "Aplicar"
+msgstr "Apply"
+
+msgid "Escribe las horas como HH:MM, por ejemplo 23:30."
+msgstr "Write the times as HH:MM, for example 23:30."
+
+msgid "Límite de velocidad por horario"
+msgstr "Speed limit by schedule"
+
+msgid "Dentro de estas horas (todos los días) la velocidad no pasa de este tope, por ejemplo para poder navegar de día. Si también hay un límite general, vale el menor."
+msgstr "Within these hours (every day) the speed does not go above this cap, for example to keep browsing during the day. If there is also a general limit, the lower one applies."
+
+msgid "tope"
+msgstr "cap"
+
+msgid "Escribe las horas como HH:MM (08:00) y el tope como 2 MB/s o 700 KB/s."
+msgstr "Write the times as HH:MM (08:00) and the cap as 2 MB/s or 700 KB/s."
+
+msgid "Carpeta según el tipo de archivo"
+msgstr "Folder by file type"
+
+msgid "Por ejemplo, vídeos a una carpeta y .zip a otra. Escribe las extensiones separadas por comas (mp4, mkv). Gana la primera regla que coincida; un paquete con carpeta propia no se toca."
+msgstr "For example, videos to one folder and .zip to another. Write the extensions separated by commas (mp4, mkv). The first matching rule wins; a package with its own folder is left alone."
+
+msgid "Añadir regla"
+msgstr "Add rule"
+
+msgid "(elige una carpeta)"
+msgstr "(choose a folder)"
+
+msgid "Atajos de teclado"
+msgstr "Keyboard shortcuts"
+
+msgid "Escríbelos como Ctrl+N, Ctrl+Shift+P o F5. Déjalo vacío para quitar el atajo. Funcionan con la ventana a la vista."
+msgstr "Write them like Ctrl+N, Ctrl+Shift+P or F5. Leave empty to remove the shortcut. They work while the window is in view."
+
+msgid "(sin atajo)"
+msgstr "(no shortcut)"
+
+msgid "Al terminar todas las descargas"
+msgstr "When all downloads finish"
+
+msgid "Qué hacer cuando no queda nada por descargar. Suspender y apagar dan 60 segundos para cancelar con un aviso."
+msgstr "What to do when nothing is left to download. Suspend and shut down give 60 seconds to cancel, with a notice."
+
+msgid "No hacer nada"
+msgstr "Do nothing"
+
+msgid "Cerrar OmniLoad"
+msgstr "Close OmniLoad"
+
+msgid "Suspender el equipo"
+msgstr "Suspend the computer"
+
+msgid "Apagar el equipo"
+msgstr "Shut down the computer"
+
+msgid "Descomprimir al terminar"
+msgstr "Extract when finished"
+
+msgid "Cuando un paquete termina, abre los .zip, .7z y .rar que traiga en una carpeta con su nombre. Los .rar necesitan 7-Zip, WinRAR o unrar instalado. Si el archivo tiene contraseña, prueba las de la lista."
+msgstr "When a package finishes, it opens the .zip, .7z and .rar files it contains into a folder with their name. .rar files need 7-Zip, WinRAR or unrar installed. If the file has a password, it tries the ones in the list."
+
+msgid "Borrar el comprimido después"
+msgstr "Delete the archive afterwards"
+
+msgid "Si se abrió bien, se borran el archivo y todas sus partes. Si falla, no se toca nada."
+msgstr "If it opened fine, the archive and all its parts are deleted. If it fails, nothing is touched."
+
+msgid "Contraseñas para descomprimir"
+msgstr "Passwords for extracting"
+
+msgid "Una por línea. Se prueba primero sin contraseña y luego con cada una."
+msgstr "One per line. It tries without a password first and then with each one."
+
+msgid "una contraseña por línea"
+msgstr "one password per line"
+
+msgid "Iniciar con el sistema"
+msgstr "Start with the system"
+
+msgid "OmniLoad arranca al encender el equipo, escondido en la bandeja, y las descargas siguen sin que tengas que abrirlo."
+msgstr "OmniLoad starts when the computer turns on, hidden in the tray, and downloads continue without you having to open it."
+
+msgid "Versión"
+msgstr "Version"
+
+msgid "Versión del PR #{} sin aprobar: es una prueba, no una versión publicada."
+msgstr "Unapproved version from PR #{}: it is a test, not a published version."
+
+msgid "Actualizando…"
+msgstr "Updating…"
+
+msgid "Actualizar ahora"
+msgstr "Update now"
+
+msgid "Ver la versión nueva"
+msgstr "See the new version"
+
+msgid "Comprobando…"
+msgstr "Checking…"
+
+msgid "Buscar actualizaciones"
+msgstr "Check for updates"
+
+msgid "Buscar al abrir"
+msgstr "Check on startup"
+
+msgid "Al abrir OmniLoad pregunta a GitHub cuál es la última versión y te avisa si hay una nueva. No descarga ni instala nada hasta que pulses «Actualizar ahora»: entonces baja el instalador, comprueba su suma de seguridad, se cierra, se actualiza y se vuelve a abrir. Solo envía el nombre y el número de versión del programa."
+msgstr "When OmniLoad opens it asks GitHub for the latest version and tells you if there is a new one. It downloads and installs nothing until you click “Update now”: then it downloads the installer, checks its checksum, closes, updates and opens again. It only sends the program name and version number."
+
+msgid "Buscar actualizaciones al abrir"
+msgstr "Check for updates on startup"
+
+msgid "Apariencia"
+msgstr "Appearance"
+
+msgid "Los cambios se aplican al momento."
+msgstr "Changes apply immediately."
+
+msgid "Tema"
+msgstr "Theme"
+
+msgid "Cristal claro"
+msgstr "Light glass"
+
+msgid "Translúcido, por defecto"
+msgstr "Translucent, default"
+
+msgid "Cristal oscuro"
+msgstr "Dark glass"
+
+msgid "Translúcido, de noche"
+msgstr "Translucent, for night"
+
+msgid "Claro"
+msgstr "Light"
+
+msgid "Plano, sin efectos"
+msgstr "Flat, no effects"
+
+msgid "Grafito"
+msgstr "Graphite"
+
+msgid "Oscuro plano"
+msgstr "Flat dark"
+
+msgid "Alto contraste"
+msgstr "High contrast"
+
+msgid "Máxima legibilidad"
+msgstr "Maximum legibility"
+
+msgid "Cambiar entre claro y oscuro según el sistema"
+msgstr "Switch between light and dark following the system"
+
+msgid "Ventana"
+msgstr "Window"
+
+msgid "Panel de propiedades"
+msgstr "Properties panel"
+
+msgid "Dónde se muestran los detalles del paquete o archivo elegido"
+msgstr "Where the details of the chosen package or file are shown"
+
+msgid "Abajo"
+msgstr "Bottom"
+
+msgid "A la derecha"
+msgstr "Right"
+
+msgid "Oculto"
+msgstr "Hidden"
+
+msgid "Densidad"
+msgstr "Density"
+
+msgid "Compacta muestra más descargas sin desplazar"
+msgstr "Compact shows more downloads without scrolling"
+
+msgid "Cómoda"
+msgstr "Comfortable"
+
+msgid "Compacta"
+msgstr "Compact"
+
+msgid "Tamaño de letra"
+msgstr "Font size"
+
+msgid "Para leer mejor o para ver más cosas a la vez"
+msgstr "To read better or to see more at once"
+
+msgid "Pequeña"
+msgstr "Small"
+
+msgid "Normal"
+msgstr "Normal"
+
+msgid "Grande"
+msgstr "Large"
+
+msgid "Escala de la interfaz"
+msgstr "Interface scale"
+
+msgid "Agranda o reduce toda la ventana. Automática sigue la escala de Windows. Se aplica al volver a abrir OmniLoad."
+msgstr "Enlarges or shrinks the whole window. Automatic follows the system scale. Applies when OmniLoad is reopened."
+
+msgid "Automática"
+msgstr "Automatic"
+
+msgid "Idioma"
+msgstr "Language"
+
+msgid "Idioma de los textos del programa. Automático sigue el del sistema (inglés si no es español). El menú del icono de la bandeja cambia al volver a abrir."
+msgstr "Language of the program texts. Automatic follows the system (English if it is not Spanish). The tray icon menu changes when reopened."
+
+msgid "Unidad de velocidad"
+msgstr "Speed unit"
+
+msgid "Cómo se escriben las velocidades en la tabla, la barra inferior y la bandeja"
+msgstr "How speeds are written in the table, the bottom bar and the tray"
+
+msgid "Barra de progreso"
+msgstr "Progress bar"
+
+msgid "Fina (sin texto), normal o gruesa"
+msgstr "Thin (no text), normal or thick"
+
+msgid "Fina"
+msgstr "Thin"
+
+msgid "Gruesa"
+msgstr "Thick"
+
+msgid "Color de acento"
+msgstr "Accent color"
+
+msgid "Botones, barras de progreso y selección"
+msgstr "Buttons, progress bars and selection"
+
+msgid "Cristal"
+msgstr "Glass"
+
+msgid "Reducir transparencia"
+msgstr "Reduce transparency"
+
+msgid "Paneles opacos: más rápido en equipos modestos y más legible"
+msgstr "Opaque panels: faster on modest computers and easier to read"
+
+msgid "Intensidad del desenfoque"
+msgstr "Blur intensity"
+
+msgid "Cuánto se difuminan las sombras y los brillos de los paneles de cristal"
+msgstr "How much the shadows and highlights of the glass panels are blurred"
+
+msgid "Suave"
+msgstr "Soft"
+
+msgid "Fuerte"
+msgstr "Strong"
+
+msgid "Portapapeles"
+msgstr "Clipboard"
+
+msgid "Aviso al copiar enlaces"
+msgstr "Notice when copying links"
+
+msgid "Ventanita abajo a la derecha con los enlaces copiados mientras se comprueban"
+msgstr "Small window at the bottom right with the copied links while they are checked"
+
+msgid "Completo"
+msgstr "Full"
+
+msgid "Compacto"
+msgstr "Compact"
+
+msgid "Desactivado"
+msgstr "Off"
+
+msgid "Esquina del aviso"
+msgstr "Notice corner"
+
+msgid "Dónde aparece la ventanita de los enlaces copiados (en Wayland la coloca el sistema)"
+msgstr "Where the copied-links window appears (on Wayland the system places it)"
+
+msgid "Abajo a la derecha"
+msgstr "Bottom right"
+
+msgid "Abajo a la izquierda"
+msgstr "Bottom left"
+
+msgid "Arriba a la derecha"
+msgstr "Top right"
+
+msgid "Arriba a la izquierda"
+msgstr "Top left"
+
+msgid "Segundos hasta cerrarse"
+msgstr "Seconds until it closes"
+
+msgid "Cuánto espera el aviso, ya comprobados los enlaces, antes de desvanecerse"
+msgstr "How long the notice waits, once the links are checked, before fading"
+
+msgid "Cerrar el aviso automáticamente"
+msgstr "Close the notice automatically"
+
+msgid "Unos segundos después de terminar la comprobación se desvanece poco a poco (si pasas el ratón por encima, se queda)"
+msgstr "A few seconds after the check finishes it fades out slowly (if you hover over it, it stays)"
+
+msgid "Quitar descargas"
+msgstr "Remove downloads"
+
+msgid "«Quitar de la lista» solo las saca de OmniLoad: los archivos descargados se quedan en tu carpeta. «Quitar y borrar archivos» también borra del disco lo descargado (y la carpeta del paquete si se queda vacía)."
+msgstr "“Remove from list” only takes them out of OmniLoad: downloaded files stay in your folder. “Remove and delete files” also deletes what was downloaded from disk (and the package folder if it ends up empty)."
+
+msgid "Quitar y borrar archivos"
+msgstr "Remove and delete files"
+
+msgid "Quitar de la lista"
+msgstr "Remove from list"
+
+msgid "Pega uno o varios enlaces, sueltos o dentro de un texto. También sirven páginas con enlaces a archivos, o una lista guardada en un archivo .txt o .html."
+msgstr "Paste one or several links, loose or inside a text. Pages with links to files also work, or a list saved in a .txt or .html file."
+
+msgid "Abrir archivo…"
+msgstr "Open file…"
+
+msgid "Analizar enlaces"
+msgstr "Analyze links"
+
+msgid "OmniLoad {} · PR #{} sin aprobar"
+msgstr "OmniLoad {} · PR #{} unapproved"
+
+msgid "OmniLoad · enlaces copiados"
+msgstr "OmniLoad · copied links"
+
+msgid "Descargar los enlaces aptos"
+msgstr "Download the valid links"
+
+msgid "1 enlace copiado"
+msgstr "1 link copied"
+
+msgid "{} enlaces copiados"
+msgstr "{} links copied"
+
+msgid "{} de {} enlaces aptos"
+msgstr "{} of {} valid links"
+
+msgid "Iniciar al añadir"
+msgstr "Start when added"
+
+msgid "Descargar ({})"
+msgstr "Download ({})"
+
+msgid "Abrir en el capturador"
+msgstr "Open in the grabber"
+
+msgid "Descartar"
+msgstr "Dismiss"

@@ -29,6 +29,7 @@
 mod automation;
 mod clipboard;
 mod format;
+mod i18n;
 mod manager;
 mod notify;
 mod platform;
@@ -88,6 +89,8 @@ struct App {
     tray_rx: Receiver<TrayEvent>,
     /// Argumentos de otras ventanas que se abrieron estando esta en marcha.
     instance_rx: Receiver<Vec<String>>,
+    /// Combinaciones de teclas pulsadas con la ventana a la vista.
+    shortcut_rx: Receiver<String>,
     /// La ventana está escondida en la bandeja.
     hidden: Cell<bool>,
     notes: RefCell<notify::Tracker>,
@@ -132,7 +135,7 @@ impl App {
 
     fn show(&self, msg: &str, error: bool) {
         if let Some(ui) = self.ui() {
-            ui.set_message(msg.into());
+            ui.set_message(i18n::tr_msg(msg).as_ref().into());
             ui.set_message_is_error(error);
         }
     }
@@ -221,9 +224,10 @@ impl App {
                         title: "Descargas terminadas".into(),
                         body: format!(
                             "Se va a {} en 60 segundos. Abre OmniLoad para cancelar.",
-                            action.describe()
+                            i18n::tr(action.describe())
                         ),
                     },
+                    self.settings.borrow().notify_sound,
                 );
             }
         }
@@ -243,11 +247,12 @@ impl App {
             automation::run_action(action);
         } else if let Some(ui) = self.ui() {
             ui.set_finish_text(
-                format!(
+                i18n::tr_msg(&format!(
                     "Descargas terminadas: se va a {} en {} s.",
-                    action.describe(),
+                    i18n::tr(action.describe()),
                     left + 1
-                )
+                ))
+                .as_ref()
                 .into(),
             );
         }
@@ -276,8 +281,15 @@ impl App {
         if in_view {
             return;
         }
+        let (errors_only, sound) = {
+            let s = self.settings.borrow();
+            (s.notify_errors_only, s.notify_sound)
+        };
         for n in notes {
-            notify::send(&self.rt, n);
+            if errors_only && !notify::is_failure(&n) {
+                continue;
+            }
+            notify::send(&self.rt, n, sound);
         }
     }
 
@@ -293,7 +305,7 @@ impl App {
         let rate = rows.iter().map(|r| r.rate).sum();
         let paused = self.manager.is_held();
         tray.update(&TrayStatus {
-            tooltip: tray::tooltip(active, waiting, rate, paused),
+            tooltip: i18n::tr(&tray::tooltip(active, waiting, rate, paused)).into_owned(),
             paused,
             clipboard: ui.get_watch_clipboard(),
         });
@@ -316,7 +328,11 @@ impl App {
             return;
         }
         ui.set_update_state(1);
-        ui.set_update_text("Comprobando si hay una versión nueva…".into());
+        ui.set_update_text(
+            i18n::tr_msg("Comprobando si hay una versión nueva…")
+                .as_ref()
+                .into(),
+        );
         let (tx, rx) = mpsc::channel();
         self.rt.spawn(async move {
             let _ = tx.send(update::check().await);
@@ -365,7 +381,7 @@ impl App {
             Failed(e) => (5, format!("No se pudo comprobar: {e}.")),
         };
         ui.set_update_state(state);
-        ui.set_update_text(text.into());
+        ui.set_update_text(i18n::tr_msg(&text).as_ref().into());
     }
 
     /// «Actualizar ahora»: baja el instalador de la versión nueva, comprueba
@@ -383,7 +399,14 @@ impl App {
             return;
         }
         ui.set_update_busy(true);
-        ui.set_update_text(format!("Descargando {}…", install.name).into());
+        ui.set_update_text(
+            if i18n::is_english() {
+                format!("Downloading {}…", install.name)
+            } else {
+                format!("Descargando {}…", install.name)
+            }
+            .into(),
+        );
         let (tx, rx) = mpsc::channel();
         let progress_tx = tx.clone();
         self.rt.spawn(async move {
@@ -402,14 +425,21 @@ impl App {
                 match msg {
                     Msg::Progress(done, total) => {
                         let pct = (done * 100).checked_div(total).unwrap_or(0);
-                        ui.set_update_text(format!("Descargando la actualización… {pct} %").into());
+                        ui.set_update_text(
+                            i18n::tr_msg(&format!("Descargando la actualización… {pct} %"))
+                                .as_ref()
+                                .into(),
+                        );
                     }
                     Msg::Done(Ok(path)) => {
                         keep.stop();
                         *app.pending_update.borrow_mut() = Some(path);
                         ui.set_update_text(
-                            "Descargada y comprobada. OmniLoad se cierra para instalarla y se abrirá solo."
-                                .into(),
+                            i18n::tr_msg(
+                                "Descargada y comprobada. OmniLoad se cierra para instalarla y se abrirá solo.",
+                            )
+                            .as_ref()
+                            .into(),
                         );
                         let _ = slint::quit_event_loop();
                         return;
@@ -418,7 +448,11 @@ impl App {
                         keep.stop();
                         app.installing.set(false);
                         ui.set_update_busy(false);
-                        ui.set_update_text(format!("No se pudo actualizar: {e}.").into());
+                        ui.set_update_text(
+                            i18n::tr_msg(&format!("No se pudo actualizar: {e}."))
+                                .as_ref()
+                                .into(),
+                        );
                         return;
                     }
                 }
@@ -446,6 +480,7 @@ impl App {
                     title: "OmniLoad sigue en la bandeja".into(),
                     body: "Las descargas continúan. Para salir del todo, usa «Salir» en el menú del icono.".into(),
                 },
+                true,
             );
         }
     }
@@ -483,6 +518,9 @@ impl App {
                 }
             }
         }
+        while let Ok(combo) = self.shortcut_rx.try_recv() {
+            self.run_shortcut(&combo);
+        }
         while let Ok(args) = self.instance_rx.try_recv() {
             self.show_window();
             self.open_args(args);
@@ -518,6 +556,29 @@ impl App {
             }
         }
         self.refresh();
+    }
+
+    /// Hace lo que toque si `combo` (ya normalizada) es uno de los atajos.
+    fn run_shortcut(&self, combo: &str) {
+        let Some(ui) = self.ui() else { return };
+        let action = self
+            .settings
+            .borrow()
+            .shortcuts
+            .iter()
+            .position(|s| !s.trim().is_empty() && settings::normalize_shortcut(s) == combo);
+        match action {
+            Some(0) => {
+                ui.set_tab(0);
+                ui.set_add_dialog_open(true);
+            }
+            Some(1) => ui.invoke_pause_all(),
+            Some(2) => ui.invoke_start_all(),
+            Some(3) => ui.set_tab(0),
+            Some(4) => ui.set_tab(1),
+            Some(5) => ui.set_tab(2),
+            _ => {}
+        }
     }
 
     /// Enlaces y archivos pasados como argumentos (`omniload <url>...`), por
@@ -643,7 +704,10 @@ impl App {
         let now = Instant::now();
         let time = self.pop.borrow_mut().tick(&c, now);
         if self.settings.borrow().clip_popup_autoclose
-            && self.pop.borrow().should_autoclose(now)
+            && self.pop.borrow().should_autoclose_after(
+                now,
+                Duration::from_secs(self.settings.borrow().popup_linger_secs.clamp(1, 60) as u64),
+            )
             && !self.popup.get_hovered()
         {
             // Se desvanece poco a poco y, al terminar, se cierra.
@@ -661,12 +725,13 @@ impl App {
             .iter()
             .map(|i| {
                 let (status, usable, tone) = popup::status(i);
+                let status = i18n::tr(status);
                 PopRow {
                     key: i.id as i32,
                     name: i.name.clone().into(),
                     host: i.host.clone().into(),
                     size: i.size.map(format::bytes).unwrap_or_default().into(),
-                    status: status.into(),
+                    status: status.as_ref().into(),
                     tone,
                     checked: usable && i.selected,
                     usable,
@@ -706,7 +771,7 @@ impl App {
             .with_winit_window(|w| w.current_monitor().or_else(|| w.primary_monitor()))
             .flatten();
         let Some(monitor) = monitor else { return };
-        let pos = popup::corner(&monitor, size);
+        let pos = popup::corner(&monitor, size, self.settings.borrow().popup_corner);
         if self.pop_place.get() != Some((pos.x, pos.y)) {
             self.popup.window().set_position(pos);
             self.pop_place.set(Some((pos.x, pos.y)));
@@ -785,7 +850,7 @@ impl App {
         s.extract_passwords = ui.get_extract_passwords().to_string();
         s.check_updates = ui.get_check_updates();
         s.close_to_tray = ui.get_close_to_tray();
-        s.minimize_to_tray = ui.get_minimize_to_tray();
+        s.minimize_to_tray = s.close_to_tray;
         s.notify_done = ui.get_notify_done();
         s.clip_popup = ui.get_clip_popup();
         s.clip_popup_autoclose = ui.get_clip_autoclose();
@@ -798,6 +863,23 @@ impl App {
         s.schedule_from = ui.get_schedule_from().to_string();
         s.schedule_to = ui.get_schedule_to().to_string();
         s.finish_action = ui.get_finish_action();
+        s.language = ui.get_language();
+        i18n::apply(s.language);
+        relabel_columns(Table::Downloads, &self.col_rows);
+        relabel_columns(Table::Grabber, &self.grab_col_rows);
+        s.speed_unit = ui.get_speed_unit();
+        format::set_speed_unit(s.speed_unit);
+        s.bar_style = theme.get_bar_style();
+        s.notify_errors_only = ui.get_notify_errors_only();
+        s.notify_sound = ui.get_notify_sound();
+        s.popup_corner = ui.get_popup_corner();
+        s.popup_linger_secs = ui.get_popup_linger_secs();
+        s.max_retries = ui.get_max_retries();
+        s.limit_schedule_enabled = ui.get_limit_schedule_enabled();
+        s.limit_schedule_from = ui.get_limit_schedule_from().to_string();
+        s.limit_schedule_to = ui.get_limit_schedule_to().to_string();
+        s.limit_schedule_rate = ui.get_limit_schedule_rate().to_string();
+        ui.set_limit_schedule_error(s.limit_schedule().is_none());
         ui.set_schedule_error(s.schedule().is_none());
         // Solo se toca el sistema cuando la casilla cambió (consultar el
         // registro en cada ajuste sería lento e innecesario).
@@ -834,6 +916,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_hidden = args.iter().any(|a| a == automation::AUTOSTART_FLAG);
     args.retain(|a| a != automation::AUTOSTART_FLAG);
     let (instance_tx, instance_rx) = mpsc::channel();
+    let drop_tx = instance_tx.clone();
+    let (shortcut_tx, shortcut_rx) = mpsc::channel::<String>();
     let _instance = match settings::instance_path() {
         Some(path) => match single::claim(&path, &args, instance_tx) {
             single::Claim::Forwarded => return Ok(()),
@@ -855,7 +939,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     popup::select_backend();
     let ui = AppWindow::new()?;
+    i18n::apply(settings.language);
     apply_settings(&ui, &settings);
+    // Archivos soltados sobre la ventana (.torrent, listas de enlaces en texto):
+    // van al capturador igual que los pasados como argumento.
+    // Y las teclas pulsadas, para los atajos.
+    let mut mods = slint::winit_030::winit::keyboard::ModifiersState::empty();
+    ui.window().on_winit_window_event(move |_, event| {
+        use slint::winit_030::winit::event::{ElementState, WindowEvent};
+        use slint::winit_030::winit::keyboard::{Key, ModifiersState};
+        match event {
+            WindowEvent::DroppedFile(path) => {
+                let _ = drop_tx.send(vec![path.display().to_string()]);
+            }
+            WindowEvent::ModifiersChanged(m) => mods = m.state(),
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed && !event.repeat =>
+            {
+                let key = match &event.logical_key {
+                    Key::Character(c) => Some(c.to_lowercase()),
+                    Key::Named(n) => Some(format!("{n:?}").to_lowercase()),
+                    _ => None,
+                };
+                if let Some(key) = key {
+                    let mut combo = String::new();
+                    for (m, name) in [
+                        (ModifiersState::CONTROL, "ctrl"),
+                        (ModifiersState::ALT, "alt"),
+                        (ModifiersState::SHIFT, "shift"),
+                        (ModifiersState::SUPER, "meta"),
+                    ] {
+                        if mods.contains(m) {
+                            combo.push_str(name);
+                            combo.push('+');
+                        }
+                    }
+                    combo.push_str(&key);
+                    // Sin Ctrl, Alt ni Meta no es un atajo: es escribir.
+                    // (Las teclas F sí valen solas.)
+                    let is_f =
+                        key.len() > 1 && key.starts_with('f') && key[1..].parse::<u8>().is_ok();
+                    if combo.contains('+') && !combo.starts_with("shift+") || is_f {
+                        let _ = shortcut_tx.send(combo);
+                    }
+                }
+            }
+            _ => {}
+        }
+        slint::winit_030::EventResult::Propagate
+    });
     let clip_popup = popup::create(ClipPopup::new)?;
     clip_popup.set_autostart(settings.clip_popup_autostart);
     let pop_rows: Rc<VecModel<PopRow>> = Rc::new(VecModel::default());
@@ -869,6 +1001,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rule_rows: Rc<VecModel<RuleRow>> = Rc::new(VecModel::default());
     fill_rules(&rule_rows, &settings.file_rules);
     ui.set_rules(ModelRc::from(rule_rows.clone()));
+    let shortcut_rows: Rc<VecModel<ShortcutRow>> = Rc::new(VecModel::default());
+    fill_shortcuts(&shortcut_rows, &settings.shortcuts);
+    ui.set_shortcuts(ModelRc::from(shortcut_rows.clone()));
 
     let net_rows: Rc<VecModel<NetRow>> = Rc::new(VecModel::default());
     fill_nets(&net_rows, &settings.networks);
@@ -907,6 +1042,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tray_tx,
         tray_rx,
         instance_rx,
+        shortcut_rx,
         hidden: Cell::new(false),
         notes: RefCell::default(),
         finish: RefCell::default(),
@@ -1151,6 +1287,11 @@ fn apply_queue_settings(manager: &Manager, s: &Settings) {
         if let Some(schedule) = s.schedule() {
             q.schedule = schedule;
         }
+        q.max_retries = s.max_retries.clamp(0, 100) as u32;
+        if let Some((schedule, rate)) = s.limit_schedule() {
+            q.limit_schedule = schedule;
+            q.limit_schedule_rate = rate;
+        }
     });
 }
 
@@ -1164,7 +1305,11 @@ fn sync_queue_settings(ui: &AppWindow, manager: &Manager) {
     // El límite también lo cambia la terminal; no se pisa lo que se está
     // escribiendo.
     if !ui.get_speed_editing() && settings::parse_speed(&ui.get_speed_text()) != Ok(q.speed_limit) {
-        ui.set_speed_text(settings::speed_text(q.speed_limit).into());
+        ui.set_speed_text(
+            i18n::tr(&settings::speed_text(q.speed_limit))
+                .as_ref()
+                .into(),
+        );
     }
     let max_active = q.max_active.min(i32::MAX as usize) as i32;
     if ui.get_max_active() != max_active {
@@ -1201,8 +1346,8 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_extract_delete(s.extract_delete);
     ui.set_extract_passwords(s.extract_passwords.clone().into());
     ui.set_check_updates(s.check_updates);
-    ui.set_close_to_tray(s.close_to_tray);
-    ui.set_minimize_to_tray(s.minimize_to_tray);
+    ui.set_close_to_tray(s.close_to_tray || s.minimize_to_tray);
+    ui.set_minimize_to_tray(s.close_to_tray || s.minimize_to_tray);
     ui.set_notify_done(s.notify_done);
     ui.set_clip_popup(s.clip_popup);
     ui.set_clip_autoclose(s.clip_popup_autoclose);
@@ -1214,6 +1359,19 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_schedule_from(s.schedule_from.clone().into());
     ui.set_schedule_to(s.schedule_to.clone().into());
     ui.set_finish_action(s.finish_action);
+    ui.set_language(s.language);
+    format::set_speed_unit(s.speed_unit);
+    ui.set_speed_unit(s.speed_unit);
+    theme.set_bar_style(s.bar_style);
+    ui.set_notify_errors_only(s.notify_errors_only);
+    ui.set_notify_sound(s.notify_sound);
+    ui.set_popup_corner(s.popup_corner);
+    ui.set_popup_linger_secs(s.popup_linger_secs);
+    ui.set_max_retries(s.max_retries);
+    ui.set_limit_schedule_enabled(s.limit_schedule_enabled);
+    ui.set_limit_schedule_from(s.limit_schedule_from.clone().into());
+    ui.set_limit_schedule_to(s.limit_schedule_to.clone().into());
+    ui.set_limit_schedule_rate(s.limit_schedule_rate.clone().into());
     ui.set_autostart(automation::autostart_enabled());
 }
 
@@ -1230,12 +1388,22 @@ fn fill_columns(table: Table, model: &VecModel<ColState>, cols: &[settings::ColC
         cols.iter()
             .map(|c| ColState {
                 id: c.id,
-                name: settings::column_name(table, c.id).into(),
+                name: i18n::tr(settings::column_name(table, c.id)).as_ref().into(),
                 width: c.width,
                 shown: c.shown,
             })
             .collect::<Vec<_>>(),
     );
+}
+
+/// Vuelve a poner el nombre de las columnas (al cambiar de idioma).
+fn relabel_columns(table: Table, model: &VecModel<ColState>) {
+    for i in 0..model.row_count() {
+        if let Some(mut c) = model.row_data(i) {
+            c.name = i18n::tr(settings::column_name(table, c.id)).as_ref().into();
+            model.set_row_data(i, c);
+        }
+    }
 }
 
 /// Lo que hay ahora en el modelo, para guardarlo.
@@ -1262,6 +1430,19 @@ fn fill_nets(model: &VecModel<NetRow>, chosen: &[String]) {
         })
         .collect();
     model.set_vec(rows);
+}
+
+fn fill_shortcuts(model: &VecModel<ShortcutRow>, keys: &[String]) {
+    model.set_vec(
+        settings::SHORTCUT_ACTIONS
+            .iter()
+            .zip(keys)
+            .map(|((name, _), k)| ShortcutRow {
+                name: (*name).into(),
+                keys: k.clone().into(),
+            })
+            .collect::<Vec<_>>(),
+    );
 }
 
 fn fill_rules(model: &VecModel<RuleRow>, rules: &[settings::RuleCfg]) {
@@ -1354,6 +1535,13 @@ fn connect_downloads(ui: &AppWindow, app: &Rc<App>) {
     ui.on_queue_settings_changed({
         let app = app.clone();
         move || app.save_settings()
+    });
+    ui.on_dl_filter({
+        let app = app.clone();
+        move |i| {
+            app.state.borrow_mut().dl_filter = i;
+            app.refresh();
+        }
     });
     ui.on_dl_search({
         let app = app.clone();
@@ -1689,7 +1877,7 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             match settings::parse_speed(&text) {
                 Ok(limit) => {
                     app.manager.update_settings(|q| q.speed_limit = limit);
-                    ui.set_speed_text(settings::speed_text(limit).into());
+                    ui.set_speed_text(i18n::tr(&settings::speed_text(limit)).as_ref().into());
                     app.show("", false);
                 }
                 Err(()) => {
@@ -1698,7 +1886,7 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
                         true,
                     );
                     let current = app.manager.settings().speed_limit;
-                    ui.set_speed_text(settings::speed_text(current).into());
+                    ui.set_speed_text(i18n::tr(&settings::speed_text(current)).as_ref().into());
                 }
             }
         }
@@ -1709,7 +1897,7 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             let Some(ui) = app.ui() else { return };
             let limit = settings::speed_limit_bytes(i);
             app.manager.update_settings(|q| q.speed_limit = limit);
-            ui.set_speed_text(settings::speed_text(limit).into());
+            ui.set_speed_text(i18n::tr(&settings::speed_text(limit)).as_ref().into());
         }
     });
     ui.on_schedule_day_toggled({
@@ -1739,6 +1927,17 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             }
             fill_nets(&app.net_rows, &app.settings.borrow().networks);
             app.save_settings();
+        }
+    });
+    ui.on_shortcut_edited({
+        let app = app.clone();
+        move |i, text| {
+            // No se rehace la fila: así no se pierde el cursor.
+            let mut s = app.settings.borrow_mut();
+            if let Some(k) = s.shortcuts.get_mut(i as usize) {
+                *k = text.to_string();
+            }
+            s.save();
         }
     });
     ui.on_rule_add({

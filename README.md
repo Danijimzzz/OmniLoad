@@ -93,7 +93,7 @@ Pega el enlace y OmniLoad averigua solo de dónde viene. Funciona con:
 
 - **Enlaces directos** de cualquier web.
 - **Pixeldrain, Archive.org, Dropbox y Mediafire.**
-- **Google Drive** (archivos compartidos) y **Gofile**.
+- **Google Drive** (archivos compartidos) y **Gofile** y **Rootz** (rootz.so; la descarga gratis va despacio y solo deja un archivo cada 2 minutos).
 - **Mega**, con su cifrado: descarga y descifra por ti.
 - **OneDrive** (enlaces compartidos) y **1fichier** en modo gratuito: espera
   lo que pida la página y sigue solo.
@@ -122,6 +122,12 @@ límite de velocidad.
   abrir como mucho a una misma web, y las descargas a la misma web se reparten
   las conexiones de forma justa.
 - Si un enlace caduca, te lo dice claramente.
+- **Filtrar por estado**: ver solo lo que va en curso, lo terminado, lo que ha
+  dado error o lo que espera. La columna **Descargado** te dice cuánto lleva
+  cada archivo, además del tamaño total.
+- **Arrastra y suelta**: suelta un archivo `.torrent` o una lista de enlaces
+  (`.txt`, `.html`) sobre la ventana y va al Capturador.
+- **Reintentos** configurables si se corta la conexión.
 - **Quitar con calma.** Al quitar una descarga eliges: «Quitar de la lista»
   (lo normal: los archivos se quedan en tu carpeta) o «Quitar y borrar
   archivos» (también borra lo descargado y la carpeta del paquete si queda
@@ -142,8 +148,9 @@ del sistema, junto al reloj, y sigue descargando y vigilando lo que copias.
   vigilancia del portapapeles y **Salir** del todo.
 - Si abres OmniLoad otra vez, no se abre una segunda ventana: aparece la que ya
   tenías.
-- ¿Prefieres que la X cierre el programa? Desactívalo en **Ajustes ›
-  General**.
+- ¿Prefieres que la X cierre el programa? Desactiva **Esconder a la
+  bandeja** en **Ajustes › General** (sirve tanto para la X como para
+  minimizar).
 
 ### Versión y actualizaciones
 
@@ -170,6 +177,8 @@ En **Ajustes › Automático**:
   lo que quieras: escribes las extensiones y eliges la carpeta.
 - **Al terminar todas las descargas**: no hacer nada, cerrar OmniLoad,
   suspender o apagar el equipo (con 60 segundos para cancelar).
+- **Límite de velocidad por horario**: por ejemplo, 1 MB/s de 8:00 a 23:00
+  para poder navegar de día, y sin tope el resto.
 - **Iniciar con el sistema**, escondido en la bandeja.
 
 ### Varias conexiones a internet a la vez
@@ -193,6 +202,14 @@ Linux y macOS cada red sale siempre por su interfaz. Desde la terminal:
   tabla. Vale para las descargas y para el Capturador de enlaces. Se recuerda.
 - **Tamaño de letra** (pequeña, normal o grande), **escala de la interfaz** y
   **desenfoque del cristal** en Ajustes › Apariencia.
+- **Idioma**: español o English (o el del sistema), con cambio al momento.
+- **Unidad de velocidad** a tu gusto: MiB/s, MB/s, KiB/s o Mbit/s.
+- **Barra de progreso** fina, normal o gruesa.
+- **Avisos a tu medida**: solo si falla, con o sin sonido, y el aviso de
+  enlaces copiados en la esquina que prefieras y durante los segundos que
+  quieras.
+- **Atajos de teclado** que tú escribes (Ajustes › Automático): añadir
+  enlaces, pausar o reanudar todo, ir a cada pestaña.
 - **Límite de velocidad**: elige uno de la lista o escribe el tuyo («700 KB/s»,
   «3 MB/s»).
 - Paneles que se pueden ensanchar arrastrando su borde, y ventana con borde

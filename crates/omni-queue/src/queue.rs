@@ -269,7 +269,7 @@ impl Queue {
             s.speed_limit = s.speed_limit.filter(|&v| v > 0);
             s.clone()
         };
-        self.inner.global_rate.set(new.speed_limit);
+        self.inner.apply_rate(&new);
         if self.inner.servers.max_per_server() != new.max_per_server {
             self.inner.servers.set_max_per_server(new.max_per_server);
         }
@@ -652,8 +652,25 @@ impl Inner {
 
     /// Mira el horario: al salir de él pausa lo que corre y al volver a entrar
     /// la cola sigue sola.
+    /// Límite de velocidad que rige ahora: el global y, dentro del horario
+    /// de límite, el de ese horario (el menor de los dos).
+    fn apply_rate(&self, s: &QueueSettings) {
+        let (weekday, minute) = crate::schedule::local_now();
+        let scheduled = (s.limit_schedule.enabled && s.limit_schedule.allows(weekday, minute))
+            .then_some(s.limit_schedule_rate)
+            .flatten()
+            .filter(|&v| v > 0);
+        let limit = match (s.speed_limit, scheduled) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        self.global_rate.set(limit);
+    }
+
     fn check_schedule(&self) {
-        let schedule = self.settings().schedule;
+        let snapshot = self.settings().clone();
+        self.apply_rate(&snapshot);
+        let schedule = snapshot.schedule;
         let (weekday, minute) = crate::schedule::local_now();
         let blocked = !schedule.allows(weekday, minute);
         if self.sched_blocked.swap(blocked, Ordering::Relaxed) == blocked {
@@ -700,14 +717,15 @@ impl Inner {
     /// Lanza (o relanza) una descarga.
     fn launch(self: &Arc<Self>, e: &mut Entry) {
         let run_id = self.next_run.fetch_add(1, Ordering::Relaxed) + 1;
-        let (connections, nets) = {
+        let (connections, nets, max_retries) = {
             let s = self.settings();
-            (s.connections, s.networks.clone())
+            (s.connections, s.networks.clone(), s.max_retries)
         };
         e.connections = connections;
         let mut opts = DownloadOptions {
             connections_per_network: connections,
             networks: omni_core::networks_for(&nets),
+            max_retries,
             ..self.base.clone()
         };
         opts.rate_limits

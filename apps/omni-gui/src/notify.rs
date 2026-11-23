@@ -102,6 +102,12 @@ impl Tracker {
     }
 }
 
+/// ¿Avisa de un fallo? (el aviso suelto de error o el resumen que cuenta
+/// alguno).
+pub fn is_failure(note: &Note) -> bool {
+    note.title.starts_with("No se pudo") || note.body.contains("con error")
+}
+
 fn with_size(text: &str, size: u64) -> String {
     if size > 0 {
         format!("{text} ({})", format::bytes(size))
@@ -110,14 +116,31 @@ fn with_size(text: &str, size: u64) -> String {
     }
 }
 
+/// El aviso en el idioma elegido. El título se traduce entero; el cuerpo solo
+/// en las frases fijas, porque lleva nombres de archivo.
+fn translated(note: &Note) -> (String, String) {
+    if !crate::i18n::is_english() {
+        return (note.title.clone(), note.body.clone());
+    }
+    let body = crate::i18n::tr_msg(&note.body)
+        .replace(" archivos (", " files (")
+        .replace(" terminadas, ", " finished, ")
+        .replace(" con error", " with errors");
+    (crate::i18n::tr(&note.title).into_owned(), body)
+}
+
 /// Manda el aviso al sistema, en otro hilo (en algunos sistemas tarda).
-pub fn send(rt: &tokio::runtime::Handle, note: Note) {
+pub fn send(rt: &tokio::runtime::Handle, note: Note, sound: bool) {
     rt.spawn_blocking(move || {
-        let result = notify_rust::Notification::new()
-            .appname("OmniLoad")
-            .summary(&note.title)
-            .body(&note.body)
-            .show();
+        let mut n = notify_rust::Notification::new();
+        let (title, body) = translated(&note);
+        n.appname("OmniLoad").summary(&title).body(&body);
+        if sound {
+            // El nombre «default» lo entienden Windows y macOS; en Linux el
+            // servidor de notificaciones decide.
+            n.sound_name("default");
+        }
+        let result = n.show();
         if let Err(e) = result {
             tracing::warn!("no se pudo mostrar la notificación: {e}");
         }

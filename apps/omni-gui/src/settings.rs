@@ -81,6 +81,76 @@ pub struct Settings {
     /// Ancho del panel de propiedades a la derecha y de la lista de Ajustes.
     pub side_width: f32,
     pub nav_width: f32,
+    /// Unidad de las velocidades: 0 MiB/s, 1 MB/s, 2 KiB/s, 3 Mbit/s.
+    pub speed_unit: i32,
+    /// Barra de progreso: 0 fina, 1 normal, 2 gruesa.
+    pub bar_style: i32,
+    /// Avisar solo cuando una descarga falla.
+    pub notify_errors_only: bool,
+    /// Que el aviso del sistema suene.
+    pub notify_sound: bool,
+    /// Esquina del aviso de enlaces copiados: 0 abajo a la derecha, 1 abajo a
+    /// la izquierda, 2 arriba a la derecha, 3 arriba a la izquierda.
+    pub popup_corner: i32,
+    /// Segundos que el aviso espera antes de cerrarse solo.
+    pub popup_linger_secs: i32,
+    /// Reintentos por descarga cuando falla la conexión.
+    pub max_retries: i32,
+    /// Límite de velocidad propio dentro de un horario.
+    pub limit_schedule_enabled: bool,
+    pub limit_schedule_from: String,
+    pub limit_schedule_to: String,
+    pub limit_schedule_rate: String,
+    /// Atajos de teclado, uno por acción de [`SHORTCUT_ACTIONS`] (vacío =
+    /// sin atajo), escritos como «Ctrl+Shift+P».
+    pub shortcuts: Vec<String>,
+    /// Idioma de la interfaz: 0 automático, 1 español, 2 English.
+    pub language: i32,
+}
+
+/// Acciones con atajo de teclado, en el orden de `Settings::shortcuts`, y su
+/// atajo por defecto.
+pub const SHORTCUT_ACTIONS: [(&str, &str); 6] = [
+    ("Añadir enlaces", "Ctrl+N"),
+    ("Pausar todo", "Ctrl+P"),
+    ("Reanudar todo", "Ctrl+R"),
+    ("Ir a Descargas", "Ctrl+1"),
+    ("Ir al Capturador de enlaces", "Ctrl+2"),
+    ("Ir a Ajustes", "Ctrl+3"),
+];
+
+/// Deja la lista de atajos con una entrada por acción.
+pub fn fix_shortcuts(saved: &[String]) -> Vec<String> {
+    SHORTCUT_ACTIONS
+        .iter()
+        .enumerate()
+        .map(|(i, (_, def))| saved.get(i).cloned().unwrap_or_else(|| (*def).to_owned()))
+        .collect()
+}
+
+/// Un atajo escrito por el usuario, en su forma de comparar: minúsculas, sin
+/// espacios y con «control»/«ctl» como «ctrl».
+pub fn normalize_shortcut(text: &str) -> String {
+    let mut parts: Vec<String> = text
+        .split('+')
+        .map(|p| {
+            let p = p.trim().to_lowercase();
+            match p.as_str() {
+                "control" | "ctl" => "ctrl".to_owned(),
+                "mayús" | "mayus" => "shift".to_owned(),
+                "option" | "opt" => "alt".to_owned(),
+                "cmd" | "win" | "meta" | "super" => "meta".to_owned(),
+                "supr" => "delete".to_owned(),
+                "esc" => "escape".to_owned(),
+                _ => p,
+            }
+        })
+        .filter(|p| !p.is_empty())
+        .collect();
+    let key = parts.pop();
+    parts.sort_by_key(|m| ["ctrl", "alt", "shift", "meta"].iter().position(|x| x == m));
+    parts.extend(key);
+    parts.join("+")
 }
 
 /// Factor de escala de una opción de [`Settings::ui_scale`] (`None` =
@@ -100,7 +170,7 @@ pub fn ui_scale_factor(option: i32) -> Option<f32> {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColCfg {
     /// Descargas: 0 Nombre, 1 Host, 2 Tamaño, 3 Progreso, 4 Velocidad,
-    /// 5 Restante, 6 Prioridad, 7 Estado. Capturador: 0 Nombre, 1 Host,
+    /// 5 Restante, 6 Prioridad, 7 Estado, 8 Descargado. Capturador: 0 Nombre, 1 Host,
     /// 2 Tamaño, 3 Disponibilidad, 4 Prioridad, 5 Guardar en.
     pub id: i32,
     pub width: f32,
@@ -124,6 +194,7 @@ pub fn column_name(table: Table, id: i32) -> &'static str {
         (Table::Downloads, 4) => "Velocidad",
         (Table::Downloads, 5) => "Restante",
         (Table::Downloads, 6) => "Prioridad",
+        (Table::Downloads, 8) => "Descargado",
         (Table::Downloads, _) => "Estado",
         (Table::Grabber, 3) => "Disponibilidad",
         (Table::Grabber, 4) => "Prioridad",
@@ -140,6 +211,7 @@ pub fn default_columns(table: Table) -> Vec<ColCfg> {
             (0, 320.0),
             (1, 150.0),
             (2, 90.0),
+            (8, 100.0),
             (3, 170.0),
             (4, 95.0),
             (5, 95.0),
@@ -189,6 +261,13 @@ pub fn fix_columns(table: Table, saved: &[ColCfg]) -> Vec<ColCfg> {
         if !out.iter().any(|o| o.id == d.id) {
             if d.id == 0 {
                 out.insert(0, d);
+            } else if d.id == 8 {
+                // «Descargado» va justo detrás de «Tamaño».
+                let at = out
+                    .iter()
+                    .position(|o| o.id == 2)
+                    .map_or(out.len(), |i| i + 1);
+                out.insert(at, d);
             } else {
                 out.push(d);
             }
@@ -258,6 +337,19 @@ impl Default for Settings {
             ui_scale: 0,
             side_width: 320.0,
             nav_width: 240.0,
+            speed_unit: 0,
+            bar_style: 1,
+            notify_errors_only: false,
+            notify_sound: true,
+            popup_corner: 0,
+            popup_linger_secs: 2,
+            max_retries: 10,
+            limit_schedule_enabled: false,
+            limit_schedule_from: "08:00".into(),
+            limit_schedule_to: "23:00".into(),
+            limit_schedule_rate: "1 MB/s".into(),
+            shortcuts: fix_shortcuts(&[]),
+            language: 0,
         }
     }
 }
@@ -270,6 +362,20 @@ pub fn parse_hhmm(text: &str) -> Option<u16> {
 }
 
 impl Settings {
+    /// El horario del límite de velocidad y su tope, o `None` si lo escrito
+    /// no se entiende.
+    pub fn limit_schedule(&self) -> Option<(omni_queue::Schedule, Option<u64>)> {
+        Some((
+            omni_queue::Schedule {
+                enabled: self.limit_schedule_enabled,
+                days: omni_queue::ALL_DAYS,
+                from_min: parse_hhmm(&self.limit_schedule_from)?,
+                to_min: parse_hhmm(&self.limit_schedule_to)?,
+            },
+            parse_speed(&self.limit_schedule_rate).ok()?,
+        ))
+    }
+
     /// El horario tal como lo entiende la cola, o `None` si las horas no son
     /// válidas.
     pub fn schedule(&self) -> Option<omni_queue::Schedule> {
@@ -340,13 +446,15 @@ impl Settings {
         let Some(path) = path() else {
             return Self::default();
         };
-        match std::fs::read(&path) {
+        let mut s: Self = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
                 tracing::warn!("ajustes ilegibles en {}: {e}", path.display());
                 Self::default()
             }),
             Err(_) => Self::default(),
-        }
+        };
+        s.shortcuts = fix_shortcuts(&s.shortcuts);
+        s
     }
 
     /// Guarda los ajustes (escribe a un temporal y lo renombra, para no dejar
@@ -442,7 +550,7 @@ mod tests {
             },
         ];
         let fixed = fix_columns(Table::Downloads, &saved);
-        assert_eq!(fixed.len(), 8);
+        assert_eq!(fixed.len(), 9);
         // Nombre (que no estaba guardado) se añade al principio.
         assert_eq!(fixed[0].id, 0);
         assert_eq!(fixed[1].id, 4);
@@ -451,7 +559,7 @@ mod tests {
         assert_eq!(fixed[2].id, 1);
         let mut ids: Vec<i32> = fixed.iter().map(|c| c.id).collect();
         ids.sort_unstable();
-        assert_eq!(ids, [0, 1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(ids, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
         assert_eq!(
             fix_columns(Table::Downloads, &[]),
             default_columns(Table::Downloads)
@@ -480,6 +588,15 @@ mod tests {
         assert!(s.schedule().is_some());
         s.schedule_to = "mal".into();
         assert!(s.schedule().is_none());
+    }
+
+    #[test]
+    fn shortcuts_compare_in_one_form() {
+        assert_eq!(normalize_shortcut("Control + shift+P"), "ctrl+shift+p");
+        assert_eq!(normalize_shortcut("shift+ctrl+p"), "ctrl+shift+p");
+        assert_eq!(normalize_shortcut("Esc"), "escape");
+        assert_eq!(fix_shortcuts(&["x".into()])[0], "x");
+        assert_eq!(fix_shortcuts(&["x".into()])[1], "Ctrl+P");
     }
 
     #[test]

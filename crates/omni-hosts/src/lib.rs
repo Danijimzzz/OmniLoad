@@ -27,6 +27,7 @@ mod mediafire;
 mod mega;
 mod onedrive;
 mod pixeldrain;
+mod rootz;
 mod torrent;
 mod ytdlp;
 
@@ -48,6 +49,7 @@ pub use mediafire::Mediafire;
 pub use mega::Mega;
 pub use onedrive::OneDrive;
 pub use pixeldrain::Pixeldrain;
+pub use rootz::Rootz;
 pub use torrent::Torrents;
 pub use ytdlp::YtDlp;
 
@@ -97,6 +99,7 @@ impl Hosts {
             .with(YtDlp::new())
             .with(OneDrive::new())
             .with(OneFichier::new())
+            .with(Rootz::new())
             .with(Torrents::new())
     }
 

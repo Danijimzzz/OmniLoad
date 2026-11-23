@@ -26,6 +26,7 @@ reqwest.workspace = true
 rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sys-locale = "0.3"
 sha2.workspace = true
 slint = { workspace = true, features = ["unstable-winit-030"] }
 tokio.workspace = true
