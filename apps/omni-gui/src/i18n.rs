@@ -37,6 +37,25 @@ pub fn apply(option: i32) {
 /// Frases escritas desde Rust, de la más larga a la más corta (para que una
 /// frase entera gane a sus trozos).
 const PHRASES: &[(&str, &str)] = &[
+    (
+        "Código de color no válido: escribe algo como #3b82f6.",
+        "Invalid color code: type something like #3b82f6.",
+    ),
+    (
+        "Escribe un nombre para guardar la combinación.",
+        "Type a name to save the combination.",
+    ),
+    (
+        "Ese archivo es demasiado grande para ser un tema.",
+        "That file is too big to be a theme.",
+    ),
+    (
+        "Ese archivo no es un tema de OmniLoad.",
+        "That file is not an OmniLoad theme.",
+    ),
+    ("Tema guardado en ", "Theme saved to "),
+    ("No se pudo guardar el tema: ", "Could not save the theme: "),
+    ("No se pudo leer el tema: ", "Could not read the theme: "),
     ("Hay una versión nueva: ", "A new version is available: "),
     (". Tienes la ", ". You have "),
     (". Actualizar es opcional.", ". Updating is optional."),

@@ -30,6 +30,8 @@ mod automation;
 mod clipboard;
 mod format;
 mod i18n;
+mod icon;
+mod look;
 mod manager;
 mod notify;
 mod platform;
@@ -85,6 +87,9 @@ struct App {
     installing: Cell<bool>,
     /// Icono de la bandeja (si el sistema tiene bandeja).
     tray: RefCell<Option<Tray>>,
+    /// El icono elegido, dibujado a 32 y 256 píxeles, y el acento con que se dibujó.
+    tray_icons: RefCell<Vec<(u32, u32, Vec<u8>)>>,
+    icon_accent: Cell<u32>,
     tray_tx: Sender<TrayEvent>,
     tray_rx: Receiver<TrayEvent>,
     /// Argumentos de otras ventanas que se abrieron estando esta en marcha.
@@ -540,7 +545,11 @@ impl App {
     /// Pone el icono en la bandeja. Se llama con el bucle de eventos ya en
     /// marcha (macOS lo exige).
     fn create_tray(&self) {
-        match Tray::new(&self.rt, self.tray_tx.clone()) {
+        let mut icons = self.tray_icons.borrow().clone();
+        if icons.is_empty() {
+            icons = tray::icon_rgba();
+        }
+        match Tray::new(&self.rt, self.tray_tx.clone(), icons) {
             Ok(t) => *self.tray.borrow_mut() = Some(t),
             Err(e) => tracing::info!("sin icono en la bandeja ({e}): cerrar la ventana sale"),
         }
@@ -870,6 +879,8 @@ impl App {
         s.speed_unit = ui.get_speed_unit();
         format::set_speed_unit(s.speed_unit);
         s.bar_style = theme.get_bar_style();
+        s.look = look::read(&ui);
+        let accent_now = look::current_accent(&ui);
         s.notify_errors_only = ui.get_notify_errors_only();
         s.notify_sound = ui.get_notify_sound();
         s.popup_corner = ui.get_popup_corner();
@@ -895,6 +906,58 @@ impl App {
         }
         s.save();
         apply_queue_settings(&self.manager, &s);
+        drop(s);
+        // Con el icono «según el acento», un acento nuevo cambia el dibujo.
+        if accent_now != self.icon_accent.get() {
+            self.refresh_icon(true);
+        }
+    }
+
+    /// Dibuja el icono elegido y lo pone en la ventana, en el aviso y en la
+    /// bandeja; con `previews` rehace también las miniaturas de Ajustes.
+    fn refresh_icon(&self, previews: bool) {
+        let Some(ui) = self.ui() else { return };
+        let look = look::read(&ui);
+        let accent = look::current_accent(&ui);
+        self.icon_accent.set(accent);
+        if let Some(d) = look::icon_for(&look, accent) {
+            ui.global::<Theme>().set_app_icon(d.image.clone());
+            self.popup.global::<Theme>().set_app_icon(d.image);
+            if let Some(t) = self.tray.borrow().as_ref() {
+                t.set_icon(d.set.clone());
+            }
+            *self.tray_icons.borrow_mut() = d.set;
+        }
+        if previews {
+            ui.set_icon_styles(ModelRc::from(Rc::new(VecModel::from(look::style_models(
+                &look, accent,
+            )))));
+            let (a, b) = look::palette_models(accent);
+            ui.set_icon_pals_a(ModelRc::from(Rc::new(VecModel::from(a))));
+            ui.set_icon_pals_b(ModelRc::from(Rc::new(VecModel::from(b))));
+        }
+    }
+
+    /// Nombres de los temas propios guardados.
+    fn sync_look_names(&self) {
+        let Some(ui) = self.ui() else { return };
+        let names: Vec<SharedString> = self
+            .settings
+            .borrow()
+            .looks
+            .iter()
+            .map(|l| l.name.as_str().into())
+            .collect();
+        ui.set_look_names(ModelRc::from(Rc::new(VecModel::from(names))));
+    }
+
+    /// Pone una combinación de colores, transparencias e icono y la guarda.
+    fn apply_look(&self, look: &settings::Look) {
+        let Some(ui) = self.ui() else { return };
+        look::apply(&ui, look);
+        copy_theme(&ui, &self.popup);
+        self.refresh_icon(true);
+        self.save_settings();
     }
 }
 
@@ -1049,6 +1112,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         last_rows: RefCell::default(),
         countdown: Cell::new(None),
         autostart_on: Cell::new(automation::autostart_enabled()),
+        tray_icons: RefCell::default(),
+        icon_accent: Cell::new(0),
         rule_rows,
         net_rows,
         col_rows,
@@ -1083,6 +1148,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     connect_downloads(&ui, &app);
     connect_grabber(&ui, &app);
     connect_settings(&ui, &app);
+    connect_look(&ui, &app);
+    app.refresh_icon(true);
+    app.sync_look_names();
     connect_popup(&ui, &app);
     connect_updates(&ui, &app);
     ui.set_app_version(update::base_version(update::CURRENT).into());
@@ -1172,6 +1240,9 @@ fn copy_theme(ui: &AppWindow, popup: &ClipPopup) {
     to.set_reduce_transparency(from.get_reduce_transparency());
     to.set_font_level(from.get_font_level());
     to.set_blur_level(from.get_blur_level());
+    to.set_bar_style(from.get_bar_style());
+    look::apply_theme(&to, &look::read_theme(&from));
+    to.set_app_icon(from.get_app_icon());
 }
 
 fn connect_updates(ui: &AppWindow, app: &Rc<App>) {
@@ -1333,6 +1404,7 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     theme.set_compact(s.compact);
     theme.set_font_level(s.font_level);
     theme.set_blur_level(s.blur_level);
+    look::apply(ui, &s.look);
     ui.set_ui_scale(s.ui_scale);
     ui.set_side_w(s.side_width.clamp(240.0, 720.0));
     ui.set_nav_w(s.nav_width.clamp(180.0, 420.0));
@@ -2030,4 +2102,183 @@ fn init_logging() {
         .with_writer(std::io::stderr)
         .with_target(false)
         .init();
+}
+
+/// Colores, transparencias, temas propios e icono de Ajustes › Apariencia.
+fn connect_look(ui: &AppWindow, app: &Rc<App>) {
+    ui.on_to_hex(|c| look::hex_of(c).into());
+    ui.on_hex_typed({
+        let app = app.clone();
+        move |id, text| {
+            let Some(ui) = app.ui() else { return };
+            let Some(v) = settings::parse_hex(&text) else {
+                app.show(
+                    "Código de color no válido: escribe algo como #3b82f6.",
+                    true,
+                );
+                return;
+            };
+            let mut l = look::read(&ui);
+            if let Some(slot) = l.colors.get_mut(id as usize) {
+                *slot = settings::to_hex(v);
+            }
+            app.show("", false);
+            ui.set_editor_hex(settings::to_hex(v).into());
+            app.apply_look(&l);
+        }
+    });
+    ui.on_icon_changed({
+        let app = app.clone();
+        move || {
+            app.refresh_icon(true);
+            app.save_settings();
+        }
+    });
+    ui.on_look_save({
+        let app = app.clone();
+        move |name| {
+            let Some(ui) = app.ui() else { return };
+            let name = name.trim().to_owned();
+            if name.is_empty() {
+                app.show("Escribe un nombre para guardar la combinación.", true);
+                return;
+            }
+            app.show("", false);
+            let entry = settings::NamedLook {
+                name: name.clone(),
+                look: look::read(&ui),
+            };
+            {
+                let mut s = app.settings.borrow_mut();
+                match s
+                    .looks
+                    .iter()
+                    .position(|l| l.name.to_lowercase() == name.to_lowercase())
+                {
+                    Some(i) => s.looks[i] = entry,
+                    None => s.looks.push(entry),
+                }
+                s.save();
+            }
+            app.sync_look_names();
+        }
+    });
+    ui.on_look_apply({
+        let app = app.clone();
+        move |i| {
+            let look = app
+                .settings
+                .borrow()
+                .looks
+                .get(i as usize)
+                .map(|l| l.look.clone());
+            if let Some(look) = look {
+                app.apply_look(&look);
+            }
+        }
+    });
+    ui.on_look_delete({
+        let app = app.clone();
+        move |i| {
+            {
+                let mut s = app.settings.borrow_mut();
+                if (i as usize) < s.looks.len() {
+                    s.looks.remove(i as usize);
+                }
+                s.save();
+            }
+            app.sync_look_names();
+        }
+    });
+    ui.on_look_reset({
+        let app = app.clone();
+        move || {
+            let Some(ui) = app.ui() else { return };
+            // Vuelve a lo del tema; el icono elegido se queda.
+            app.apply_look(&settings::Look {
+                icon_style: ui.get_icon_style(),
+                icon_palette: ui.get_icon_palette(),
+                ..Default::default()
+            });
+        }
+    });
+    ui.on_look_export({
+        let app = app.clone();
+        move || {
+            let Some(ui) = app.ui() else { return };
+            let name = ui.get_look_name_text().trim().to_owned();
+            let name = if name.is_empty() {
+                "Mi tema".to_owned()
+            } else {
+                name
+            };
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Exportar tema")
+                .set_file_name(format!("{name}.omnitema.json"))
+                .add_filter("Tema de OmniLoad", &["json"])
+                .save_file()
+            else {
+                return;
+            };
+            let entry = settings::NamedLook {
+                name,
+                look: look::read(&ui),
+            };
+            match serde_json::to_vec_pretty(&entry).map(|b| std::fs::write(&path, b)) {
+                Ok(Ok(())) => app.show(&format!("Tema guardado en {}.", path.display()), false),
+                Ok(Err(e)) => app.show(&format!("No se pudo guardar el tema: {e}."), true),
+                Err(e) => app.show(&format!("No se pudo guardar el tema: {e}."), true),
+            }
+        }
+    });
+    ui.on_look_import({
+        let app = app.clone();
+        move || {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Importar tema")
+                .add_filter("Tema de OmniLoad", &["json"])
+                .pick_file()
+            else {
+                return;
+            };
+            let bytes = match std::fs::read(&path) {
+                Ok(b) if b.len() <= 256 * 1024 => b,
+                Ok(_) => {
+                    return app.show("Ese archivo es demasiado grande para ser un tema.", true);
+                }
+                Err(e) => return app.show(&format!("No se pudo leer el tema: {e}."), true),
+            };
+            let entry = serde_json::from_slice::<settings::NamedLook>(&bytes).or_else(|_| {
+                serde_json::from_slice::<settings::Look>(&bytes).map(|look| settings::NamedLook {
+                    name: path
+                        .file_stem()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "Tema importado".into()),
+                    look,
+                })
+            });
+            let Ok(mut entry) = entry else {
+                return app.show("Ese archivo no es un tema de OmniLoad.", true);
+            };
+            entry.look = entry.look.fixed();
+            if entry.name.trim().is_empty() {
+                entry.name = "Tema importado".into();
+            }
+            app.show("", false);
+            let look = entry.look.clone();
+            {
+                let mut s = app.settings.borrow_mut();
+                match s
+                    .looks
+                    .iter()
+                    .position(|l| l.name.to_lowercase() == entry.name.to_lowercase())
+                {
+                    Some(i) => s.looks[i] = entry,
+                    None => s.looks.push(entry),
+                }
+            }
+            app.sync_look_names();
+            app.apply_look(&look);
+        }
+    });
 }

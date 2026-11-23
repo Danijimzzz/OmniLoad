@@ -205,6 +205,8 @@ Linux y macOS cada red sale siempre por su interfaz. Desde la terminal:
 - **Idioma**: español o English (o el del sistema), con cambio al momento.
 - **Unidad de velocidad** a tu gusto: MiB/s, MB/s, KiB/s o Mbit/s.
 - **Barra de progreso** fina, normal o gruesa.
+- **Colores, transparencias, esquinas e icono** a tu gusto, con temas propios que
+  puedes guardar y compartir (más abajo, en «Apariencia»).
 - **Avisos a tu medida**: solo si falla, con o sin sonido, y el aviso de
   enlaces copiados en la esquina que prefieras y durante los segundos que
   quieras.
@@ -227,6 +229,32 @@ Elige entre **Cristal claro**, **Cristal oscuro**, **Claro**, **Grafito** y
 **Alto contraste**, o deja que cambie solo entre claro y oscuro con tu sistema.
 También puedes elegir el color de acento, una vista más compacta para ver más
 descargas y dónde se muestran los detalles.
+
+#### Hazlo tuyo: colores y transparencias
+
+Si los temas se te quedan cortos, en Ajustes › Apariencia puedes cambiar casi
+todo, y se ve al momento:
+
+- **Colores a tu gusto**: acento, fondo de la ventana, paneles, texto, barras
+  de progreso, los colores de «terminado», «aviso» y «error», las filas
+  alternas y la fila seleccionada. Cada uno con tres deslizadores (tono,
+  intensidad y luminosidad), colores rápidos o el código que quieras
+  (`#3b82f6`). Y un botón para volver al color del tema.
+- **Transparencias**: cuánto se ve el fondo a través de los paneles y qué
+  intensidad tienen los brillos de color de detrás del cristal.
+- **Formas**: esquinas rectas, normales o redondas, y bordes finos, normales o
+  gruesos.
+- **Temas propios**: guarda tu combinación con un nombre, vuelve a ella
+  cuando quieras y compártela con un amigo exportándola a un archivo (o
+  importa la suya). «Restaurar valores» te devuelve al tema original.
+
+#### Elige el icono de OmniLoad
+
+En Ajustes › Apariencia › **Icono de la aplicación** eliges entre 9 estilos
+(Hexágono con rayo, Cristal, Rayo con ondas, Doble hexágono, Escudo…) y 20
+combinaciones de colores, o dejas que siga tu color de acento. El icono cambia
+al momento en la ventana y junto al reloj. (El del archivo `.exe`, el del
+instalador y el del acceso directo es el de por defecto: los fija el sistema.)
 
 ## Descargar
 

@@ -15,10 +15,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Los tres programas juntos: la ventana busca omnid en su misma carpeta.
 cp "$BIN/omniload" "$BIN/omnid" "$BIN/omni" "$APP/Contents/MacOS/"
 
-# Icono: PNG de 256 px → .icns
+# Icono: PNG de 1024 px → .icns
 ICONSET="$(mktemp -d)/omniload.iconset"
 mkdir -p "$ICONSET"
-SRC="$ROOT/apps/omni-gui/ui/icon.png"
+SRC="$ROOT/apps/omni-gui/ui/icon-1024.png"
 for s in 16 32 128 256; do
   sips -z $s $s "$SRC" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
   sips -z $((s*2)) $((s*2)) "$SRC" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null

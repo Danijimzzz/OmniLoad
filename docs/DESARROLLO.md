@@ -74,6 +74,16 @@ ejecútalo en una terminal (`RUST_LOG=debug omnid`; Ctrl+C lo para).
   GTK: lo muestran KDE, XFCE, Cinnamon, MATE, LXQt y GNOME con la extensión
   «AppIndicator»). Si no hay bandeja, cerrar la ventana sale como antes. Si la
   bandeja desaparece con la ventana escondida, la ventana vuelve sola.
+- `apps/omni-gui/src/icon.rs` y `look.rs`: icono elegible y colores propios.
+  El icono es una plantilla SVG (9 estilos) con una paleta; se dibuja con
+  `resvg` (0.45.1: compatible con Rust 1.88, sin texto) a 32 y 256 px para la
+  bandeja y la ventana (`Theme.app-icon`) y a 120 px para las miniaturas de
+  Ajustes. El icono fijo (`ui/icon.png`, `icon.ico`, `icon-1024.png` para el
+  `.icns`) lo fija el sistema al compilar y se regenera con
+  `OMNILOAD_ICON_OUT=<carpeta> cargo test -p omni-gui write_default_icons -- --ignored`
+  (luego se empaqueta el `.ico` a partir de los PNG). `look.rs` pasa entre el
+  `Theme` de Slint (`c-*`, `panel-opacity`, `glow`, `radius-level`,
+  `border-level`) y `Settings::look`; los temas propios van en `Settings::looks`.
 - `apps/omni-gui/src/single.rs`: solo una ventana. La que está en marcha
   escucha en `127.0.0.1` y apunta puerto y token en `ventana.json`, junto a
   `ajustes.json`; abrir `omniload` otra vez le pasa los argumentos (enlaces o
