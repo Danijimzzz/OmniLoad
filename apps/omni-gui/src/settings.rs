@@ -81,6 +81,26 @@ pub struct Settings {
     /// Ancho del panel de propiedades a la derecha y de la lista de Ajustes.
     pub side_width: f32,
     pub nav_width: f32,
+    /// Unidad de las velocidades: 0 MiB/s, 1 MB/s, 2 KiB/s, 3 Mbit/s.
+    pub speed_unit: i32,
+    /// Barra de progreso: 0 fina, 1 normal, 2 gruesa.
+    pub bar_style: i32,
+    /// Avisar solo cuando una descarga falla.
+    pub notify_errors_only: bool,
+    /// Que el aviso del sistema suene.
+    pub notify_sound: bool,
+    /// Esquina del aviso de enlaces copiados: 0 abajo a la derecha, 1 abajo a
+    /// la izquierda, 2 arriba a la derecha, 3 arriba a la izquierda.
+    pub popup_corner: i32,
+    /// Segundos que el aviso espera antes de cerrarse solo.
+    pub popup_linger_secs: i32,
+    /// Reintentos por descarga cuando falla la conexión.
+    pub max_retries: i32,
+    /// Límite de velocidad propio dentro de un horario.
+    pub limit_schedule_enabled: bool,
+    pub limit_schedule_from: String,
+    pub limit_schedule_to: String,
+    pub limit_schedule_rate: String,
 }
 
 /// Factor de escala de una opción de [`Settings::ui_scale`] (`None` =
@@ -258,6 +278,17 @@ impl Default for Settings {
             ui_scale: 0,
             side_width: 320.0,
             nav_width: 240.0,
+            speed_unit: 0,
+            bar_style: 1,
+            notify_errors_only: false,
+            notify_sound: true,
+            popup_corner: 0,
+            popup_linger_secs: 2,
+            max_retries: 10,
+            limit_schedule_enabled: false,
+            limit_schedule_from: "08:00".into(),
+            limit_schedule_to: "23:00".into(),
+            limit_schedule_rate: "1 MB/s".into(),
         }
     }
 }
@@ -270,6 +301,20 @@ pub fn parse_hhmm(text: &str) -> Option<u16> {
 }
 
 impl Settings {
+    /// El horario del límite de velocidad y su tope, o `None` si lo escrito
+    /// no se entiende.
+    pub fn limit_schedule(&self) -> Option<(omni_queue::Schedule, Option<u64>)> {
+        Some((
+            omni_queue::Schedule {
+                enabled: self.limit_schedule_enabled,
+                days: omni_queue::ALL_DAYS,
+                from_min: parse_hhmm(&self.limit_schedule_from)?,
+                to_min: parse_hhmm(&self.limit_schedule_to)?,
+            },
+            parse_speed(&self.limit_schedule_rate).ok()?,
+        ))
+    }
+
     /// El horario tal como lo entiende la cola, o `None` si las horas no son
     /// válidas.
     pub fn schedule(&self) -> Option<omni_queue::Schedule> {

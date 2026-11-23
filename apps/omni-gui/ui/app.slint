@@ -28,6 +28,8 @@ export global Theme {
     in-out property <int> font-level: 1;
     // Desenfoque de sombras y brillos del cristal: 0 suave, 1 normal, 2 fuerte.
     in-out property <int> blur-level: 1;
+    // Barra de progreso: 0 fina, 1 normal, 2 gruesa.
+    in-out property <int> bar-style: 1;
     out property <float> fscale: [0.9, 1.0, 1.15][font-level];
     out property <length> shadow-blur: [14px, 32px, 56px][blur-level];
 
@@ -504,21 +506,22 @@ component Bar inherits Rectangle {
     in property <float> fraction;
     in property <string> text;
     in property <color> fill: Theme.accent;
-    height: 18px;
-    border-radius: 9px;
+    height: [8px, 18px, 26px][Theme.bar-style];
+    border-radius: self.height / 2;
     background: Theme.track;
     clip: true;
     Rectangle {
         x: 0;
         width: parent.width * max(0, root.fraction);
         background: @linear-gradient(90deg, root.fill.darker(0.15) 0%, root.fill 100%);
-        border-radius: 9px;
+        border-radius: root.border-radius;
         animate width { duration: 250ms; easing: ease-out; }
     }
     Text {
         x: 8px;
+        visible: Theme.bar-style > 0;
         text: root.text;
-        font-size: 11px * Theme.fscale;
+        font-size: (Theme.bar-style == 2 ? 13px : 11px) * Theme.fscale;
         font-weight: 700;
         color: Theme.text;
         vertical-alignment: center;
@@ -1637,6 +1640,19 @@ export component AppWindow inherits Window {
     in-out property <bool> autostart: false;
     // Escala de la interfaz: 0 automática, 1 100 %, 2 125 %… (al reabrir).
     in-out property <int> ui-scale: 0;
+    // Unidad de las velocidades: 0 MiB/s, 1 MB/s, 2 KiB/s, 3 Mbit/s.
+    in-out property <int> speed-unit: 0;
+    in-out property <bool> notify-errors-only: false;
+    in-out property <bool> notify-sound: true;
+    // Esquina del aviso de enlaces y segundos que espera antes de cerrarse.
+    in-out property <int> popup-corner: 0;
+    in-out property <int> popup-linger-secs: 2;
+    in-out property <int> max-retries: 10;
+    in-out property <bool> limit-schedule-enabled: false;
+    in-out property <string> limit-schedule-from: "08:00";
+    in-out property <string> limit-schedule-to: "23:00";
+    in-out property <string> limit-schedule-rate: "1 MB/s";
+    in property <bool> limit-schedule-error: false;
     // Cuenta atrás de la acción al terminar (vacío = no hay).
     in property <string> finish-text;
     callback finish-cancel();
@@ -2416,6 +2432,16 @@ export component AppWindow inherits Window {
                         }
                     }
                     SettingRow {
+                        title: "Reintentos si falla la conexión";
+                        subtitle: "Cuántas veces vuelve a intentar una descarga cuando se corta o el servidor da error, esperando cada vez un poco más. Vale para las descargas que empiecen después de cambiarlo.";
+                        SpinBox {
+                            width: 90px;
+                            minimum: 0;
+                            maximum: 100;
+                            value <=> root.max-retries;
+                        }
+                    }
+                    SettingRow {
                         title: "Descargar por varias redes a la vez";
                         subtitle: "Marca dos o más para sumar su velocidad (por ejemplo, wifi y cable, o el móvil por USB). Con una o ninguna se usa la red normal del sistema. Cada red abre sus propias conexiones por archivo. Solo cuentan las descargas que se empiecen después de cambiarlo.";
                         Btn { text: "Buscar de nuevo"; clicked => { root.nets-refresh(); } }
@@ -2448,6 +2474,28 @@ export component AppWindow inherits Window {
                         Check {
                             checked <=> root.notify-done;
                             label: "Avisar al terminar";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Avisar solo si falla";
+                        subtitle: "No avisa de lo que termina bien, solo de lo que da error.";
+                        opacity: root.notify-done ? 1 : 0.5;
+                        Check {
+                            checked <=> root.notify-errors-only;
+                            enabled: root.notify-done;
+                            label: "Avisar solo si falla";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    SettingRow {
+                        title: "Sonido en los avisos";
+                        subtitle: "La notificación del sistema suena al aparecer.";
+                        opacity: root.notify-done ? 1 : 0.5;
+                        Check {
+                            checked <=> root.notify-sound;
+                            enabled: root.notify-done;
+                            label: "Sonido en los avisos";
                             toggled => { root.settings-changed(); }
                         }
                     }
@@ -2525,6 +2573,50 @@ export component AppWindow inherits Window {
                     }
                     if root.schedule-error: Text {
                         text: "Escribe las horas como HH:MM, por ejemplo 23:30.";
+                        color: Theme.err;
+                        font-size: 13px * Theme.fscale;
+                    }
+                    SettingRow {
+                        title: "Límite de velocidad por horario";
+                        subtitle: "Dentro de estas horas (todos los días) la velocidad no pasa de este tope, por ejemplo para poder navegar de día. Si también hay un límite general, vale el menor.";
+                        Check {
+                            checked <=> root.limit-schedule-enabled;
+                            label: "Límite de velocidad por horario";
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        opacity: root.limit-schedule-enabled ? 1 : 0.5;
+                        Text { text: "De"; color: Theme.muted; font-size: 13px * Theme.fscale; vertical-alignment: center; }
+                        LineEdit {
+                            width: 80px;
+                            enabled: root.limit-schedule-enabled;
+                            text <=> root.limit-schedule-from;
+                            placeholder-text: "08:00";
+                            accepted => { root.settings-changed(); }
+                        }
+                        Text { text: "a"; color: Theme.muted; font-size: 13px * Theme.fscale; vertical-alignment: center; }
+                        LineEdit {
+                            width: 80px;
+                            enabled: root.limit-schedule-enabled;
+                            text <=> root.limit-schedule-to;
+                            placeholder-text: "23:00";
+                            accepted => { root.settings-changed(); }
+                        }
+                        Text { text: "tope"; color: Theme.muted; font-size: 13px * Theme.fscale; vertical-alignment: center; }
+                        LineEdit {
+                            width: 110px;
+                            enabled: root.limit-schedule-enabled;
+                            text <=> root.limit-schedule-rate;
+                            placeholder-text: "1 MB/s";
+                            accepted => { root.settings-changed(); }
+                        }
+                        Btn { text: "Aplicar"; enabled: root.limit-schedule-enabled; clicked => { root.settings-changed(); } }
+                    }
+                    if root.limit-schedule-error: Text {
+                        text: "Escribe las horas como HH:MM (08:00) y el tope como 2 MB/s o 700 KB/s.";
                         color: Theme.err;
                         font-size: 13px * Theme.fscale;
                     }
@@ -2775,6 +2867,25 @@ export component AppWindow inherits Window {
                                 }
                             }
                             SettingRow {
+                                title: "Unidad de velocidad";
+                                subtitle: "Cómo se escriben las velocidades en la tabla, la barra inferior y la bandeja";
+                                ComboBox {
+                                    width: 140px;
+                                    model: ["MiB/s", "MB/s", "KiB/s", "Mbit/s"];
+                                    current-index <=> root.speed-unit;
+                                    selected => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Barra de progreso";
+                                subtitle: "Fina (sin texto), normal o gruesa";
+                                Segmented {
+                                    options: ["Fina", "Normal", "Gruesa"];
+                                    current: Theme.bar-style;
+                                    changed-by-user(i) => { Theme.bar-style = i; root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
                                 title: "Color de acento";
                                 subtitle: "Botones, barras de progreso y selección";
                                 HorizontalLayout {
@@ -2828,6 +2939,28 @@ export component AppWindow inherits Window {
                                     options: ["Completo", "Compacto", "Desactivado"];
                                     current <=> root.clip-popup;
                                     changed-by-user => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Esquina del aviso";
+                                subtitle: "Dónde aparece la ventanita de los enlaces copiados (en Wayland la coloca el sistema)";
+                                ComboBox {
+                                    width: 190px;
+                                    model: ["Abajo a la derecha", "Abajo a la izquierda", "Arriba a la derecha", "Arriba a la izquierda"];
+                                    current-index <=> root.popup-corner;
+                                    selected => { root.settings-changed(); }
+                                }
+                            }
+                            SettingRow {
+                                title: "Segundos hasta cerrarse";
+                                subtitle: "Cuánto espera el aviso, ya comprobados los enlaces, antes de desvanecerse";
+                                opacity: root.clip-autoclose ? 1 : 0.5;
+                                SpinBox {
+                                    width: 90px;
+                                    enabled: root.clip-autoclose;
+                                    minimum: 1;
+                                    maximum: 60;
+                                    value <=> root.popup-linger-secs;
                                 }
                             }
                             SettingRow {

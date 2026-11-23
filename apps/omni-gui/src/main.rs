@@ -224,6 +224,7 @@ impl App {
                             action.describe()
                         ),
                     },
+                    self.settings.borrow().notify_sound,
                 );
             }
         }
@@ -276,8 +277,15 @@ impl App {
         if in_view {
             return;
         }
+        let (errors_only, sound) = {
+            let s = self.settings.borrow();
+            (s.notify_errors_only, s.notify_sound)
+        };
         for n in notes {
-            notify::send(&self.rt, n);
+            if errors_only && !notify::is_failure(&n) {
+                continue;
+            }
+            notify::send(&self.rt, n, sound);
         }
     }
 
@@ -446,6 +454,7 @@ impl App {
                     title: "OmniLoad sigue en la bandeja".into(),
                     body: "Las descargas continúan. Para salir del todo, usa «Salir» en el menú del icono.".into(),
                 },
+                true,
             );
         }
     }
@@ -643,7 +652,10 @@ impl App {
         let now = Instant::now();
         let time = self.pop.borrow_mut().tick(&c, now);
         if self.settings.borrow().clip_popup_autoclose
-            && self.pop.borrow().should_autoclose(now)
+            && self.pop.borrow().should_autoclose_after(
+                now,
+                Duration::from_secs(self.settings.borrow().popup_linger_secs.clamp(1, 60) as u64),
+            )
             && !self.popup.get_hovered()
         {
             // Se desvanece poco a poco y, al terminar, se cierra.
@@ -706,7 +718,7 @@ impl App {
             .with_winit_window(|w| w.current_monitor().or_else(|| w.primary_monitor()))
             .flatten();
         let Some(monitor) = monitor else { return };
-        let pos = popup::corner(&monitor, size);
+        let pos = popup::corner(&monitor, size, self.settings.borrow().popup_corner);
         if self.pop_place.get() != Some((pos.x, pos.y)) {
             self.popup.window().set_position(pos);
             self.pop_place.set(Some((pos.x, pos.y)));
@@ -798,6 +810,19 @@ impl App {
         s.schedule_from = ui.get_schedule_from().to_string();
         s.schedule_to = ui.get_schedule_to().to_string();
         s.finish_action = ui.get_finish_action();
+        s.speed_unit = ui.get_speed_unit();
+        format::set_speed_unit(s.speed_unit);
+        s.bar_style = theme.get_bar_style();
+        s.notify_errors_only = ui.get_notify_errors_only();
+        s.notify_sound = ui.get_notify_sound();
+        s.popup_corner = ui.get_popup_corner();
+        s.popup_linger_secs = ui.get_popup_linger_secs();
+        s.max_retries = ui.get_max_retries();
+        s.limit_schedule_enabled = ui.get_limit_schedule_enabled();
+        s.limit_schedule_from = ui.get_limit_schedule_from().to_string();
+        s.limit_schedule_to = ui.get_limit_schedule_to().to_string();
+        s.limit_schedule_rate = ui.get_limit_schedule_rate().to_string();
+        ui.set_limit_schedule_error(s.limit_schedule().is_none());
         ui.set_schedule_error(s.schedule().is_none());
         // Solo se toca el sistema cuando la casilla cambió (consultar el
         // registro en cada ajuste sería lento e innecesario).
@@ -1151,6 +1176,11 @@ fn apply_queue_settings(manager: &Manager, s: &Settings) {
         if let Some(schedule) = s.schedule() {
             q.schedule = schedule;
         }
+        q.max_retries = s.max_retries.clamp(0, 100) as u32;
+        if let Some((schedule, rate)) = s.limit_schedule() {
+            q.limit_schedule = schedule;
+            q.limit_schedule_rate = rate;
+        }
     });
 }
 
@@ -1214,6 +1244,18 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_schedule_from(s.schedule_from.clone().into());
     ui.set_schedule_to(s.schedule_to.clone().into());
     ui.set_finish_action(s.finish_action);
+    format::set_speed_unit(s.speed_unit);
+    ui.set_speed_unit(s.speed_unit);
+    theme.set_bar_style(s.bar_style);
+    ui.set_notify_errors_only(s.notify_errors_only);
+    ui.set_notify_sound(s.notify_sound);
+    ui.set_popup_corner(s.popup_corner);
+    ui.set_popup_linger_secs(s.popup_linger_secs);
+    ui.set_max_retries(s.max_retries);
+    ui.set_limit_schedule_enabled(s.limit_schedule_enabled);
+    ui.set_limit_schedule_from(s.limit_schedule_from.clone().into());
+    ui.set_limit_schedule_to(s.limit_schedule_to.clone().into());
+    ui.set_limit_schedule_rate(s.limit_schedule_rate.clone().into());
     ui.set_autostart(automation::autostart_enabled());
 }
 

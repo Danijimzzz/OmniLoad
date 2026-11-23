@@ -154,6 +154,14 @@ pub struct QueueSettings {
     pub extract: ExtractSettings,
     /// Interfaces por las que descargar a la vez (vacío = la del sistema).
     pub networks: Vec<String>,
+    /// Reintentos de cada descarga cuando falla la red o el servidor.
+    pub max_retries: u32,
+    /// Horario en el que rige un límite de velocidad propio (por ejemplo,
+    /// poco ancho de banda de día y todo de noche).
+    pub limit_schedule: Schedule,
+    /// Límite, en bytes por segundo, dentro de ese horario (`None` = sin
+    /// límite extra). Si también hay límite global, vale el menor.
+    pub limit_schedule_rate: Option<u64>,
 }
 
 /// Qué hacer con los archivos comprimidos que se terminan de descargar.
@@ -189,6 +197,14 @@ impl Default for QueueSettings {
             schedule: Schedule::default(),
             extract: ExtractSettings::default(),
             networks: Vec::new(),
+            max_retries: 10,
+            limit_schedule: Schedule {
+                enabled: false,
+                days: crate::schedule::ALL_DAYS,
+                from_min: 8 * 60,
+                to_min: 23 * 60,
+            },
+            limit_schedule_rate: None,
         }
     }
 }

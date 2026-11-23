@@ -102,6 +102,12 @@ impl Tracker {
     }
 }
 
+/// ¿Avisa de un fallo? (el aviso suelto de error o el resumen que cuenta
+/// alguno).
+pub fn is_failure(note: &Note) -> bool {
+    note.title.starts_with("No se pudo") || note.body.contains("con error")
+}
+
 fn with_size(text: &str, size: u64) -> String {
     if size > 0 {
         format!("{text} ({})", format::bytes(size))
@@ -111,13 +117,16 @@ fn with_size(text: &str, size: u64) -> String {
 }
 
 /// Manda el aviso al sistema, en otro hilo (en algunos sistemas tarda).
-pub fn send(rt: &tokio::runtime::Handle, note: Note) {
+pub fn send(rt: &tokio::runtime::Handle, note: Note, sound: bool) {
     rt.spawn_blocking(move || {
-        let result = notify_rust::Notification::new()
-            .appname("OmniLoad")
-            .summary(&note.title)
-            .body(&note.body)
-            .show();
+        let mut n = notify_rust::Notification::new();
+        n.appname("OmniLoad").summary(&note.title).body(&note.body);
+        if sound {
+            // El nombre «default» lo entienden Windows y macOS; en Linux el
+            // servidor de notificaciones decide.
+            n.sound_name("default");
+        }
+        let result = n.show();
         if let Err(e) = result {
             tracing::warn!("no se pudo mostrar la notificación: {e}");
         }
