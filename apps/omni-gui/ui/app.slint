@@ -2053,13 +2053,15 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                     horizontal-alignment: center;
                 }
-                if root.update-state == 3: Btn {
-                    y: (parent.height - self.height) / 2;
-                    text: @tr("Hay una versión nueva");
-                    icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
-                    icon-color: Theme.ok;
-                    label: root.update-text;
-                    clicked => { root.settings-section = 2; root.tab = 2; }
+                if root.update-state == 3: VerticalLayout {
+                    alignment: center;
+                    Btn {
+                        text: @tr("Hay una versión nueva");
+                        icon: "M12 5v10M7 11l5 5 5-5M5 19h14";
+                        icon-color: Theme.ok;
+                        label: root.update-text;
+                        clicked => { root.settings-section = 2; root.tab = 2; }
+                    }
                 }
                 VerticalLayout { alignment: center;
                 Btn {
