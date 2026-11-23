@@ -398,6 +398,28 @@ impl CustomDownload for TorrentJob {
                     base = stats.progress_bytes;
                     started = matches!(stats.state, TorrentStatsState::Live);
                 }
+                // Compañeros conectados con su IP y programa, los que más
+                // mandan primero.
+                if let (Some(live), Some(st)) = (handle.live(), stats.live.as_ref()) {
+                    let mut peers: Vec<omni_core::PeerInfo> = live
+                        .per_peer_stats_snapshot(Default::default())
+                        .peers
+                        .into_iter()
+                        .map(|(addr, p)| omni_core::PeerInfo {
+                            addr,
+                            client: p.client_name.unwrap_or_default(),
+                            downloaded: p.counters.fetched_bytes,
+                            uploaded: p.counters.uploaded_bytes,
+                        })
+                        .collect();
+                    peers.sort_by(|a, b| b.downloaded.cmp(&a.downloaded).then(a.addr.cmp(&b.addr)));
+                    let ps = &st.snapshot.peer_stats;
+                    progress.set_swarm(omni_core::Swarm {
+                        live: peers,
+                        known: ps.seen as usize,
+                        seeders: ps.live_seeders as usize,
+                    });
+                }
                 if let Some(err) = stats.error {
                     break Err(fail(err));
                 }

@@ -101,7 +101,10 @@ Pega el enlace y OmniLoad averigua solo de dónde viene. Funciona con:
   [yt-dlp](https://github.com/yt-dlp/yt-dlp) (tienes que tenerlo instalado).
 - **Torrents**: enlaces `magnet:` y archivos `.torrent`, en la misma lista
   que todo lo demás. Ojo: en BitTorrent tu dirección IP es visible para los
-  demás participantes, es así como funciona el protocolo.
+  demás participantes, es así como funciona el protocolo. Al pulsar un
+  torrent que está bajando, el panel de detalles dice cuántos compañeros hay
+  conectados (y cuántos tienen el archivo entero) y lista los primeros con su
+  IP, el programa que usan y lo que te mandan.
 
 Todo aparece en la misma lista, con los mismos controles de pausa, prioridad y
 límite de velocidad.
