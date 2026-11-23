@@ -1996,7 +1996,7 @@ export component AppWindow inherits Window {
             height: 52px;
             HorizontalLayout {
                 padding: 7px;
-                padding-left: 12px;
+                padding-left: 20px;
                 spacing: 6px;
                 // Dentro de un HorizontalLayout la `y` se ignora: el logo va en un
                 // VerticalLayout que lo centra.
@@ -2578,11 +2578,16 @@ export component AppWindow inherits Window {
                     padding-right: 10px;
                     spacing: 2px;
                     alignment: start;
-                    Text {
-                        text: @tr("Ajustes");
-                        font-size: 20px * Theme.fscale;
-                        font-weight: 700;
-                        color: Theme.text;
+                    // Con el mismo margen que el texto de las opciones de abajo.
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        padding-top: 4px;
+                        Text {
+                            text: @tr("Ajustes");
+                            font-size: 20px * Theme.fscale;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
                     }
                     Rectangle { height: 12px; }
                     for s[i] in ["General", "Apariencia", "Versión", "Automático"]: Rectangle {
