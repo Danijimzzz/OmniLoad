@@ -111,10 +111,11 @@ impl State {
         let started = *self.started.get_or_insert(now);
         if c.checking > 0 {
             self.done = None;
-            return format!("Comprobando… {}", seconds(now - started));
+            return crate::i18n::tr(&format!("Comprobando… {}", seconds(now - started)))
+                .into_owned();
         }
         let (_, took) = *self.done.get_or_insert((now, now - started));
-        format!("Comprobado en {}", seconds(took))
+        crate::i18n::tr(&format!("Comprobado en {}", seconds(took))).into_owned()
     }
 
     /// Si toca empezar a cerrarlo solo: [`LINGER`] después de terminar de

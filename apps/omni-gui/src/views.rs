@@ -37,6 +37,8 @@ pub struct UiState {
     /// Carpeta de lo seleccionado, para "Abrir carpeta".
     pub dl_selected_folder: Option<PathBuf>,
     pub dl_search: String,
+    /// Filtro por estado: 0 todas, 1 en curso, 2 terminadas, 3 con error, 4 en espera o pausa.
+    pub dl_filter: i32,
     dl_collapsed: HashSet<String>,
     /// Paquetes de la tabla de descargas en el orden pintado; la clave de una
     /// fila de paquete es su posición aquí.
@@ -87,6 +89,17 @@ impl UiState {
     /// El paquete del capturador elegido.
     pub fn grab_package(&self) -> Option<u64> {
         self.grab_selected
+    }
+}
+
+/// ¿Pasa el estado por el filtro de la tabla de descargas?
+fn state_matches(filter: i32, state: State) -> bool {
+    match filter {
+        1 => state.is_active(),
+        2 => state == State::Done,
+        3 => state == State::Failed,
+        4 => matches!(state, State::Queued | State::Paused),
+        _ => true,
     }
 }
 
@@ -151,9 +164,12 @@ fn package_status(files: &[&RowInfo]) -> (String, i32) {
             " · {errors} {}",
             if errors == 1 { "error" } else { "errores" }
         ));
-        return (text, if tone == TONE_ACCENT { tone } else { TONE_WARN });
+        return (
+            crate::i18n::tr(&text).into_owned(),
+            if tone == TONE_ACCENT { tone } else { TONE_WARN },
+        );
     }
-    (text, tone)
+    (crate::i18n::tr(&text).into_owned(), tone)
 }
 
 fn hosts_text<'a>(hosts: impl Iterator<Item = &'a str>) -> String {
@@ -167,7 +183,7 @@ fn hosts_text<'a>(hosts: impl Iterator<Item = &'a str>) -> String {
 
 fn stat(label: &str, value: impl Into<SharedString>) -> Stat {
     Stat {
-        label: label.into(),
+        label: crate::i18n::tr(label).as_ref().into(),
         value: value.into(),
     }
 }
@@ -204,6 +220,7 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
         let shown: Vec<&&RowInfo> = files
             .iter()
             .filter(|r| pkg_match || matches(&st.dl_search, &r.name))
+            .filter(|r| state_matches(st.dl_filter, r.state))
             .collect();
         if shown.is_empty() {
             continue;
@@ -223,7 +240,8 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
             (total > 0).then(|| total.saturating_sub(downloaded)),
         );
         let (status, tone) = package_status(files);
-        let expanded = !st.dl_collapsed.contains(name) || !st.dl_search.is_empty();
+        let expanded =
+            !st.dl_collapsed.contains(name) || !st.dl_search.is_empty() || st.dl_filter != 0;
         out.push(DlRow {
             key: key as i32,
             is_package: true,
@@ -233,6 +251,11 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
             host: hosts_text(files.iter().map(|r| r.host.as_str())).into(),
             size: if total > 0 {
                 format::bytes(total).into()
+            } else {
+                SharedString::new()
+            },
+            got: if downloaded > 0 {
+                format::bytes(downloaded).into()
             } else {
                 SharedString::new()
             },
@@ -269,12 +292,17 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
                 name: r.name.clone().into(),
                 host: r.host.clone().into(),
                 size: sizes(r).into(),
+                got: if r.downloaded > 0 {
+                    format::bytes(r.downloaded.min(r.total.unwrap_or(u64::MAX))).into()
+                } else {
+                    SharedString::new()
+                },
                 fraction,
                 progress,
                 speed: speed_text(one.rate),
                 eta: eta_text(one.eta),
                 priority: r.priority.label().into(),
-                status: r.status().into(),
+                status: crate::i18n::tr(&r.status()).as_ref().into(),
                 tone: file_tone(r),
             });
         }
@@ -302,11 +330,12 @@ pub fn fill_downloads(ui: &AppWindow, model: &VecModel<DlRow>, rows: &[RowInfo],
     ];
     ui.set_totals(ModelRc::new(VecModel::from(totals)));
     ui.set_net_text(
-        if rate > 0.0 {
+        crate::i18n::tr(&if rate > 0.0 {
             format!("Red del sistema · {}", format::speed(rate))
         } else {
             "Red del sistema · sin actividad".to_owned()
-        }
+        })
+        .as_ref()
         .into(),
     );
     ui.set_header_speed(if rate > 0.0 {
@@ -360,7 +389,7 @@ fn fill_selection(ui: &AppWindow, rows: &[RowInfo], st: &mut UiState) {
                 lines.push(stat("Paquete", r.package.clone()));
                 lines.push(stat("Carpeta", r.folder.display().to_string()));
                 lines.push(stat("Enlace", r.url.clone()));
-                let mut state = r.status();
+                let mut state = crate::i18n::tr(&r.status()).into_owned();
                 if let Some(f) = r.fraction()
                     && r.state != State::Done
                 {
@@ -447,6 +476,11 @@ fn fill_selection(ui: &AppWindow, rows: &[RowInfo], st: &mut UiState) {
 }
 
 fn avail(item: &GrabItem) -> (String, i32) {
+    let (text, tone) = avail_es(item);
+    (crate::i18n::tr_msg(&text).into_owned(), tone)
+}
+
+fn avail_es(item: &GrabItem) -> (String, i32) {
     if item.duplicate && matches!(item.check, Check::Online { .. }) {
         return ("Ya está en Descargas".into(), TONE_WARN);
     }

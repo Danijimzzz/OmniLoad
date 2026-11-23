@@ -29,6 +29,7 @@
 mod automation;
 mod clipboard;
 mod format;
+mod i18n;
 mod manager;
 mod notify;
 mod platform;
@@ -134,7 +135,7 @@ impl App {
 
     fn show(&self, msg: &str, error: bool) {
         if let Some(ui) = self.ui() {
-            ui.set_message(msg.into());
+            ui.set_message(i18n::tr_msg(msg).as_ref().into());
             ui.set_message_is_error(error);
         }
     }
@@ -223,7 +224,7 @@ impl App {
                         title: "Descargas terminadas".into(),
                         body: format!(
                             "Se va a {} en 60 segundos. Abre OmniLoad para cancelar.",
-                            action.describe()
+                            i18n::tr(action.describe())
                         ),
                     },
                     self.settings.borrow().notify_sound,
@@ -246,11 +247,12 @@ impl App {
             automation::run_action(action);
         } else if let Some(ui) = self.ui() {
             ui.set_finish_text(
-                format!(
+                i18n::tr_msg(&format!(
                     "Descargas terminadas: se va a {} en {} s.",
-                    action.describe(),
+                    i18n::tr(action.describe()),
                     left + 1
-                )
+                ))
+                .as_ref()
                 .into(),
             );
         }
@@ -303,7 +305,7 @@ impl App {
         let rate = rows.iter().map(|r| r.rate).sum();
         let paused = self.manager.is_held();
         tray.update(&TrayStatus {
-            tooltip: tray::tooltip(active, waiting, rate, paused),
+            tooltip: i18n::tr(&tray::tooltip(active, waiting, rate, paused)).into_owned(),
             paused,
             clipboard: ui.get_watch_clipboard(),
         });
@@ -326,7 +328,11 @@ impl App {
             return;
         }
         ui.set_update_state(1);
-        ui.set_update_text("Comprobando si hay una versión nueva…".into());
+        ui.set_update_text(
+            i18n::tr_msg("Comprobando si hay una versión nueva…")
+                .as_ref()
+                .into(),
+        );
         let (tx, rx) = mpsc::channel();
         self.rt.spawn(async move {
             let _ = tx.send(update::check().await);
@@ -375,7 +381,7 @@ impl App {
             Failed(e) => (5, format!("No se pudo comprobar: {e}.")),
         };
         ui.set_update_state(state);
-        ui.set_update_text(text.into());
+        ui.set_update_text(i18n::tr_msg(&text).as_ref().into());
     }
 
     /// «Actualizar ahora»: baja el instalador de la versión nueva, comprueba
@@ -393,7 +399,14 @@ impl App {
             return;
         }
         ui.set_update_busy(true);
-        ui.set_update_text(format!("Descargando {}…", install.name).into());
+        ui.set_update_text(
+            if i18n::is_english() {
+                format!("Downloading {}…", install.name)
+            } else {
+                format!("Descargando {}…", install.name)
+            }
+            .into(),
+        );
         let (tx, rx) = mpsc::channel();
         let progress_tx = tx.clone();
         self.rt.spawn(async move {
@@ -412,14 +425,21 @@ impl App {
                 match msg {
                     Msg::Progress(done, total) => {
                         let pct = (done * 100).checked_div(total).unwrap_or(0);
-                        ui.set_update_text(format!("Descargando la actualización… {pct} %").into());
+                        ui.set_update_text(
+                            i18n::tr_msg(&format!("Descargando la actualización… {pct} %"))
+                                .as_ref()
+                                .into(),
+                        );
                     }
                     Msg::Done(Ok(path)) => {
                         keep.stop();
                         *app.pending_update.borrow_mut() = Some(path);
                         ui.set_update_text(
-                            "Descargada y comprobada. OmniLoad se cierra para instalarla y se abrirá solo."
-                                .into(),
+                            i18n::tr_msg(
+                                "Descargada y comprobada. OmniLoad se cierra para instalarla y se abrirá solo.",
+                            )
+                            .as_ref()
+                            .into(),
                         );
                         let _ = slint::quit_event_loop();
                         return;
@@ -428,7 +448,11 @@ impl App {
                         keep.stop();
                         app.installing.set(false);
                         ui.set_update_busy(false);
-                        ui.set_update_text(format!("No se pudo actualizar: {e}.").into());
+                        ui.set_update_text(
+                            i18n::tr_msg(&format!("No se pudo actualizar: {e}."))
+                                .as_ref()
+                                .into(),
+                        );
                         return;
                     }
                 }
@@ -701,12 +725,13 @@ impl App {
             .iter()
             .map(|i| {
                 let (status, usable, tone) = popup::status(i);
+                let status = i18n::tr(status);
                 PopRow {
                     key: i.id as i32,
                     name: i.name.clone().into(),
                     host: i.host.clone().into(),
                     size: i.size.map(format::bytes).unwrap_or_default().into(),
-                    status: status.into(),
+                    status: status.as_ref().into(),
                     tone,
                     checked: usable && i.selected,
                     usable,
@@ -838,6 +863,8 @@ impl App {
         s.schedule_from = ui.get_schedule_from().to_string();
         s.schedule_to = ui.get_schedule_to().to_string();
         s.finish_action = ui.get_finish_action();
+        s.language = ui.get_language();
+        i18n::apply(s.language);
         s.speed_unit = ui.get_speed_unit();
         format::set_speed_unit(s.speed_unit);
         s.bar_style = theme.get_bar_style();
@@ -910,6 +937,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     popup::select_backend();
     let ui = AppWindow::new()?;
+    i18n::apply(settings.language);
     apply_settings(&ui, &settings);
     // Archivos soltados sobre la ventana (.torrent, listas de enlaces en texto):
     // van al capturador igual que los pasados como argumento.
@@ -1325,6 +1353,7 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_schedule_from(s.schedule_from.clone().into());
     ui.set_schedule_to(s.schedule_to.clone().into());
     ui.set_finish_action(s.finish_action);
+    ui.set_language(s.language);
     format::set_speed_unit(s.speed_unit);
     ui.set_speed_unit(s.speed_unit);
     theme.set_bar_style(s.bar_style);
@@ -1490,6 +1519,13 @@ fn connect_downloads(ui: &AppWindow, app: &Rc<App>) {
     ui.on_queue_settings_changed({
         let app = app.clone();
         move || app.save_settings()
+    });
+    ui.on_dl_filter({
+        let app = app.clone();
+        move |i| {
+            app.state.borrow_mut().dl_filter = i;
+            app.refresh();
+        }
     });
     ui.on_dl_search({
         let app = app.clone();

@@ -196,12 +196,29 @@ mod imp {
             events: Sender<TrayEvent>,
             _available: Arc<AtomicBool>,
         ) -> Result<Self, String> {
-            let open = MenuItem::with_id("abrir", labels::OPEN, true, None);
-            let start = MenuItem::with_id("iniciar", labels::START, true, None);
-            let pause = MenuItem::with_id("pausar", labels::PAUSE, true, None);
-            let clipboard =
-                CheckMenuItem::with_id("portapapeles", labels::CLIPBOARD, true, true, None);
-            let quit = MenuItem::with_id("salir", labels::QUIT, true, None);
+            let open =
+                MenuItem::with_id("abrir", crate::i18n::tr(labels::OPEN).as_ref(), true, None);
+            let start = MenuItem::with_id(
+                "iniciar",
+                crate::i18n::tr(labels::START).as_ref(),
+                true,
+                None,
+            );
+            let pause = MenuItem::with_id(
+                "pausar",
+                crate::i18n::tr(labels::PAUSE).as_ref(),
+                true,
+                None,
+            );
+            let clipboard = CheckMenuItem::with_id(
+                "portapapeles",
+                crate::i18n::tr(labels::CLIPBOARD).as_ref(),
+                true,
+                true,
+                None,
+            );
+            let quit =
+                MenuItem::with_id("salir", crate::i18n::tr(labels::QUIT).as_ref(), true, None);
             let menu = Menu::new();
             menu.append_items(&[
                 &open,
@@ -339,7 +356,7 @@ mod imp {
         fn menu(&self) -> Vec<MenuItem<Self>> {
             let item = |label: &str, enabled: bool, ev: TrayEvent| -> MenuItem<Self> {
                 StandardItem {
-                    label: label.into(),
+                    label: crate::i18n::tr(label).as_ref().into(),
                     enabled,
                     activate: Box::new(move |t: &mut Self| t.send(ev.clone())),
                     ..Default::default()
@@ -352,7 +369,7 @@ mod imp {
                 item(labels::START, self.status.paused, TrayEvent::StartAll),
                 item(labels::PAUSE, !self.status.paused, TrayEvent::PauseAll),
                 CheckmarkItem {
-                    label: labels::CLIPBOARD.into(),
+                    label: crate::i18n::tr(labels::CLIPBOARD).as_ref().into(),
                     checked: self.status.clipboard,
                     activate: Box::new(|t: &mut Self| t.send(TrayEvent::ToggleClipboard)),
                     ..Default::default()

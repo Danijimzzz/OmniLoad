@@ -5218,6 +5218,7 @@ dependencies = [
  "sha2 0.10.9",
  "slint",
  "slint-build",
+ "sys-locale",
  "tempfile",
  "tokio",
  "tokio-util",

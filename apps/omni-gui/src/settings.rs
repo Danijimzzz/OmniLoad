@@ -104,6 +104,8 @@ pub struct Settings {
     /// Atajos de teclado, uno por acción de [`SHORTCUT_ACTIONS`] (vacío =
     /// sin atajo), escritos como «Ctrl+Shift+P».
     pub shortcuts: Vec<String>,
+    /// Idioma de la interfaz: 0 automático, 1 español, 2 English.
+    pub language: i32,
 }
 
 /// Acciones con atajo de teclado, en el orden de `Settings::shortcuts`, y su
@@ -168,7 +170,7 @@ pub fn ui_scale_factor(option: i32) -> Option<f32> {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColCfg {
     /// Descargas: 0 Nombre, 1 Host, 2 Tamaño, 3 Progreso, 4 Velocidad,
-    /// 5 Restante, 6 Prioridad, 7 Estado. Capturador: 0 Nombre, 1 Host,
+    /// 5 Restante, 6 Prioridad, 7 Estado, 8 Descargado. Capturador: 0 Nombre, 1 Host,
     /// 2 Tamaño, 3 Disponibilidad, 4 Prioridad, 5 Guardar en.
     pub id: i32,
     pub width: f32,
@@ -192,6 +194,7 @@ pub fn column_name(table: Table, id: i32) -> &'static str {
         (Table::Downloads, 4) => "Velocidad",
         (Table::Downloads, 5) => "Restante",
         (Table::Downloads, 6) => "Prioridad",
+        (Table::Downloads, 8) => "Descargado",
         (Table::Downloads, _) => "Estado",
         (Table::Grabber, 3) => "Disponibilidad",
         (Table::Grabber, 4) => "Prioridad",
@@ -208,6 +211,7 @@ pub fn default_columns(table: Table) -> Vec<ColCfg> {
             (0, 320.0),
             (1, 150.0),
             (2, 90.0),
+            (8, 100.0),
             (3, 170.0),
             (4, 95.0),
             (5, 95.0),
@@ -257,6 +261,13 @@ pub fn fix_columns(table: Table, saved: &[ColCfg]) -> Vec<ColCfg> {
         if !out.iter().any(|o| o.id == d.id) {
             if d.id == 0 {
                 out.insert(0, d);
+            } else if d.id == 8 {
+                // «Descargado» va justo detrás de «Tamaño».
+                let at = out
+                    .iter()
+                    .position(|o| o.id == 2)
+                    .map_or(out.len(), |i| i + 1);
+                out.insert(at, d);
             } else {
                 out.push(d);
             }
@@ -338,6 +349,7 @@ impl Default for Settings {
             limit_schedule_to: "23:00".into(),
             limit_schedule_rate: "1 MB/s".into(),
             shortcuts: fix_shortcuts(&[]),
+            language: 0,
         }
     }
 }
@@ -538,7 +550,7 @@ mod tests {
             },
         ];
         let fixed = fix_columns(Table::Downloads, &saved);
-        assert_eq!(fixed.len(), 8);
+        assert_eq!(fixed.len(), 9);
         // Nombre (que no estaba guardado) se añade al principio.
         assert_eq!(fixed[0].id, 0);
         assert_eq!(fixed[1].id, 4);
@@ -547,7 +559,7 @@ mod tests {
         assert_eq!(fixed[2].id, 1);
         let mut ids: Vec<i32> = fixed.iter().map(|c| c.id).collect();
         ids.sort_unstable();
-        assert_eq!(ids, [0, 1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(ids, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
         assert_eq!(
             fix_columns(Table::Downloads, &[]),
             default_columns(Table::Downloads)
