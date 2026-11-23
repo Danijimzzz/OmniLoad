@@ -376,10 +376,11 @@ async fn standard_set_has_all_hosts() {
             "yt-dlp",
             "OneDrive",
             "1fichier",
+            "Rootz",
             "Torrent"
         ]
     );
-    assert_eq!(hosts.checkers().names().len(), 11);
+    assert_eq!(hosts.checkers().names().len(), 12);
 }
 
 // -------------------------------------------------------------- Google Drive
