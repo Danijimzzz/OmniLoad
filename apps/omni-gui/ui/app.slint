@@ -323,6 +323,7 @@ component TextEdit inherits Rectangle {
             y: 12px;
             width: parent.width - 24px;
             wrap: root.wrap;
+            single-line: false;
             font-size: Theme.font;
             color: Theme.text;
             selection-background-color: Theme.accent.with-alpha(0.35);
@@ -2419,32 +2420,25 @@ export component AppWindow inherits Window {
                         subtitle: "Marca dos o más para sumar su velocidad (por ejemplo, wifi y cable, o el móvil por USB). Con una o ninguna se usa la red normal del sistema. Cada red abre sus propias conexiones por archivo. Solo cuentan las descargas que se empiecen después de cambiarlo.";
                         Btn { text: "Buscar de nuevo"; clicked => { root.nets-refresh(); } }
                     }
-                    for n[i] in root.nets: Check {
-                        checked: n.on;
-                        label: n.name + "  (" + n.ip + ")";
-                        toggled => { root.net-toggled(i); }
+                    for n[i] in root.nets: SettingRow {
+                        title: n.name;
+                        subtitle: n.ip;
+                        Check {
+                            checked: n.on;
+                            label: n.name + "  (" + n.ip + ")";
+                            toggled => { root.net-toggled(i); }
+                        }
                     }
                     SettingRow {
-                        title: "Cerrar a la bandeja";
+                        title: "Esconder a la bandeja";
                         subtitle: root.tray-available
-                            ? "La X de la ventana la esconde junto al reloj y las descargas siguen. Para salir del todo: «Salir» en el menú del icono."
+                            ? "Al cerrar (X) o minimizar, la ventana se esconde junto al reloj y las descargas siguen. Para salir del todo: «Salir» en el menú del icono."
                             : "Este escritorio no tiene bandeja del sistema: cerrar la ventana sale de OmniLoad. En GNOME, instala la extensión «AppIndicator» para tenerla.";
                         opacity: root.tray-available ? 1 : 0.5;
                         Check {
                             checked <=> root.close-to-tray;
                             enabled: root.tray-available;
-                            label: "Cerrar a la bandeja";
-                            toggled => { root.settings-changed(); }
-                        }
-                    }
-                    SettingRow {
-                        title: "Minimizar a la bandeja";
-                        subtitle: "Al minimizar, la ventana desaparece de la barra de tareas y queda solo el icono de la bandeja.";
-                        opacity: root.tray-available ? 1 : 0.5;
-                        Check {
-                            checked <=> root.minimize-to-tray;
-                            enabled: root.tray-available;
-                            label: "Minimizar a la bandeja";
+                            label: "Esconder a la bandeja";
                             toggled => { root.settings-changed(); }
                         }
                     }

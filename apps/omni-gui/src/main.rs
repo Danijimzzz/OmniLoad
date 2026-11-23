@@ -785,7 +785,7 @@ impl App {
         s.extract_passwords = ui.get_extract_passwords().to_string();
         s.check_updates = ui.get_check_updates();
         s.close_to_tray = ui.get_close_to_tray();
-        s.minimize_to_tray = ui.get_minimize_to_tray();
+        s.minimize_to_tray = s.close_to_tray;
         s.notify_done = ui.get_notify_done();
         s.clip_popup = ui.get_clip_popup();
         s.clip_popup_autoclose = ui.get_clip_autoclose();
@@ -1201,8 +1201,8 @@ fn apply_settings(ui: &AppWindow, s: &Settings) {
     ui.set_extract_delete(s.extract_delete);
     ui.set_extract_passwords(s.extract_passwords.clone().into());
     ui.set_check_updates(s.check_updates);
-    ui.set_close_to_tray(s.close_to_tray);
-    ui.set_minimize_to_tray(s.minimize_to_tray);
+    ui.set_close_to_tray(s.close_to_tray || s.minimize_to_tray);
+    ui.set_minimize_to_tray(s.close_to_tray || s.minimize_to_tray);
     ui.set_notify_done(s.notify_done);
     ui.set_clip_popup(s.clip_popup);
     ui.set_clip_autoclose(s.clip_popup_autoclose);
