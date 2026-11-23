@@ -93,7 +93,7 @@ Pega el enlace y OmniLoad averigua solo de dónde viene. Funciona con:
 
 - **Enlaces directos** de cualquier web.
 - **Pixeldrain, Archive.org, Dropbox y Mediafire.**
-- **Google Drive** (archivos compartidos) y **Gofile**.
+- **Google Drive** (archivos compartidos) y **Gofile** y **Rootz** (rootz.so; la descarga gratis va despacio y solo deja un archivo cada 2 minutos).
 - **Mega**, con su cifrado: descarga y descifra por ti.
 - **OneDrive** (enlaces compartidos) y **1fichier** en modo gratuito: espera
   lo que pida la página y sigue solo.
