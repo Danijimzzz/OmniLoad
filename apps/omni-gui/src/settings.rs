@@ -101,6 +101,54 @@ pub struct Settings {
     pub limit_schedule_from: String,
     pub limit_schedule_to: String,
     pub limit_schedule_rate: String,
+    /// Atajos de teclado, uno por acción de [`SHORTCUT_ACTIONS`] (vacío =
+    /// sin atajo), escritos como «Ctrl+Shift+P».
+    pub shortcuts: Vec<String>,
+}
+
+/// Acciones con atajo de teclado, en el orden de `Settings::shortcuts`, y su
+/// atajo por defecto.
+pub const SHORTCUT_ACTIONS: [(&str, &str); 6] = [
+    ("Añadir enlaces", "Ctrl+N"),
+    ("Pausar todo", "Ctrl+P"),
+    ("Reanudar todo", "Ctrl+R"),
+    ("Ir a Descargas", "Ctrl+1"),
+    ("Ir al Capturador de enlaces", "Ctrl+2"),
+    ("Ir a Ajustes", "Ctrl+3"),
+];
+
+/// Deja la lista de atajos con una entrada por acción.
+pub fn fix_shortcuts(saved: &[String]) -> Vec<String> {
+    SHORTCUT_ACTIONS
+        .iter()
+        .enumerate()
+        .map(|(i, (_, def))| saved.get(i).cloned().unwrap_or_else(|| (*def).to_owned()))
+        .collect()
+}
+
+/// Un atajo escrito por el usuario, en su forma de comparar: minúsculas, sin
+/// espacios y con «control»/«ctl» como «ctrl».
+pub fn normalize_shortcut(text: &str) -> String {
+    let mut parts: Vec<String> = text
+        .split('+')
+        .map(|p| {
+            let p = p.trim().to_lowercase();
+            match p.as_str() {
+                "control" | "ctl" => "ctrl".to_owned(),
+                "mayús" | "mayus" => "shift".to_owned(),
+                "option" | "opt" => "alt".to_owned(),
+                "cmd" | "win" | "meta" | "super" => "meta".to_owned(),
+                "supr" => "delete".to_owned(),
+                "esc" => "escape".to_owned(),
+                _ => p,
+            }
+        })
+        .filter(|p| !p.is_empty())
+        .collect();
+    let key = parts.pop();
+    parts.sort_by_key(|m| ["ctrl", "alt", "shift", "meta"].iter().position(|x| x == m));
+    parts.extend(key);
+    parts.join("+")
 }
 
 /// Factor de escala de una opción de [`Settings::ui_scale`] (`None` =
@@ -289,6 +337,7 @@ impl Default for Settings {
             limit_schedule_from: "08:00".into(),
             limit_schedule_to: "23:00".into(),
             limit_schedule_rate: "1 MB/s".into(),
+            shortcuts: fix_shortcuts(&[]),
         }
     }
 }
@@ -385,13 +434,15 @@ impl Settings {
         let Some(path) = path() else {
             return Self::default();
         };
-        match std::fs::read(&path) {
+        let mut s: Self = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
                 tracing::warn!("ajustes ilegibles en {}: {e}", path.display());
                 Self::default()
             }),
             Err(_) => Self::default(),
-        }
+        };
+        s.shortcuts = fix_shortcuts(&s.shortcuts);
+        s
     }
 
     /// Guarda los ajustes (escribe a un temporal y lo renombra, para no dejar
@@ -525,6 +576,15 @@ mod tests {
         assert!(s.schedule().is_some());
         s.schedule_to = "mal".into();
         assert!(s.schedule().is_none());
+    }
+
+    #[test]
+    fn shortcuts_compare_in_one_form() {
+        assert_eq!(normalize_shortcut("Control + shift+P"), "ctrl+shift+p");
+        assert_eq!(normalize_shortcut("shift+ctrl+p"), "ctrl+shift+p");
+        assert_eq!(normalize_shortcut("Esc"), "escape");
+        assert_eq!(fix_shortcuts(&["x".into()])[0], "x");
+        assert_eq!(fix_shortcuts(&["x".into()])[1], "Ctrl+P");
     }
 
     #[test]

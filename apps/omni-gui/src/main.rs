@@ -88,6 +88,8 @@ struct App {
     tray_rx: Receiver<TrayEvent>,
     /// Argumentos de otras ventanas que se abrieron estando esta en marcha.
     instance_rx: Receiver<Vec<String>>,
+    /// Combinaciones de teclas pulsadas con la ventana a la vista.
+    shortcut_rx: Receiver<String>,
     /// La ventana está escondida en la bandeja.
     hidden: Cell<bool>,
     notes: RefCell<notify::Tracker>,
@@ -492,6 +494,9 @@ impl App {
                 }
             }
         }
+        while let Ok(combo) = self.shortcut_rx.try_recv() {
+            self.run_shortcut(&combo);
+        }
         while let Ok(args) = self.instance_rx.try_recv() {
             self.show_window();
             self.open_args(args);
@@ -527,6 +532,29 @@ impl App {
             }
         }
         self.refresh();
+    }
+
+    /// Hace lo que toque si `combo` (ya normalizada) es uno de los atajos.
+    fn run_shortcut(&self, combo: &str) {
+        let Some(ui) = self.ui() else { return };
+        let action = self
+            .settings
+            .borrow()
+            .shortcuts
+            .iter()
+            .position(|s| !s.trim().is_empty() && settings::normalize_shortcut(s) == combo);
+        match action {
+            Some(0) => {
+                ui.set_tab(0);
+                ui.set_add_dialog_open(true);
+            }
+            Some(1) => ui.invoke_pause_all(),
+            Some(2) => ui.invoke_start_all(),
+            Some(3) => ui.set_tab(0),
+            Some(4) => ui.set_tab(1),
+            Some(5) => ui.set_tab(2),
+            _ => {}
+        }
     }
 
     /// Enlaces y archivos pasados como argumentos (`omniload <url>...`), por
@@ -859,6 +887,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_hidden = args.iter().any(|a| a == automation::AUTOSTART_FLAG);
     args.retain(|a| a != automation::AUTOSTART_FLAG);
     let (instance_tx, instance_rx) = mpsc::channel();
+    let drop_tx = instance_tx.clone();
+    let (shortcut_tx, shortcut_rx) = mpsc::channel::<String>();
     let _instance = match settings::instance_path() {
         Some(path) => match single::claim(&path, &args, instance_tx) {
             single::Claim::Forwarded => return Ok(()),
@@ -881,6 +911,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     popup::select_backend();
     let ui = AppWindow::new()?;
     apply_settings(&ui, &settings);
+    // Archivos soltados sobre la ventana (.torrent, listas de enlaces en texto):
+    // van al capturador igual que los pasados como argumento.
+    // Y las teclas pulsadas, para los atajos.
+    let mut mods = slint::winit_030::winit::keyboard::ModifiersState::empty();
+    ui.window().on_winit_window_event(move |_, event| {
+        use slint::winit_030::winit::event::{ElementState, WindowEvent};
+        use slint::winit_030::winit::keyboard::{Key, ModifiersState};
+        match event {
+            WindowEvent::DroppedFile(path) => {
+                let _ = drop_tx.send(vec![path.display().to_string()]);
+            }
+            WindowEvent::ModifiersChanged(m) => mods = m.state(),
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed && !event.repeat =>
+            {
+                let key = match &event.logical_key {
+                    Key::Character(c) => Some(c.to_lowercase()),
+                    Key::Named(n) => Some(format!("{n:?}").to_lowercase()),
+                    _ => None,
+                };
+                if let Some(key) = key {
+                    let mut combo = String::new();
+                    for (m, name) in [
+                        (ModifiersState::CONTROL, "ctrl"),
+                        (ModifiersState::ALT, "alt"),
+                        (ModifiersState::SHIFT, "shift"),
+                        (ModifiersState::SUPER, "meta"),
+                    ] {
+                        if mods.contains(m) {
+                            combo.push_str(name);
+                            combo.push('+');
+                        }
+                    }
+                    combo.push_str(&key);
+                    // Sin Ctrl, Alt ni Meta no es un atajo: es escribir.
+                    // (Las teclas F sí valen solas.)
+                    let is_f =
+                        key.len() > 1 && key.starts_with('f') && key[1..].parse::<u8>().is_ok();
+                    if combo.contains('+') && !combo.starts_with("shift+") || is_f {
+                        let _ = shortcut_tx.send(combo);
+                    }
+                }
+            }
+            _ => {}
+        }
+        slint::winit_030::EventResult::Propagate
+    });
     let clip_popup = popup::create(ClipPopup::new)?;
     clip_popup.set_autostart(settings.clip_popup_autostart);
     let pop_rows: Rc<VecModel<PopRow>> = Rc::new(VecModel::default());
@@ -894,6 +971,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rule_rows: Rc<VecModel<RuleRow>> = Rc::new(VecModel::default());
     fill_rules(&rule_rows, &settings.file_rules);
     ui.set_rules(ModelRc::from(rule_rows.clone()));
+    let shortcut_rows: Rc<VecModel<ShortcutRow>> = Rc::new(VecModel::default());
+    fill_shortcuts(&shortcut_rows, &settings.shortcuts);
+    ui.set_shortcuts(ModelRc::from(shortcut_rows.clone()));
 
     let net_rows: Rc<VecModel<NetRow>> = Rc::new(VecModel::default());
     fill_nets(&net_rows, &settings.networks);
@@ -932,6 +1012,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tray_tx,
         tray_rx,
         instance_rx,
+        shortcut_rx,
         hidden: Cell::new(false),
         notes: RefCell::default(),
         finish: RefCell::default(),
@@ -1304,6 +1385,19 @@ fn fill_nets(model: &VecModel<NetRow>, chosen: &[String]) {
         })
         .collect();
     model.set_vec(rows);
+}
+
+fn fill_shortcuts(model: &VecModel<ShortcutRow>, keys: &[String]) {
+    model.set_vec(
+        settings::SHORTCUT_ACTIONS
+            .iter()
+            .zip(keys)
+            .map(|((name, _), k)| ShortcutRow {
+                name: (*name).into(),
+                keys: k.clone().into(),
+            })
+            .collect::<Vec<_>>(),
+    );
 }
 
 fn fill_rules(model: &VecModel<RuleRow>, rules: &[settings::RuleCfg]) {
@@ -1781,6 +1875,17 @@ fn connect_settings(ui: &AppWindow, app: &Rc<App>) {
             }
             fill_nets(&app.net_rows, &app.settings.borrow().networks);
             app.save_settings();
+        }
+    });
+    ui.on_shortcut_edited({
+        let app = app.clone();
+        move |i, text| {
+            // No se rehace la fila: así no se pierde el cursor.
+            let mut s = app.settings.borrow_mut();
+            if let Some(k) = s.shortcuts.get_mut(i as usize) {
+                *k = text.to_string();
+            }
+            s.save();
         }
     });
     ui.on_rule_add({

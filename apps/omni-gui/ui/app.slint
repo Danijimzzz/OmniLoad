@@ -190,6 +190,12 @@ struct RuleRow {
     folder: string,
 }
 
+// Un atajo de teclado en Ajustes › General.
+struct ShortcutRow {
+    name: string,
+    keys: string,
+}
+
 // Cuadro de texto propio (de una línea). Misma interfaz que el LineEdit
 // estándar: `text`, `placeholder-text`, `edited`, `accepted`, `has-focus`.
 component LineEdit inherits Rectangle {
@@ -1634,6 +1640,8 @@ export component AppWindow inherits Window {
     callback rule-add();
     callback rule-remove(int);
     callback rule-exts-edited(int, string);
+    in property <[ShortcutRow]> shortcuts;
+    callback shortcut-edited(int, string);
     callback rule-choose(int);
     // 0 nada, 1 cerrar OmniLoad, 2 suspender, 3 apagar.
     in-out property <int> finish-action: 0;
@@ -2646,6 +2654,27 @@ export component AppWindow inherits Window {
                         }
                         Btn { text: "Elegir…"; clicked => { root.rule-choose(i); } }
                         Btn { text: "Quitar"; clicked => { root.rule-remove(i); } }
+                    }
+                    SettingRow {
+                        title: "Atajos de teclado";
+                        subtitle: "Escríbelos como Ctrl+N, Ctrl+Shift+P o F5. Déjalo vacío para quitar el atajo. Funcionan con la ventana a la vista.";
+                    }
+                    for sc[i] in root.shortcuts: HorizontalLayout {
+                        spacing: 12px;
+                        height: 36px;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: sc.name;
+                            vertical-alignment: center;
+                            color: Theme.text;
+                            font-size: 13px * Theme.fscale;
+                        }
+                        LineEdit {
+                            width: 180px;
+                            text: sc.keys;
+                            placeholder-text: "(sin atajo)";
+                            edited(t) => { root.shortcut-edited(i, t); }
+                        }
                     }
                     SettingRow {
                         title: "Al terminar todas las descargas";
